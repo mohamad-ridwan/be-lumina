@@ -10,7 +10,6 @@ exports.getUser = async (req, res, next) => {
         res.status(HTTP_STATUS_CODE.BAD_REQUEST).json({
             message: 'Query id required!'
         })
-        next()
         return
     }
 
@@ -23,7 +22,6 @@ exports.getUser = async (req, res, next) => {
         res.status(HTTP_STATUS_CODE.NOT_FOUND).json({
             message: 'User not found!',
         })
-        next()
         return
     }
 
@@ -40,7 +38,6 @@ exports.profile = async (req, res, next) => {
         res.status(HTTP_STATUS_CODE.BAD_REQUEST).json({
             message: 'token required!'
         })
-        next()
         return
     }
 
@@ -59,7 +56,6 @@ exports.profile = async (req, res, next) => {
                 res.status(HTTP_STATUS_CODE.NOT_FOUND).json({
                     message: 'User not registered'
                 })
-                next()
                 return
             }
 
@@ -91,7 +87,6 @@ exports.login = async (req, res, next) => {
         res.status(HTTP_STATUS_CODE.BAD_REQUEST).json({
             message: Object.entries(err).map(p => p[1])[0]
         })
-        next()
         return
     }
 
@@ -106,7 +101,6 @@ exports.login = async (req, res, next) => {
         res.status(HTTP_STATUS_CODE.NOT_FOUND).json({
             message: 'Account not registered!'
         })
-        next()
         return
     }
 
@@ -125,7 +119,6 @@ exports.login = async (req, res, next) => {
                     data: userCurrently,
                     token: token
                 })
-                next()
             }
         }
     )
@@ -154,7 +147,6 @@ exports.register = async (req, res, next) => {
         res.status(HTTP_STATUS_CODE.BAD_REQUEST).json({
             message: Object.entries(err).map(p => p[1])[0]
         })
-        next()
         return
     }
 
@@ -164,13 +156,11 @@ exports.register = async (req, res, next) => {
         res.status(HTTP_STATUS_CODE.BAD_REQUEST).json({
             message: 'Email or phone number is already registered!'
         })
-        next()
         return
     } else if (isUserAvailable && !isUserAvailable?.verification) {
         res.status(HTTP_STATUS_CODE.BAD_REQUEST).json({
             message: 'Your account needs to be verified'
         })
-        next()
         return
     }
 
@@ -190,7 +180,6 @@ exports.register = async (req, res, next) => {
                 message: 'Successfully registered account',
                 data: result
             })
-            next()
         })
         .catch((err) => {
             console.log('err-register', err)

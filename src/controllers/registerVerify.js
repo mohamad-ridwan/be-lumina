@@ -40,7 +40,6 @@ exports.verification = async (req, res, next) => {
         res.status(HTTP_STATUS_CODE.BAD_REQUEST).json({
             message: Object.entries(err).map(p => p[1])[0]
         })
-        next()
         return
     }
 
@@ -50,7 +49,6 @@ exports.verification = async (req, res, next) => {
         res.status(HTTP_STATUS_CODE.NOT_FOUND).json({
             message: 'Token is invalid or expired.'
         })
-        next()
         return
     }
 
@@ -66,7 +64,6 @@ exports.verification = async (req, res, next) => {
                 res.status(HTTP_STATUS_CODE.INTERNAL_SERVER_ERROR).json({
                     message: errorMessage.serverError
                 })
-                next()
                 return
             }
 
@@ -79,7 +76,6 @@ exports.verification = async (req, res, next) => {
                 res.status(HTTP_STATUS_CODE.INTERNAL_SERVER_ERROR).json({
                     message: errorMessage.serverError
                 })
-                next()
                 return
             }
 
@@ -97,7 +93,6 @@ exports.postToken = (req, res, next) => {
         res.status(HTTP_STATUS_CODE.BAD_REQUEST).json({
             message: 'user id required'
         })
-        next()
         return
     }
     jwt.sign({
