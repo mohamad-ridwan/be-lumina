@@ -1,6 +1,45 @@
 const { HTTP_STATUS_CODE } = require('../constant')
 const { generateRandomId } = require('../helpers/generateRandomId')
 const users = require('../models/users')
+const jwt = require('jsonwebtoken')
+
+exports.profile = async (req, res, next) => {
+    const { token } = req.body
+
+    if (!token) {
+        res.status(HTTP_STATUS_CODE.BAD_REQUEST).json({
+            message: 'token required!'
+        })
+        next()
+        return
+    }
+
+    jwt.verify(token, process.env.TOKEN_BEARER_SECRET, async (err, data) => {
+        if (err) {
+            res.status(HTTP_STATUS_CODE.NOT_FOUND).json({
+                message: 'Token is invalid or expired',
+                errJwt: err
+            })
+        } else {
+            const userCurrently = await users.findOne({
+                id: data.id,
+                verification: true
+            })
+            if (!userCurrently) {
+                res.status(HTTP_STATUS_CODE.NOT_FOUND).json({
+                    message: 'User not registered'
+                })
+                next()
+                return
+            }
+
+            res.status(HTTP_STATUS_CODE.OK).json({
+                message: 'Profile Data',
+                data: userCurrently
+            })
+        }
+    })
+}
 
 exports.login = async (req, res, next) => {
     const {
@@ -33,7 +72,7 @@ exports.login = async (req, res, next) => {
         verification: true
     })
 
-    if(!userCurrently){
+    if (!userCurrently) {
         res.status(HTTP_STATUS_CODE.NOT_FOUND).json({
             message: 'Account not registered!'
         })
@@ -41,11 +80,25 @@ exports.login = async (req, res, next) => {
         return
     }
 
-    res.status(HTTP_STATUS_CODE.OK).json({
-        message: 'Successfully logged in',
-        data: userCurrently
-    })
-    next()
+    jwt.sign(
+        {
+            id: userCurrently.id,
+        },
+        process.env.TOKEN_BEARER_SECRET,
+        { expiresIn: '1h' },
+        (err, token) => {
+            if (err) {
+                next(err)
+            } else {
+                res.status(HTTP_STATUS_CODE.OK).json({
+                    message: 'Successfully logged in',
+                    data: userCurrently,
+                    token: token
+                })
+                next()
+            }
+        }
+    )
 }
 
 exports.register = async (req, res, next) => {
