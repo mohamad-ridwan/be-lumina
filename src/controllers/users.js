@@ -3,6 +3,36 @@ const { generateRandomId } = require('../helpers/generateRandomId')
 const users = require('../models/users')
 const jwt = require('jsonwebtoken')
 
+exports.getUser = async (req, res, next) => {
+    const { id } = req.query
+
+    if (!id) {
+        res.status(HTTP_STATUS_CODE.BAD_REQUEST).json({
+            message: 'Query id required!'
+        })
+        next()
+        return
+    }
+
+    const userCurrently = await users.findOne({
+        id,
+        verification: true
+    })
+
+    if (!userCurrently) {
+        res.status(HTTP_STATUS_CODE.NOT_FOUND).json({
+            message: 'User not found!',
+        })
+        next()
+        return
+    }
+
+    res.status(HTTP_STATUS_CODE.OK).json({
+        message: 'User Data',
+        data: userCurrently
+    })
+}
+
 exports.profile = async (req, res, next) => {
     const { token } = req.body
 
