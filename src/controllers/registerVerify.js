@@ -40,6 +40,8 @@ exports.verification = async (req, res, next) => {
         res.status(HTTP_STATUS_CODE.BAD_REQUEST).json({
             message: Object.entries(err).map(p => p[1])[0]
         })
+        next()
+        return
     }
 
     const tokenCurrently = await registerVerify.findOne({ tokenClient, token })
@@ -48,6 +50,8 @@ exports.verification = async (req, res, next) => {
         res.status(HTTP_STATUS_CODE.NOT_FOUND).json({
             message: 'Token is invalid or expired.'
         })
+        next()
+        return
     }
 
     jwt.verify(token, process.env.TOKEN_BEARER_SECRET, async (err, data) => {
@@ -62,6 +66,8 @@ exports.verification = async (req, res, next) => {
                 res.status(HTTP_STATUS_CODE.INTERNAL_SERVER_ERROR).json({
                     message: errorMessage.serverError
                 })
+                next()
+                return
             }
 
             const resultUserUpdate = await users.updateOne(
@@ -73,6 +79,8 @@ exports.verification = async (req, res, next) => {
                 res.status(HTTP_STATUS_CODE.INTERNAL_SERVER_ERROR).json({
                     message: errorMessage.serverError
                 })
+                next()
+                return
             }
 
             res.status(HTTP_STATUS_CODE.OK).json({
@@ -89,6 +97,8 @@ exports.postToken = (req, res, next) => {
         res.status(HTTP_STATUS_CODE.BAD_REQUEST).json({
             message: 'user id required'
         })
+        next()
+        return
     }
     jwt.sign({
         userId
