@@ -27,24 +27,6 @@ client.on('error', (err) => {
 
 client.connect().then(() => {
     console.log('Redis client connected');
-
-    // Contoh penggunaan
-    client.set('myKey', 'myValue', (err, reply) => {
-        if (err) {
-            console.error('Redis error:', err);
-        } else {
-            console.log('Redis reply:', reply);
-        }
-    });
-
-    client.get('myKey', (err, reply) => {
-        if (err) {
-            console.error('Redis error:', err);
-        } else {
-            console.log('Redis value:', reply);
-        }
-    });
-
 }).catch((err) => {
     console.error('Redis connection error:', err);
 });
