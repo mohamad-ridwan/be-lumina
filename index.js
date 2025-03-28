@@ -1,5 +1,7 @@
 require('dotenv').config()
 const express = require('express')
+const redis = require('redis');
+const client = redis.createClient();
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors')
@@ -19,8 +21,36 @@ const io = socketIo(server, { // Inisialisasi Socket.io
 
 const PORT = process.env.PORT || 4001
 
+client.on('error', (err) => {
+    console.error('Redis Client Error', err);
+});
+
+client.connect().then(() => {
+    console.log('Redis client connected');
+
+    // Contoh penggunaan
+    client.set('myKey', 'myValue', (err, reply) => {
+        if (err) {
+            console.error('Redis error:', err);
+        } else {
+            console.log('Redis reply:', reply);
+        }
+    });
+
+    client.get('myKey', (err, reply) => {
+        if (err) {
+            console.error('Redis error:', err);
+        } else {
+            console.log('Redis value:', reply);
+        }
+    });
+
+}).catch((err) => {
+    console.error('Redis connection error:', err);
+});
+
 dbConnection()
-    .then(() => {
+    .then(async () => {
         app.use(cors())
         app.use(express.json());
         app.use(express.urlencoded({ extended: true }));
@@ -42,9 +72,29 @@ dbConnection()
                 console.log('A user disconnected');
             });
 
-            socket.on('sendMessage', (message) => {
-                chatRoom.handleGetSendMessage(message, io)
+            socket.on('joinRoom', (room) => {
+                const { chatRoomId, chatId, userId } = room;
+
+                client.sAdd(`chats:${chatId}:room:${chatRoomId}:users`, userId); // Tambahkan userId ke set Redis
+
+                console.log(`User ${userId} joined room: ${chatRoomId}`);
             });
+
+            socket.on('leaveRoom', (room) => {
+                const { chatRoomId, chatId, userId } = room;
+
+                client.sRem(`chats:${chatId}:room:${chatRoomId}:users`, userId); // Hapus userId dari set Redis
+
+                console.log(`User ${userId} left room: ${chatRoomId}`);
+            });
+
+            socket.on('sendMessage', (message) => {
+                chatRoom.handleGetSendMessage(message, io, socket, client)
+            });
+
+            socket.on('markMessageAsRead', (message) => {
+                chatRoom.markMessageAsRead(message, io)
+            })
         });
 
         server.listen(PORT, () => { // Gunakan server.listen, bukan app.listen
