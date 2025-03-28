@@ -11,7 +11,7 @@ const chats = new Schema(
             type: String
         },
         unreadCount:{
-            type: Number
+            type: Object
         },
         latestMessage:{
             type: Object
@@ -27,7 +27,7 @@ const chats = new Schema(
         },
         userIds: {
             type: Array
-        }
+        },
     },
     {
         timestamp: true,
