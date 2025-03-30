@@ -3,6 +3,50 @@ const { generateRandomId } = require('../helpers/generateRandomId')
 const users = require('../models/users')
 const jwt = require('jsonwebtoken')
 
+exports.searchUser = async (req, res, next)=>{
+    const {
+        username,
+    } = req.body
+
+    if(!username || !username.trim()){
+        res.status(HTTP_STATUS_CODE.BAD_REQUEST).json({
+            message: 'username or number required'
+        })
+        return
+    }
+
+    const usersCurrently = await users.aggregate([
+        {
+          $match: {
+            $or: [
+              {
+                $expr: {
+                  $regexMatch: {
+                    input: { $toLower: '$username' },
+                    regex: username.toLowerCase()
+                  }
+                }
+              },
+              {
+                $expr: {
+                  $regexMatch: {
+                    input: '$phoneNumber',
+                    regex: username
+                  }
+                }
+              }
+            ],
+            verification: true
+          }
+        }
+    ]);
+
+    res.status(HTTP_STATUS_CODE.OK).json({
+        message: 'users data',
+        data: usersCurrently
+    })
+}
+
 exports.getUser = async (req, res, next) => {
     const { id } = req.query
 
