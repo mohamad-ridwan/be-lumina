@@ -79,9 +79,9 @@ dbConnection()
                 chatRoom.markMessageAsRead(message, io)
             })
 
-            socket.on('user-profile', (userId)=>{
-                usersSocket.userProfile(userId, io)
-                console.log('get from userId : ', userId)
+            socket.on('user-profile', (data)=>{
+                usersSocket.userProfile(data, io)
+                console.log('get from userId : ', data.profileId)
             })
         });
 
