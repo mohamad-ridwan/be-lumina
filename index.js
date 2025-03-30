@@ -9,6 +9,7 @@ const dbConnection = require('./src/dbConnection')
 const errorHandler = require('./src/utils/errorHandler')
 const { customHeader } = require('./src/utils/middlewares');
 const { chatRoom } = require('./src/sockets/chatRoom');
+const { usersSocket } = require('./src/sockets/users');
 
 const app = express()
 const server = http.createServer(app); // Buat server HTTP
@@ -76,6 +77,11 @@ dbConnection()
 
             socket.on('markMessageAsRead', (message) => {
                 chatRoom.markMessageAsRead(message, io)
+            })
+
+            socket.on('user-profile', (userId)=>{
+                usersSocket.userProfile(userId, io)
+                console.log('get from userId : ', userId)
             })
         });
 

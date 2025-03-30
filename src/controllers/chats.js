@@ -15,6 +15,7 @@ exports.getChats = async (req, res, next) => {
 
     const chatsCurrently = await chats.find({
         userIds: { $in: [userId] },
+        latestMessage: { $exists: true }
     });
 
     res.status(HTTP_STATUS_CODE.OK).json({
