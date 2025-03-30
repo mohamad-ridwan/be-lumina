@@ -9,7 +9,9 @@ async function userProfile(data, io){
 
     io.emit('user-profile', {
         senderId: data.senderId,
-        profile: userCurrently
+        profile: userCurrently,
+        profileIdConnection: data.profileIdConnection,
+        actionType: data.actionType
     })
 }
 

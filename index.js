@@ -10,6 +10,7 @@ const errorHandler = require('./src/utils/errorHandler')
 const { customHeader } = require('./src/utils/middlewares');
 const { chatRoom } = require('./src/sockets/chatRoom');
 const { usersSocket } = require('./src/sockets/users');
+const { chatsSocket } = require('./src/sockets/chats');
 
 const app = express()
 const server = http.createServer(app); // Buat server HTTP
@@ -48,7 +49,7 @@ dbConnection()
 
         // Socket.io Connection
         io.on('connection', (socket) => {
-            console.log('A user connected');
+            console.log('A user connected : ');
 
             // Tambahkan penanganan peristiwa socket di sini
             socket.on('disconnect', () => {
@@ -59,6 +60,7 @@ dbConnection()
                 const { chatRoomId, chatId, userId } = room;
 
                 client.sAdd(`chats:${chatId}:room:${chatRoomId}:users`, userId); // Tambahkan userId ke set Redis
+                chatsSocket.readNotification(room, io)
 
                 console.log(`User ${userId} joined room: ${chatRoomId}`);
             });

@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken')
 exports.searchUser = async (req, res, next)=>{
     const {
         username,
+        senderId
     } = req.body
 
     if(!username || !username.trim()){
@@ -18,22 +19,29 @@ exports.searchUser = async (req, res, next)=>{
     const usersCurrently = await users.aggregate([
         {
           $match: {
-            $or: [
+            $and: [
               {
-                $expr: {
-                  $regexMatch: {
-                    input: { $toLower: '$username' },
-                    regex: username.toLowerCase()
+                $or: [
+                  {
+                    $expr: {
+                      $regexMatch: {
+                        input: { $toLower: '$username' },
+                        regex: username.toLowerCase()
+                      }
+                    }
+                  },
+                  {
+                    $expr: {
+                      $regexMatch: {
+                        input: '$phoneNumber',
+                        regex: username
+                      }
+                    }
                   }
-                }
+                ]
               },
               {
-                $expr: {
-                  $regexMatch: {
-                    input: '$phoneNumber',
-                    regex: username
-                  }
-                }
+                id: { $ne: senderId } // Mengecualikan senderId
               }
             ],
             verification: true
