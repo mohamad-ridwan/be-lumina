@@ -3,9 +3,9 @@ const chatsDB = require('../models/chats')
 
 async function isUserInRoom(chatId, chatRoomId, userId, client) {
     return await new Promise((resolve, reject) => {
-        client.sIsMember(`chats:${chatId}:room:${chatRoomId}:users`, userId)
+        client.sCard(`chats:${chatId}:room:${chatRoomId}:users:${userId}`)
             .then(res => {
-                resolve(res)
+                resolve(res > 0)
             })
             .catch(err => reject(err))
     });

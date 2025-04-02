@@ -49,28 +49,40 @@ dbConnection()
 
         // Socket.io Connection
         io.on('connection', (socket) => {
-            console.log('A user connected : ');
+            console.log('A user connected', socket.id)
+            const socketId = socket.id
 
-            // Tambahkan penanganan peristiwa socket di sini
             socket.on('disconnect', () => {
-                console.log('A user disconnected');
+                console.log('A user disconnected', socket.id);
+
+                const { chatRoomId, chatId, userId } = socket
+                if(chatRoomId){
+                    client.sRem(`chats:${chatId}:room:${chatRoomId}:users:${userId}`, socketId); // Hapus userId dari set Redis
+
+                    console.log(`User ${socketId} left room: ${chatRoomId} from disconnected`);
+                }
             });
 
             socket.on('joinRoom', (room) => {
                 const { chatRoomId, chatId, userId } = room;
 
-                client.sAdd(`chats:${chatId}:room:${chatRoomId}:users`, userId); // Tambahkan userId ke set Redis
+                // save chatRoom information to socket session
+                socket.chatRoomId = chatRoomId
+                socket.chatId = chatId
+                socket.userId = userId
+
+                client.sAdd(`chats:${chatId}:room:${chatRoomId}:users:${userId}`, socketId); // Tambahkan userId ke set Redis
                 chatsSocket.readNotification(room, io)
 
-                console.log(`User ${userId} joined room: ${chatRoomId}`);
+                console.log(`User ${socketId} joined room: ${chatRoomId}`);
             });
 
             socket.on('leaveRoom', (room) => {
                 const { chatRoomId, chatId, userId } = room;
 
-                client.sRem(`chats:${chatId}:room:${chatRoomId}:users`, userId); // Hapus userId dari set Redis
+                client.sRem(`chats:${chatId}:room:${chatRoomId}:users:${userId}`, socketId); // Hapus userId dari set Redis
 
-                console.log(`User ${userId} left room: ${chatRoomId}`);
+                console.log(`User ${socketId} left room: ${chatRoomId}`);
             });
 
             socket.on('sendMessage', (message) => {
