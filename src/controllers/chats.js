@@ -14,7 +14,7 @@ exports.getChats = async (req, res, next) => {
     const chatsCurrently = await chats.find({
         userIds: { $in: [userId] },
         latestMessage: { $exists: true }
-    });
+    }).sort({ latestMessageTimestamp: -1 })
 
     res.status(HTTP_STATUS_CODE.OK).json({
         message: 'Chats Data',
