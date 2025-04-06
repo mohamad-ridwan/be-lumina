@@ -3,13 +3,13 @@ const { generateRandomId } = require('../helpers/generateRandomId')
 const users = require('../models/users')
 const jwt = require('jsonwebtoken')
 
-exports.searchUser = async (req, res, next)=>{
+exports.searchUser = async (req, res, next) => {
     const {
         username,
         senderId
     } = req.body
 
-    if(!username || !username.trim()){
+    if (!username || !username.trim()) {
         res.status(HTTP_STATUS_CODE.BAD_REQUEST).json({
             message: 'username or number required'
         })
@@ -18,34 +18,34 @@ exports.searchUser = async (req, res, next)=>{
 
     const usersCurrently = await users.aggregate([
         {
-          $match: {
-            $and: [
-              {
-                $or: [
-                  {
-                    $expr: {
-                      $regexMatch: {
-                        input: { $toLower: '$username' },
-                        regex: username.toLowerCase()
-                      }
+            $match: {
+                $and: [
+                    {
+                        $or: [
+                            {
+                                $expr: {
+                                    $regexMatch: {
+                                        input: { $toLower: '$username' },
+                                        regex: username.toLowerCase()
+                                    }
+                                }
+                            },
+                            {
+                                $expr: {
+                                    $regexMatch: {
+                                        input: { $toString: '$phoneNumber' }, // Pastikan phoneNumber adalah string
+                                        regex: username
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        id: { $ne: senderId } // Mengecualikan senderId
                     }
-                  },
-                  {
-                    $expr: {
-                      $regexMatch: {
-                        input: '$phoneNumber',
-                        regex: username
-                      }
-                    }
-                  }
-                ]
-              },
-              {
-                id: { $ne: senderId } // Mengecualikan senderId
-              }
-            ],
-            verification: true
-          }
+                ],
+                verification: true
+            }
         }
     ]);
 

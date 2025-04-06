@@ -23,7 +23,7 @@ exports.stream = async(req, res)=>{
           .cursor();
     
           for await (const doc of cursor) {
-            buffer.push(doc);
+            buffer.push({...doc._doc, id: doc._doc.messageId});
         
             if (buffer.length >= 50) {
               res.write(`data: ${JSON.stringify(buffer)}\n\n`);
