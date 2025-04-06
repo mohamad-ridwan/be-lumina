@@ -16,9 +16,9 @@ const markMessageAsRead = async (message, io) => {
         {
             chatRoomId: message?.chatRoomId,
             chatId: message?.chatId,
-            'data.messageId': message?.messageId
+            messageId: message?.messageId
         },
-        { 'data.$.status': 'READ' },
+        { status: 'READ' },
         { new: true }
     )
 
