@@ -2,20 +2,20 @@ const { HTTP_STATUS_CODE } = require('../constant');
 const chats = require('../models/chats')
 
 exports.getChats = async(req, res)=>{
+    const { userId } = req.query;
+    
     if (!userId || !userId.trim()) {
         res.status(HTTP_STATUS_CODE.BAD_REQUEST).json({
             message: 'userId required'
         })
         return
     }
-    
+
     res.set({
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         Connection: 'keep-alive',
       });
-      
-      const { userId } = req.query;
 
       let buffer = [];
     
