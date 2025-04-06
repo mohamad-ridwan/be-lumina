@@ -10,15 +10,24 @@ const chatRoom = new Schema(
         chatId: {
             type: String
         },
-        data: {
-            type: Array
+        messageId: {
+            type: String
         },
-        chatRoomCreationDate: {
-            type: Number
+        senderUserId:{
+            type: String
         },
-        userIds: {
-            type: Array
+        messageType: {
+            type: String
         },
+        textMessage: {
+            type: String
+        },
+        latestMessageTimestamp: {
+            type: String
+        },
+        status: {
+            type: String
+        }
     },
     {
         timestamp: true,
