@@ -12,6 +12,8 @@ exports.stream = async(req, res)=>{
       });
       
       const { chatId, chatRoomId } = req.query;
+
+      let buffer = [];
     
       try {
         const cursor = chatRoom
@@ -20,14 +22,24 @@ exports.stream = async(req, res)=>{
           .batchSize(40)
           .cursor();
     
-        for await (const doc of cursor) {
-          res.write(`data: ${JSON.stringify(doc)}\n\n`);
-          await new Promise((resolve) => setTimeout(resolve, 10)); // optional delay
-        }
-    
-        // Selesai
-        res.write(`event: done\ndata: {}\n\n`);
-        res.end();
+          for await (const doc of cursor) {
+            buffer.push(doc);
+        
+            if (buffer.length >= 50) {
+              res.write(`data: ${JSON.stringify(buffer)}\n\n`);
+              buffer = [];
+              await new Promise((resolve) => setTimeout(resolve, 1000));
+            }
+          }
+        
+          // Kirim sisa data kalau ada (kurang dari 50)
+          if (buffer.length > 0) {
+            res.write(`data: ${JSON.stringify(buffer)}\n\n`);
+          }
+        
+          // Kirim event selesai
+          res.write(`event: done\ndata: {}\n\n`);
+          res.end();
       } catch (error) {
         console.error('Error streaming:', error);
         res.write(`event: error\ndata: ${JSON.stringify({ message: 'Internal Error' })}\n\n`);
