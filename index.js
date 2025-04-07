@@ -56,6 +56,9 @@ dbConnection()
                 console.log('A user disconnected', socket.id);
 
                 const { chatRoomId, chatId, userId } = socket
+                if(userId){
+                    usersSocket.handleDisconnected(userId)
+                }
                 if(chatRoomId){
                     chatRoom.handleDisconnected({
                         chatRoomId,

@@ -20,6 +20,10 @@ async function userOffline(id, io, client){
     }
 }
 
+const handleDisconnected = async (id, io, client)=>{
+    userOffline(id, io, client)
+}
+
 function userOnline(id, io){
     io.emit('userOnline', id)
 }
@@ -40,6 +44,7 @@ async function userProfile(data, io){
 }
 
 const usersSocket = {
+    handleDisconnected,
     userOffline,
     userProfile,
     userOnline
