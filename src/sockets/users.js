@@ -28,10 +28,12 @@ async function userOffline(id, io, client, socketId){
 
     const isOtherDeviceInOnline = await isUserInOnline(id, client)
 
-    if(isOtherDeviceInOnline === false){
-        await users.updateOne({id}, {lastSeenTime: Date.now()}, {new: true})
+    const lastSeenTime = Date.now()
 
-        io.emit('userOffline', id)
+    if(isOtherDeviceInOnline === false){
+        await users.updateOne({id}, {lastSeenTime}, {new: true})
+
+        io.emit('userOffline', {id, lastSeenTime})
     }
 }
 
