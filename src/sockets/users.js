@@ -10,6 +10,18 @@ async function isUserInOnline(id, client) {
     });
 }
 
+const getUserOnlineInfo = async ({recipientId, senderId, profileIdConnection}, io, client)=>{
+    const isUserOnline = await isUserInOnline(recipientId, client)
+    if(isUserOnline === true){
+        io.emit('getUserOnlineInfo', {status: 'online', recipientId, senderId, profileIdConnection})
+    }else {
+        const profile = await users.findOne({id: recipientId})
+        if(profile?.id){
+            io.emit('getUserOnlineInfo', {status: profile.lastSeenTime, recipientId, senderId, profileIdConnection})
+        }
+    }
+}
+
 async function userOffline(id, io, client, socketId){
     // delete first
     client.sRem(`user-online:${id}`, socketId)
@@ -48,6 +60,7 @@ async function userProfile(data, io){
 }
 
 const usersSocket = {
+    getUserOnlineInfo,
     handleDisconnected,
     userOffline,
     userProfile,

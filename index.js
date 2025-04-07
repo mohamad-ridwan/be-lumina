@@ -69,6 +69,12 @@ dbConnection()
                 }
             });
 
+            socket.on('getUserOnlineInfo', (data)=>{
+                if(data){
+                    usersSocket.getUserOnlineInfo(data, io, client)
+                }
+            })
+
             socket.on('userOnline', (id)=>{
                 if(id){
                     client.sAdd(`user-online:${id}`, socketId)
