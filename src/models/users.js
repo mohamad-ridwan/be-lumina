@@ -25,7 +25,7 @@ const users = new Schema(
         phoneNumber:{
             type: String
         },
-        onlineStatus: {
+        lastSeenTime: {
             type: String
         }
     },
