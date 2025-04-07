@@ -11,6 +11,12 @@ async function isUserInRoom(chatId, chatRoomId, userId, client) {
     });
 }
 
+const handleDisconnected = ({chatRoomId, chatId, userId, socketId}, client)=>{
+    client.sRem(`chats:${chatId}:room:${chatRoomId}:users:${userId}`, socketId); // Hapus userId dari set Redis
+
+    console.log(`User ${socketId} left room: ${chatRoomId} from disconnected`);
+}
+
 const markMessageAsRead = async (message, io) => {
     await chatRoomDB.updateOne(
         {
@@ -136,6 +142,7 @@ const handleGetSendMessage = async (message, io, socket, client) => {
 }
 
 const chatRoom = {
+    handleDisconnected,
     handleGetSendMessage,
     markMessageAsRead
 }

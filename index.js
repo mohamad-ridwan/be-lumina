@@ -57,9 +57,12 @@ dbConnection()
 
                 const { chatRoomId, chatId, userId } = socket
                 if(chatRoomId){
-                    client.sRem(`chats:${chatId}:room:${chatRoomId}:users:${userId}`, socketId); // Hapus userId dari set Redis
-
-                    console.log(`User ${socketId} left room: ${chatRoomId} from disconnected`);
+                    chatRoom.handleDisconnected({
+                        chatRoomId,
+                        chatId,
+                        userId,
+                        socketId
+                    }, client)
                 }
             });
 
@@ -67,6 +70,7 @@ dbConnection()
                 if(id){
                     client.sAdd(`user-online:${id}`, socketId)
                     usersSocket.userOnline(id, io)
+                    socket.userId = id
 
                     console.log(`User online : ${socketId} userId : ${id}`)
                 }
