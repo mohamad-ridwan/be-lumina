@@ -34,7 +34,7 @@ exports.getChats = async(req, res)=>{
           for await (const doc of cursor) {
             buffer.push(doc);
         
-            if (buffer.length >= 50) {
+            if (buffer.length >= 20) {
               res.write(`data: ${JSON.stringify(buffer)}\n\n`);
               buffer = [];
               await new Promise((resolve) => setTimeout(resolve, 1000));
