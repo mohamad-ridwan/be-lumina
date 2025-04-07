@@ -161,7 +161,7 @@ exports.login = async (req, res, next) => {
             id: userCurrently.id,
         },
         process.env.TOKEN_BEARER_SECRET,
-        { expiresIn: '1h' },
+        { expiresIn: '24h' },
         (err, token) => {
             if (err) {
                 next(err)
