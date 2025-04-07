@@ -57,7 +57,7 @@ dbConnection()
 
                 const { chatRoomId, chatId, userId } = socket
                 if(userId){
-                    usersSocket.handleDisconnected(userId)
+                    usersSocket.handleDisconnected(userId, io, socketId, client)
                 }
                 if(chatRoomId){
                     chatRoom.handleDisconnected({
@@ -81,7 +81,7 @@ dbConnection()
 
             socket.on('userOffline', (id)=>{
                 if(id){
-                    usersSocket.userOffline(id, io, client)
+                    usersSocket.userOffline(id, io, client, socketId)
 
                     console.log(`User Offline : ${socketId} userId : ${id}`)
                 }

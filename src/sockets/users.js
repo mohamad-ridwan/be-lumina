@@ -10,7 +10,10 @@ async function isUserInOnline(id, client) {
     });
 }
 
-async function userOffline(id, io, client){
+async function userOffline(id, io, client, socketId){
+    // delete first
+    client.sRem(`user-online:${id}`, socketId)
+
     const isOtherDeviceInOnline = await isUserInOnline(id, client)
 
     if(isOtherDeviceInOnline === false){
@@ -20,8 +23,9 @@ async function userOffline(id, io, client){
     }
 }
 
-const handleDisconnected = async (id, io, client)=>{
-    userOffline(id, io, client)
+const handleDisconnected = (id, io, socketId, client)=>{
+    userOffline(id, io, client, socketId)
+    console.log(`User Offline : ${socketId} userId : ${id}`)
 }
 
 function userOnline(id, io){
