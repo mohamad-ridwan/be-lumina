@@ -63,6 +63,23 @@ dbConnection()
                 }
             });
 
+            socket.on('userOnline', (id)=>{
+                if(id){
+                    client.sAdd(`user-online:${id}`, socketId)
+                    usersSocket.userOnline(id, io)
+
+                    console.log(`User online : ${socketId} userId : ${id}`)
+                }
+            })
+
+            socket.on('userOffline', (id)=>{
+                if(id){
+                    usersSocket.userOffline(id, io, client)
+
+                    console.log(`User Offline : ${socketId} userId : ${id}`)
+                }
+            })
+
             socket.on('joinRoom', (room) => {
                 const { chatRoomId, chatId, userId } = room;
 
