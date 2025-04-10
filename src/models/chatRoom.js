@@ -27,6 +27,15 @@ const chatRoom = new Schema(
         },
         status: {
             type: String
+        },
+        isHeader: {
+            type: Boolean
+        },
+        isEndHeader: {
+            type: Boolean
+        },
+        headerText: {
+            type: String
         }
     },
     {
