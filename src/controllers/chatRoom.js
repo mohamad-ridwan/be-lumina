@@ -32,7 +32,7 @@ exports.stream = async(req, res)=>{
             }
           }
         
-          // Kirim sisa data kalau ada (kurang dari 50)
+          // Kirim sisa data kalau ada (kurang dari 20)
           if (buffer.length > 0) {
             res.write(`data: ${JSON.stringify(buffer)}\n\n`);
           }
