@@ -55,12 +55,14 @@ dbConnection()
             socket.on('disconnect', () => {
                 console.log('A user disconnected', socket.id);
 
-                const { chatRoomId, chatId, userId, typingId } = socket
+                const { chatRoomId, chatId, userId, typingId, typingRecipientId } = socket
                 if(userId){
                     usersSocket.handleDisconnected(userId, io, socketId, client)
                 }
                 if(typingId){
+                    io.emit('typing-stop', {recipientId: typingRecipientId, senderId: typingId})
                     delete socket.typingId
+                    delete socket.typingRecipientId
                 }
                 if(chatRoomId){
                     chatRoom.handleDisconnected({
@@ -75,12 +77,14 @@ dbConnection()
             socket.on('typing-start', (data)=>{
                 if(data){
                     socket.typingId = data.senderId
+                    socket.typingRecipientId = data.recipientId
                 }
                 io.emit('typing-start', data)
             })
             socket.on('typing-stop', (data)=>{
                 if(data){
                     delete socket.typingId
+                    delete socket.typingRecipientId
                 }
                 io.emit('typing-stop', data)
             })
