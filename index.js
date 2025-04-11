@@ -13,9 +13,10 @@ const { chatsSocket } = require('./src/sockets/chats');
 
 const app = express()
 const server = http.createServer(app); // Buat server HTTP
+const origin = ["https://lumina-a8fa3.web.app", "http://localhost:3125"]
 const io = socketIo(server, { // Inisialisasi Socket.io
     cors: {
-        origin: ["https://lumina-a8fa3.web.app", "http://localhost:3125"], // Sesuaikan dengan origin aplikasi client Anda
+        origin, // Sesuaikan dengan origin aplikasi client Anda
         methods: ["GET", "POST"],
     },
 });
@@ -40,7 +41,7 @@ client.connect().then(() => {
 dbConnection()
     .then(async () => {
         app.use(cors({
-            origin: "http://localhost:3125" // Sesuaikan untuk development
+            origin // Sesuaikan untuk development
             // origin: "https://<nama-app-frontend>.vercel.app" // Sesuaikan untuk production
         }));
         app.use(express.json());
