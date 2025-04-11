@@ -39,7 +39,10 @@ client.connect().then(() => {
 
 dbConnection()
     .then(async () => {
-        app.use(cors())
+        app.use(cors({
+            origin: "http://localhost:3125" // Sesuaikan untuk development
+            // origin: "https://<nama-app-frontend>.vercel.app" // Sesuaikan untuk production
+        }));
         app.use(express.json());
         app.use(express.urlencoded({ extended: true }));
 
