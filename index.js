@@ -15,7 +15,7 @@ const app = express()
 const server = http.createServer(app); // Buat server HTTP
 const io = socketIo(server, { // Inisialisasi Socket.io
     cors: {
-        origin: "http://localhost:3125", // Sesuaikan dengan origin aplikasi client Anda
+        origin: ["https://lumina-a8fa3.web.app", "http://localhost:3125"], // Sesuaikan dengan origin aplikasi client Anda
         methods: ["GET", "POST"],
     },
 });
