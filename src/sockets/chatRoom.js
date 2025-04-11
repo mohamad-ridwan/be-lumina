@@ -6,11 +6,16 @@ const isToday = require('dayjs/plugin/isToday');
 const isYesterday = require('dayjs/plugin/isYesterday');
 const weekOfYear = require('dayjs/plugin/weekOfYear');
 const weekday = require('dayjs/plugin/weekday');
+const utc = require('dayjs/plugin/utc');
+const timezone = require('dayjs/plugin/timezone');
+const { generateRandomId } = require('../helpers/generateRandomId');
 
 dayjs.extend(isToday);
 dayjs.extend(isYesterday);
 dayjs.extend(weekOfYear);
 dayjs.extend(weekday);
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const formatDate = (date) => {
     const today = dayjs().startOf('day');
@@ -32,6 +37,27 @@ const formatDate = (date) => {
       return dateToCheck.format('DD MMMM YYYY');
     }
 };
+
+const isThereMessageToday = async (chatId, chatRoomId) => {
+  const todayStartUTC = dayjs().tz('Asia/Jakarta').startOf('day').utc().valueOf();
+  const todayEndUTC = dayjs().tz('Asia/Jakarta').endOf('day').utc().valueOf();
+
+  try {
+      const existingMessageToday = await chatRoomDB.findOne({
+          chatId,
+          chatRoomId,
+          latestMessageTimestamp: {
+              $gte: todayStartUTC,
+              $lte: todayEndUTC,
+          },
+          isHeader: { $ne: true } // Optional: Exclude header messages if needed
+      });
+      return !!existingMessageToday;
+  } catch (error) {
+      console.error('Error checking for messages today:', error);
+      return false;
+  }
+}
 
 async function isUserInRoom(chatId, chatRoomId, userId, client) {
     return await new Promise((resolve, reject) => {
@@ -119,11 +145,12 @@ const markMessageAsRead = async (message, io) => {
 
 const sendMessage = async (message, io, socket, client) => {
     const { latestMessage } = message;
-    const headerText = formatDate(latestMessage?.latestMessageTimestamp);
   
-    const headerId = `header-${headerText}`;
     const chatRoomId = message?.chatRoomId;
     const chatId = message?.chatId;
+
+    // Cek apakah header untuk tanggal ini sudah ada
+    const hasMessageToday = await isThereMessageToday(chatId, chatRoomId);
   
     // Tambahkan pesan utama
     const newChatRoom = new chatRoomDB({
@@ -138,21 +165,13 @@ const sendMessage = async (message, io, socket, client) => {
     });
     await newChatRoom.save();
 
-    // Cek apakah header untuk tanggal ini sudah ada
-    const existingHeader = await chatRoomDB.findOne({
-        chatRoomId,
-        chatId,
-        messageId: headerId
-    });
-    
-    if (!existingHeader) {
+    const headerId = generateRandomId(15)
+    if (!hasMessageToday) {
         const headerMessage = new chatRoomDB({
           chatId,
           chatRoomId,
-          messageId: headerId,
+          messageId: generateRandomId(15),
           isHeader: true,
-          isEndHeader: true,
-          headerText,
           latestMessageTimestamp: latestMessage?.latestMessageTimestamp
         });
         await headerMessage.save();
@@ -182,13 +201,11 @@ const sendMessage = async (message, io, socket, client) => {
       { new: true }
     );
 
-    if(!existingHeader){
+    if(!hasMessageToday){
         const newData = {
             ...message,
             messageId: headerId,
             isHeader: true,
-            isEndHeader: true,
-            headerText,
             latestMessageTimestamp: latestMessage?.latestMessageTimestamp
         }
         delete newData.latestMessage

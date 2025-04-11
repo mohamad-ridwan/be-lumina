@@ -31,12 +31,6 @@ const chatRoom = new Schema(
         isHeader: {
             type: Boolean
         },
-        isEndHeader: {
-            type: Boolean
-        },
-        headerText: {
-            type: String
-        }
     },
     {
         timestamp: true,
