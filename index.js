@@ -1,7 +1,6 @@
 require('dotenv').config()
 const express = require('express')
 const redis = require('redis');
-const client = redis.createClient();
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors')
@@ -22,6 +21,11 @@ const io = socketIo(server, { // Inisialisasi Socket.io
 });
 
 const PORT = process.env.PORT || 4001
+
+// Gunakan REDIS_URL dari environment variable
+const client = redis.createClient({
+    url: process.env.REDIS_URL
+});
 
 client.on('error', (err) => {
     console.error('Redis Client Error', err);
