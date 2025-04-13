@@ -17,10 +17,10 @@ exports.stream = async(req, res)=>{
     
       try {
         const cursor = chatRoom
-          .find({ chatId, chatRoomId })
-          .sort({latestMessageTimestamp: -1})
-          .batchSize(40)
-          .cursor();
+        .find({ chatId, chatRoomId })
+        .sort({ latestMessageTimestamp: -1, isHeader: 1 }) // Urutkan berdasarkan timestamp menurun, lalu isHeader menaik
+        .batchSize(40)
+        .cursor();
     
           for await (const doc of cursor) {
             buffer.push({...doc._doc, id: doc._doc.messageId});
@@ -28,7 +28,7 @@ exports.stream = async(req, res)=>{
             if (buffer.length >= 20) {
               res.write(`data: ${JSON.stringify(buffer)}\n\n`);
               buffer = [];
-              await new Promise((resolve) => setTimeout(resolve, 1000));
+              await new Promise((resolve) => setTimeout(resolve, 500));
             }
           }
         

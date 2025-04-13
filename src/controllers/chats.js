@@ -37,7 +37,7 @@ exports.getChats = async(req, res)=>{
             if (buffer.length >= 20) {
               res.write(`data: ${JSON.stringify(buffer)}\n\n`);
               buffer = [];
-              await new Promise((resolve) => setTimeout(resolve, 1000));
+              await new Promise((resolve) => setTimeout(resolve, 500));
             }
           }
         
