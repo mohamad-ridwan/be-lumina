@@ -19,7 +19,6 @@ exports.stream = async(req, res)=>{
         const cursor = chatRoom
         .find({ chatId, chatRoomId })
         .sort({ latestMessageTimestamp: -1, isHeader: 1 }) // Urutkan berdasarkan timestamp menurun, lalu isHeader menaik
-        .explain('executionStats')
         .allowDiskUse(true)
         .batchSize(40)
         .cursor();
