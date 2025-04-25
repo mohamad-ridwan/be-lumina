@@ -4,6 +4,96 @@ const chatRoom = require('../models/chatRoom')
 const { HTTP_STATUS_CODE } = require('../constant');
 const { generateRandomId } = require('../helpers/generateRandomId');
 
+exports.getMessagesPagination = async (req, res, next) => {
+  try {
+    const { chatId, chatRoomId, messageId, direction } = req.query
+    const limit = parseInt(req.query.limit) || 20
+
+    if (!chatId || !chatRoomId || !messageId || !direction) {
+      return res.status(400).json({ error: 'Missing required query parameters.' })
+    }
+
+    // Temukan anchor message berdasarkan messageId
+    const anchor = await chatRoom.findOne({ chatId, chatRoomId, messageId })
+
+    if (!anchor) {
+      return res.status(404).json({ error: 'Anchor message not found.' })
+    }
+
+    const timestamp = Number(anchor.latestMessageTimestamp)
+
+    let query = {}
+    let sort = {}
+
+    // ⛔️ FIXED: Tukar logika prev & next
+    if (direction === 'next') {
+      // Sebelumnya prev → sekarang jadi next
+      query = {
+        chatId,
+        chatRoomId,
+        latestMessageTimestamp: { $lt: timestamp },
+      }
+      sort = { latestMessageTimestamp: -1 }
+    } else if (direction === 'prev') {
+      // Sebelumnya next → sekarang jadi prev
+      query = {
+        chatId,
+        chatRoomId,
+        latestMessageTimestamp: { $gt: timestamp },
+      }
+      sort = { latestMessageTimestamp: 1 }
+    } else {
+      return res.status(400).json({ error: 'Invalid direction. Use "prev" or "next".' })
+    }
+
+    const messages = await chatRoom
+      .find(query)
+      .sort(sort)
+      .limit(limit)
+      .lean()
+
+    const totalMessages = await chatRoom.countDocuments({ chatId, chatRoomId })
+
+    const firstMessage = await chatRoom
+      .findOne({ chatId, chatRoomId })
+      .sort({ latestMessageTimestamp: 1 })
+
+    const lastMessage = await chatRoom
+      .findOne({ chatId, chatRoomId })
+      .sort({ latestMessageTimestamp: -1 })
+
+    const hasPrev = timestamp < Number(lastMessage.latestMessageTimestamp)
+    const hasNext = timestamp > Number(firstMessage.latestMessageTimestamp)
+
+    // ✅ Tetap balik jika dari arah 'next' (sekarang ambil dari paling baru → lama)
+    const sortedMessages = direction === 'next' ? messages.reverse() : messages
+
+    return res.json({
+      data: sortedMessages.map((item)=>({
+        ...item,
+        latestMessageTimestamp: Number(item.latestMessageTimestamp),
+      })).sort((a, b) => {
+        if (a.latestMessageTimestamp === b.latestMessageTimestamp) {
+          if (a.isHeader && !b.isHeader) return 1
+          if (!a.isHeader && b.isHeader) return -1
+          return 0
+        }
+        return b.latestMessageTimestamp - a.latestMessageTimestamp
+      }),
+      meta: {
+        anchorMessageId: anchor.messageId,
+        hasPrev,
+        hasNext,
+        totalMessages,
+        fetchedCount: sortedMessages.length,
+        direction
+      },
+    })
+  } catch (err) {
+    next(err)
+  }
+}
+
 exports.stream = async(req, res)=>{
     res.set({
         'Content-Type': 'text/event-stream',
@@ -14,6 +104,7 @@ exports.stream = async(req, res)=>{
       const { chatId, chatRoomId } = req.query;
 
       let buffer = [];
+      let totalMessages = 0
     
       try {
         const cursor = chatRoom
@@ -28,6 +119,7 @@ exports.stream = async(req, res)=>{
         
             if (buffer.length >= 20) {
               res.write(`data: ${JSON.stringify(buffer)}\n\n`);
+              totalMessages += buffer.length;
               buffer = [];
               await new Promise((resolve) => setTimeout(resolve, 500));
             }
@@ -36,10 +128,15 @@ exports.stream = async(req, res)=>{
           // Kirim sisa data kalau ada (kurang dari 20)
           if (buffer.length > 0) {
             res.write(`data: ${JSON.stringify(buffer)}\n\n`);
+            totalMessages += buffer.length;
+          }
+
+          const totalMessageData = {
+            totalMessages
           }
         
           // Kirim event selesai
-          res.write(`event: done\ndata: {}\n\n`);
+          res.write(`event: done\ndata: ${JSON.stringify(totalMessageData)}\n\n`);
           res.end();
       } catch (error) {
         console.error('Error streaming:', error);

@@ -172,6 +172,7 @@ const sendMessage = async (message, io, socket, client) => {
           chatRoomId,
           messageId: generateRandomId(15),
           isHeader: true,
+          senderUserId: latestMessage?.senderUserId,
           latestMessageTimestamp: latestMessage?.latestMessageTimestamp
         });
         await headerMessage.save();
