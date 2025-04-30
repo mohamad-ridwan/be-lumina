@@ -153,7 +153,7 @@ const sendMessage = async (message, io, socket, client) => {
     const hasMessageToday = await isThereMessageToday(chatId, chatRoomId);
   
     // Tambahkan pesan utama
-    const newChatRoom = new chatRoomDB({
+    let chatRoomData = {
       chatId,
       chatRoomId,
       messageId: latestMessage?.messageId,
@@ -162,7 +162,12 @@ const sendMessage = async (message, io, socket, client) => {
       textMessage: latestMessage?.textMessage,
       latestMessageTimestamp: latestMessage?.latestMessageTimestamp,
       status: latestMessage?.status
-    });
+    }
+    if(latestMessage?.replyView){
+      chatRoomData.replyView = latestMessage.replyView
+    }
+
+    const newChatRoom = new chatRoomDB(chatRoomData);
     await newChatRoom.save();
 
     const headerId = generateRandomId(15)

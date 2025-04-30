@@ -4,6 +4,55 @@ const chatRoom = require('../models/chatRoom')
 const { HTTP_STATUS_CODE } = require('../constant');
 const { generateRandomId } = require('../helpers/generateRandomId');
 
+exports.getMessagesAround = async (req, res) => {
+  const { chatRoomId, messageId } = req.params
+  const limit = Math.min(parseInt(req.query.limit) || 50, 100) // Default 50, max 100
+
+  try {
+    // Cari pesan target untuk ambil timestamp
+    const targetMessage = await chatRoom.findOne({ chatRoomId, messageId })
+    if (!targetMessage) {
+      return res.status(404).json({ error: 'Message not found' })
+    }
+
+    const targetTimestamp = Number(targetMessage.latestMessageTimestamp)
+
+    const halfLimit = Math.floor(limit / 2)
+
+    // Ambil pesan sebelum target (lebih kecil dari timestamp)
+    const beforeMessages = await chatRoom.find({
+      chatRoomId,
+      latestMessageTimestamp: { $lt: targetTimestamp }
+    })
+      .sort({ latestMessageTimestamp: -1 }) // Terbaru ke terlama
+      .limit(halfLimit)
+
+    // Ambil pesan sesudah target (lebih besar dari timestamp)
+    const afterMessages = await chatRoom.find({
+      chatRoomId,
+      latestMessageTimestamp: { $gt: targetTimestamp }
+    })
+      .sort({ latestMessageTimestamp: 1 }) // Terlama ke terbaru
+      .limit(limit - beforeMessages.length - 1) // Sisa quota
+
+    // Gabungkan: before (dibalik dulu) + target + after
+    const result = [
+      ...beforeMessages.reverse(),
+      targetMessage,
+      ...afterMessages
+    ]
+
+    res.json({
+      messages: result,
+      targetMessageId: messageId,
+      total: result.length
+    })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+}
+
 exports.getMessagesPagination = async (req, res, next) => {
   try {
     const { chatId, chatRoomId, messageId, direction } = req.query

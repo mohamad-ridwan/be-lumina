@@ -31,6 +31,9 @@ const chatRoom = new Schema(
         isHeader: {
             type: Boolean
         },
+        replyView: {
+            type: Object
+        }
     },
     {
         timestamp: true,
