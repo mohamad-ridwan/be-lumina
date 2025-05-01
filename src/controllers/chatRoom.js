@@ -9,31 +9,65 @@ exports.getMessagesAround = async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 100) // Default 50, max 100
 
   try {
-    // Cari pesan target untuk ambil timestamp
+    // Cari pesan target untuk ambil timestamp & messageId
     const targetMessage = await chatRoom.findOne({ chatRoomId, messageId })
     if (!targetMessage) {
       return res.status(404).json({ error: 'Message not found' })
     }
 
     const targetTimestamp = Number(targetMessage.latestMessageTimestamp)
-
+    const targetMessageId = targetMessage.messageId
     const halfLimit = Math.floor(limit / 2)
 
-    // Ambil pesan sebelum target (lebih kecil dari timestamp)
-    const beforeMessages = await chatRoom.find({
+    // Ambil pesan sebelum target
+    let beforeMessages = await chatRoom.find({
       chatRoomId,
-      latestMessageTimestamp: { $lt: targetTimestamp }
+      $or: [
+        { latestMessageTimestamp: { $lt: targetTimestamp } },
+        {
+          latestMessageTimestamp: targetTimestamp,
+          messageId: { $lt: targetMessageId } // Kalau timestamp sama, messageId lebih kecil dianggap "sebelum"
+        }
+      ]
     })
-      .sort({ latestMessageTimestamp: -1 }) // Terbaru ke terlama
+      .sort({ latestMessageTimestamp: -1, messageId: -1 }) // Urutkan terbaru ke terlama
       .limit(halfLimit)
 
-    // Ambil pesan sesudah target (lebih besar dari timestamp)
+    // Cek apakah pesan teratas beforeMessages adalah header
+    if (beforeMessages.length > 0 && beforeMessages[0]?.isHeader === true) {
+      const topMessage = beforeMessages[beforeMessages.length - 1]
+
+      const extraMessage = await chatRoom.findOne({
+        chatRoomId,
+        $or: [
+          { latestMessageTimestamp: { $lt: topMessage.latestMessageTimestamp } },
+          {
+            latestMessageTimestamp: topMessage.latestMessageTimestamp,
+            messageId: { $lt: topMessage.messageId }
+          }
+        ]
+      })
+        .sort({ latestMessageTimestamp: -1, messageId: -1 })
+
+      if (extraMessage) {
+        beforeMessages.push(extraMessage)
+      }
+    }
+
+    // Ambil pesan sesudah target
+    const afterLimit = limit - beforeMessages.length - 1 // Sisa quota
     const afterMessages = await chatRoom.find({
       chatRoomId,
-      latestMessageTimestamp: { $gt: targetTimestamp }
+      $or: [
+        { latestMessageTimestamp: { $gt: targetTimestamp } },
+        {
+          latestMessageTimestamp: targetTimestamp,
+          messageId: { $gt: targetMessageId }
+        }
+      ]
     })
-      .sort({ latestMessageTimestamp: 1 }) // Terlama ke terbaru
-      .limit(limit - beforeMessages.length - 1) // Sisa quota
+      .sort({ latestMessageTimestamp: 1, messageId: 1 }) // Terlama ke terbaru
+      .limit(afterLimit > 0 ? afterLimit : 0)
 
     // Gabungkan: before (dibalik dulu) + target + after
     const result = [
