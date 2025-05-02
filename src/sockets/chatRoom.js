@@ -274,16 +274,90 @@ const sendMessage = async (message, io, socket, client) => {
 //     });
 // }
 
+const handleReactionMessage = async (message, io, socket, client) => {
+  const { chatRoomId, chatId, messageId, reaction } = message;
+  const { emoji, senderUserId, code, latestMessageTimestamp } = reaction;
+
+  try {
+    if (!chatRoomId || !senderUserId || !emoji) {
+      console.error('Invalid reaction payload:', { chatRoomId, senderUserId, emoji });
+      return;
+    }
+
+    const filterQuery = {
+      chatRoomId, chatId , messageId
+    }
+
+    const chatRoomDoc = await chatRoomDB.findOne(filterQuery);
+    if (!chatRoomDoc) {
+      console.error('Chat room not found with chatRoomId:', chatRoomId);
+      return;
+    }
+
+    // Cek apakah reaction sudah ada
+    const existingReaction = chatRoomDoc.reactions.find(
+      (r) => r.senderUserId === senderUserId
+    );
+
+    let isDeleted = false
+
+    if (existingReaction) {
+      if (existingReaction.emoji === emoji) {
+        // Sama → hapus
+        await chatRoomDB.updateOne(
+          filterQuery,
+          { $pull: { reactions: { senderUserId } } }
+        );
+        isDeleted = true
+        console.log('Removed existing reaction');
+      } else {
+        // Beda → hapus dulu, lalu tambah (PISAH)
+        await chatRoomDB.updateOne(
+          filterQuery,
+          { $pull: { reactions: { senderUserId } } }
+        );
+        await chatRoomDB.updateOne(
+          filterQuery,
+          { $push: { reactions: { emoji, senderUserId, code, latestMessageTimestamp } } }
+        );
+        console.log('Replaced reaction with new emoji');
+      }
+    } else {
+      // Belum ada → tambahkan
+      await chatRoomDB.updateOne(
+        filterQuery,
+        { $push: { reactions: { emoji, senderUserId, code, latestMessageTimestamp } } }
+      );
+      console.log('Added new reaction');
+    }
+
+    // Ambil ulang doc untuk emit data terbaru
+    const updatedDoc = await chatRoomDB.findOne(filterQuery);
+
+    io.emit('newMessage', {
+      ...message,
+      eventType: 'reaction-message',
+      isDeleted,
+      reactions: updatedDoc.reactions
+    });
+
+  } catch (error) {
+    console.error('Error handling reaction message:', error);
+  }
+};
+
 const handleGetSendMessage = async (message, io, socket, client) => {
     if (message?.eventType === 'send-message') {
         sendMessage(message, io, socket, client)
+    }else if(message?.eventType === 'reaction-message'){
+        handleReactionMessage(message, io, socket, client)
     }
 }
 
 const chatRoom = {
     handleDisconnected,
     handleGetSendMessage,
-    markMessageAsRead
+    markMessageAsRead,
 }
 
 module.exports = { chatRoom }

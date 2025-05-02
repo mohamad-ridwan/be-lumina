@@ -33,7 +33,15 @@ const chatRoom = new Schema(
         },
         replyView: {
             type: Object
-        }
+        },
+        reactions: [
+            {
+                emoji: { type: String },
+                senderUserId: { type: String },
+                code: {type: String},
+                latestMessageTimestamp: {type: String}
+            }
+        ]
     },
     {
         timestamp: true,
