@@ -168,6 +168,14 @@ exports.getMessagesPagination = async (req, res, next) => {
       query = {
         chatId,
         chatRoomId,
+        $nor: [{
+          isDeleted: {
+            $elemMatch: {
+              senderUserId: profileId,
+              deletionType: { $in: ['me', 'permanent'] }
+            }
+          }
+        }],
         latestMessageTimestamp: { $lt: timestamp },
       }
       sort = { latestMessageTimestamp: -1 }
@@ -176,6 +184,14 @@ exports.getMessagesPagination = async (req, res, next) => {
       query = {
         chatId,
         chatRoomId,
+        $nor: [{
+          isDeleted: {
+            $elemMatch: {
+              senderUserId: profileId,
+              deletionType: { $in: ['me', 'permanent'] }
+            }
+          }
+        }],
         latestMessageTimestamp: { $gt: timestamp },
       }
       sort = { latestMessageTimestamp: 1 }
@@ -191,6 +207,10 @@ exports.getMessagesPagination = async (req, res, next) => {
 
     const totalMessages = await chatRoom.countDocuments({ chatId, chatRoomId })
 
+    const messageNonHeaders = messages.filter(msg => !msg?.isHeader);
+    const headersTimeId = new Set(messageNonHeaders.map(msg => msg.timeId));
+    const messagesCurrently = messages.filter(msg=>headersTimeId.has(msg.timeId))
+
     const firstMessage = await chatRoom
       .findOne({ chatId, chatRoomId })
       .sort({ latestMessageTimestamp: 1 })
@@ -203,7 +223,7 @@ exports.getMessagesPagination = async (req, res, next) => {
     const hasNext = timestamp > Number(firstMessage.latestMessageTimestamp)
 
     // ✅ Tetap balik jika dari arah 'next' (sekarang ambil dari paling baru → lama)
-    const sortedMessages = direction === 'next' ? messages.reverse() : messages
+    const sortedMessages = direction === 'next' ? messagesCurrently.reverse() : messagesCurrently
 
     return res.json({
       data: sortedMessages.map((item)=>({
