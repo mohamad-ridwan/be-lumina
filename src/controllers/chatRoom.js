@@ -89,8 +89,62 @@ exports.getMessagesAround = async (req, res) => {
 
 exports.getMessagesPagination = async (req, res, next) => {
   try {
-    const { chatId, chatRoomId, messageId, direction } = req.query
+    const { chatId, chatRoomId, messageId, direction, isFirstMessage, profileId } = req.query
     const limit = parseInt(req.query.limit) || 20
+
+    if(isFirstMessage){
+      const messages = await chatRoom
+      .find({
+        chatId,
+        chatRoomId,
+        $nor: [{
+          isDeleted: {
+            $elemMatch: {
+              senderUserId: profileId,
+              deletionType: { $in: ['me', 'permanent'] }
+            }
+          }
+        }]
+      })
+      .sort({ latestMessageTimestamp: -1, isHeader: 1 })
+      .limit(20);
+
+      // ==== Cek apakah semua item adalah header ====
+      const headers = messages.filter(msg => msg.isHeader === true);
+      const nonHeaders = messages.filter(msg => !msg.isHeader);
+
+      const nonHeaderTimeIds = new Set(nonHeaders.map(msg => msg.timeId));
+
+      const headersWithoutMatchingNonHeader = headers.filter(header => 
+        !nonHeaderTimeIds.has(header.timeId)
+      );
+
+      const allItemsAreOrphanHeaders = 
+        messages.length > 0 && messages.every(msg => msg.isHeader === true) &&
+        headersWithoutMatchingNonHeader.length === headers.length;
+
+        if(allItemsAreOrphanHeaders){
+          return res.json({
+            isFirstMessage,
+            messages: [],
+            totalMessages: 0
+          })
+        }else{
+          const messageNonHeaders = messages.filter(msg => !msg?.isHeader);
+
+          const headersTimeId = new Set(messageNonHeaders.map(msg => msg.timeId));
+
+          const messagesCurrently = messages.filter(msg=>
+            headersTimeId.has(msg.timeId)
+          )
+          
+          return res.json({
+            isFirstMessage,
+            messages: messagesCurrently,
+            totalMessages: messagesCurrently.length
+          })
+        }
+    }
 
     if (!chatId || !chatRoomId || !messageId || !direction) {
       return res.status(400).json({ error: 'Missing required query parameters.' })
@@ -177,56 +231,80 @@ exports.getMessagesPagination = async (req, res, next) => {
   }
 }
 
-exports.stream = async(req, res)=>{
-    res.set({
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-      });
-      
-      const { chatId, chatRoomId } = req.query;
+exports.stream = async (req, res) => {
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
 
-      let buffer = [];
-      let totalMessages = 0
-    
-      try {
-        const cursor = chatRoom
-        .find({ chatId, chatRoomId })
-        .sort({ latestMessageTimestamp: -1, isHeader: 1 }) // Urutkan berdasarkan timestamp menurun, lalu isHeader menaik
-        .allowDiskUse(true)
-        .batchSize(40)
-        .cursor();
-    
-          for await (const doc of cursor) {
-            buffer.push({...doc._doc, id: doc._doc.messageId});
-        
-            if (buffer.length >= 20) {
-              res.write(`data: ${JSON.stringify(buffer)}\n\n`);
-              totalMessages += buffer.length;
-              buffer = [];
-              await new Promise((resolve) => setTimeout(resolve, 500));
+  const { chatId, chatRoomId, profileId } = req.query;
+
+  let allMessages = []; // Kita tampung semua dulu
+  let totalMessages = 0;
+
+  try {
+    const cursor = chatRoom
+      .find({
+        chatId,
+        chatRoomId,
+        $nor: [{
+          isDeleted: {
+            $elemMatch: {
+              senderUserId: profileId,
+              deletionType: { $in: ['me', 'permanent'] }
             }
           }
-        
-          // Kirim sisa data kalau ada (kurang dari 20)
-          if (buffer.length > 0) {
-            res.write(`data: ${JSON.stringify(buffer)}\n\n`);
-            totalMessages += buffer.length;
-          }
+        }]
+      })
+      .sort({ latestMessageTimestamp: -1, isHeader: 1 })
+      .allowDiskUse(true)
+      .batchSize(40)
+      .cursor();
 
-          const totalMessageData = {
-            totalMessages
-          }
-        
-          // Kirim event selesai
-          res.write(`event: done\ndata: ${JSON.stringify(totalMessageData)}\n\n`);
-          res.end();
-      } catch (error) {
-        console.error('Error streaming:', error);
-        res.write(`event: error\ndata: ${JSON.stringify({ message: 'Internal Error' })}\n\n`);
-        res.end();
-      }
-}
+    for await (const doc of cursor) {
+      const message = { ...doc._doc, id: doc._doc.messageId };
+      allMessages.push(message);
+    }
+
+    // ==== Cek apakah semua item adalah header ====
+    const headers = allMessages.filter(msg => msg.isHeader === true);
+    const nonHeaders = allMessages.filter(msg => !msg.isHeader);
+
+    const nonHeaderTimeIds = new Set(nonHeaders.map(msg => msg.timeId));
+
+    const headersWithoutMatchingNonHeader = headers.filter(header => 
+      !nonHeaderTimeIds.has(header.timeId)
+    );
+
+    const allItemsAreOrphanHeaders = 
+      allMessages.length > 0 && allMessages.every(msg => msg.isHeader === true) &&
+      headersWithoutMatchingNonHeader.length === headers.length;
+
+    if (allItemsAreOrphanHeaders) {
+      // Kalau semua item adalah header → jangan kirim apapun
+      res.write(`event: done\ndata: ${JSON.stringify({ totalMessages: 0 })}\n\n`);
+      res.end();
+      return;
+    }
+
+    // ==== Kalau tidak semua header, kirim data secara batch 20 ====
+    for (let i = 0; i < allMessages.length; i += 20) {
+      const batch = allMessages.slice(i, i + 20);
+      res.write(`data: ${JSON.stringify(batch)}\n\n`);
+      totalMessages += batch.length;
+      await new Promise(resolve => setTimeout(resolve, 500)); // Delay sama seperti sebelumnya
+    }
+
+    const totalMessageData = { totalMessages };
+    res.write(`event: done\ndata: ${JSON.stringify(totalMessageData)}\n\n`);
+    res.end();
+  } catch (error) {
+    console.error('Error streaming:', error);
+    res.write(`event: error\ndata: ${JSON.stringify({ message: 'Internal Error' })}\n\n`);
+    res.end();
+  }
+};
 
 exports.getChatRoom = async (req, res, next)=>{
     const session = await mongoose.startSession();

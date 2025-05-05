@@ -41,7 +41,14 @@ const chatRoom = new Schema(
                 code: {type: String},
                 latestMessageTimestamp: {type: String}
             }
-        ]
+        ],
+        isDeleted: [
+            {
+                senderUserId: {type: String},
+                deletionType: {type: String},
+            }
+        ],
+        timeId: { type: String }
     },
     {
         timestamp: true,

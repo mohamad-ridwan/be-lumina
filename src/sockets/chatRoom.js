@@ -9,6 +9,7 @@ const weekday = require('dayjs/plugin/weekday');
 const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
 const { generateRandomId } = require('../helpers/generateRandomId');
+const { formatDate } = require('../helpers/general');
 
 dayjs.extend(isToday);
 dayjs.extend(isYesterday);
@@ -16,27 +17,6 @@ dayjs.extend(weekOfYear);
 dayjs.extend(weekday);
 dayjs.extend(utc);
 dayjs.extend(timezone);
-
-const formatDate = (date) => {
-    const today = dayjs().startOf('day');
-    const yesterday = dayjs().subtract(1, 'day').startOf('day');
-    const now = dayjs();
-    const dateToCheck = dayjs(date);
-  
-    if (dateToCheck.isSame(today, 'day')) {
-      return 'Today';
-    } else if (dateToCheck.isSame(yesterday, 'day')) {
-      return 'Yesterday';
-    } else if (
-      dateToCheck.isSame(now, 'week') &&
-      !dateToCheck.isSame(today, 'day') &&
-      !dateToCheck.isSame(yesterday, 'day')
-    ) {
-      return dateToCheck.format('dddd');
-    } else {
-      return dateToCheck.format('DD MMMM YYYY');
-    }
-};
 
 const isThereMessageToday = async (chatId, chatRoomId) => {
   const todayStartUTC = dayjs().tz('Asia/Jakarta').startOf('day').utc().valueOf();
@@ -144,85 +124,157 @@ const markMessageAsRead = async (message, io) => {
 // }
 
 const sendMessage = async (message, io, socket, client) => {
-    const { latestMessage } = message;
-  
-    const chatRoomId = message?.chatRoomId;
-    const chatId = message?.chatId;
+  const { latestMessage, isNeedHeaderDate, recipientProfileId } = message
 
-    // Cek apakah header untuk tanggal ini sudah ada
-    const hasMessageToday = await isThereMessageToday(chatId, chatRoomId);
-  
-    // Tambahkan pesan utama
-    let chatRoomData = {
+  const chatRoomId = message?.chatRoomId
+  const chatId = message?.chatId
+
+  // Cari header yang ada hari ini
+  const headerMessageToday = await getTodayHeader(chatId, chatRoomId)
+
+  let timeId
+  let headerMessage
+
+  if (headerMessageToday) {
+    // ✅ Header sudah ada
+    timeId = headerMessageToday.timeId
+    headerMessage = headerMessageToday
+  } else {
+    // ❌ Belum ada header → buat header baru
+    timeId = generateRandomId(15)
+    const headerId = generateRandomId(15)
+
+    headerMessage = new chatRoomDB({
       chatId,
       chatRoomId,
-      messageId: latestMessage?.messageId,
+      messageId: headerId,
+      isHeader: true,
       senderUserId: latestMessage?.senderUserId,
-      messageType: latestMessage?.messageType,
-      textMessage: latestMessage?.textMessage,
       latestMessageTimestamp: latestMessage?.latestMessageTimestamp,
-      status: latestMessage?.status
-    }
-    if(latestMessage?.replyView){
-      chatRoomData.replyView = latestMessage.replyView
-    }
+      timeId
+    })
+    await headerMessage.save()
+  }
 
-    const newChatRoom = new chatRoomDB(chatRoomData);
-    await newChatRoom.save();
+  // Cek apakah recipient perlu header juga (kalau datanya kosong → dia butuh)
+  const recipientChatRoom = await chatRoomDB.find({
+      chatId,
+      chatRoomId,
+      $nor: [{
+          isDeleted: {
+              $elemMatch: {
+                  senderUserId: recipientProfileId,
+                  deletionType: { $in: ['me', 'permanent'] }
+              }
+          }
+      }]
+  })
+  // ==== Cek apakah semua item adalah header ====
+  const headers = recipientChatRoom.filter(msg => {
+    const itemDate = dayjs(Number(msg?.latestMessageTimestamp)).startOf('day')
+    return msg.isHeader === true && formatDate(itemDate) === 'Today'
+  });
+  const nonHeaders = recipientChatRoom.filter(msg => {
+    const itemDate = dayjs(Number(msg?.latestMessageTimestamp)).startOf('day')
+    return !msg.isHeader && formatDate(itemDate) === 'Today'
+  });
 
-    const headerId = generateRandomId(15)
-    if (!hasMessageToday) {
-        const headerMessage = new chatRoomDB({
-          chatId,
-          chatRoomId,
-          messageId: generateRandomId(15),
-          isHeader: true,
-          senderUserId: latestMessage?.senderUserId,
-          latestMessageTimestamp: latestMessage?.latestMessageTimestamp
-        });
-        await headerMessage.save();
-    }
-  
-    // Update unread count
-    const chatsCurrently = await chatsDB.findOne({ chatRoomId, chatId });
-    const secondUserId = Object.keys(chatsCurrently?.unreadCount || {}).find(
-      (id) => id !== latestMessage?.senderUserId
-    );
-    const currentUnreadCount = chatsCurrently?.unreadCount?.[secondUserId] || 0;
-  
-    const isSecondUserInRoom = await isUserInRoom(chatId, chatRoomId, secondUserId, client);
-  
-    const newUnreadCount = {
-      [latestMessage.senderUserId]: 0,
-      [secondUserId]: isSecondUserInRoom ? 0 : currentUnreadCount + 1
-    };
-  
-    await chatsDB.updateOne(
-      { chatRoomId, chatId },
-      {
-        unreadCount: newUnreadCount,
-        latestMessage,
-        latestMessageTimestamp: latestMessage?.latestMessageTimestamp
-      },
-      { new: true }
-    );
+  const nonHeaderTimeIds = new Set(nonHeaders.map(msg => msg.timeId));
 
-    if(!hasMessageToday){
-        const newData = {
-            ...message,
-            messageId: headerId,
-            isHeader: true,
-            latestMessageTimestamp: latestMessage?.latestMessageTimestamp
-        }
-        delete newData.latestMessage
-        io.emit('newMessage', newData);
-    }
-  
+  const headersWithoutMatchingNonHeader = headers.filter(header => 
+    !nonHeaderTimeIds.has(header.timeId)
+  );
+
+  const allItemsAreOrphanHeaders = 
+    recipientChatRoom.length > 0 && !recipientChatRoom.every(msg => {
+      const itemDate = dayjs(Number(msg?.latestMessageTimestamp)).startOf('day')
+      return msg.isHeader === true && formatDate(itemDate) === 'Today'
+    }) &&
+    headersWithoutMatchingNonHeader.length === headers.length;
+
+  // Siapa saja yang perlu header
+  const shouldEmitHeaderToSender = isNeedHeaderDate
+  const shouldEmitHeaderToRecipient = allItemsAreOrphanHeaders
+
+  const shouldEmitHeader = shouldEmitHeaderToSender || shouldEmitHeaderToRecipient
+
+  // Tambahkan pesan utama (dengan timeId yang sama)
+  const chatRoomData = {
+    chatId,
+    chatRoomId,
+    messageId: latestMessage?.messageId,
+    senderUserId: latestMessage?.senderUserId,
+    messageType: latestMessage?.messageType,
+    textMessage: latestMessage?.textMessage,
+    latestMessageTimestamp: latestMessage?.latestMessageTimestamp,
+    status: latestMessage?.status,
+    timeId
+  }
+  if (latestMessage?.replyView) {
+    chatRoomData.replyView = latestMessage.replyView
+  }
+
+  const newChatRoom = new chatRoomDB(chatRoomData)
+  await newChatRoom.save()
+
+  // Update unread count
+  const chatsCurrently = await chatsDB.findOne({ chatRoomId, chatId })
+  const secondUserId = Object.keys(chatsCurrently?.unreadCount || {}).find(
+    (id) => id !== latestMessage?.senderUserId
+  )
+  const currentUnreadCount = chatsCurrently?.unreadCount?.[secondUserId] || 0
+
+  const isSecondUserInRoom = await isUserInRoom(chatId, chatRoomId, secondUserId, client)
+
+  const newUnreadCount = {
+    [latestMessage.senderUserId]: 0,
+    [secondUserId]: isSecondUserInRoom ? 0 : currentUnreadCount + 1
+  }
+
+  await chatsDB.updateOne(
+    { chatRoomId, chatId },
+    {
+      unreadCount: newUnreadCount,
+      latestMessage,
+      latestMessageTimestamp: latestMessage?.latestMessageTimestamp
+    },
+    { new: true }
+  )
+
+  // Emit header dulu kalau perlu (kondisi gabungan)
+  if (shouldEmitHeader && headerMessage) {
     io.emit('newMessage', {
       ...message,
-      unreadCount: newUnreadCount
-    });
-};
+      timeId,
+      messageId: headerMessage.messageId,
+      isHeader: true,
+      latestMessageTimestamp: headerMessage.latestMessageTimestamp
+    })
+  }
+
+  // Emit pesan biasa (seperti biasa)
+  io.emit('newMessage', {
+    ...message,
+    latestMessage: {
+      ...message.latestMessage,
+      timeId
+    },
+    unreadCount: newUnreadCount
+  })
+}
+
+// Fungsi tambahan → cari header untuk tanggal ini (sekalian ambil timeId)
+const getTodayHeader = async (chatId, chatRoomId) => {
+  const todayStart = dayjs().startOf('day').valueOf()
+  const todayEnd = dayjs().endOf('day').valueOf()
+
+  return await chatRoomDB.findOne({
+    chatId,
+    chatRoomId,
+    isHeader: true,
+    latestMessageTimestamp: { $gte: todayStart, $lte: todayEnd }
+  })
+}
 
 // const sendMessage = async (message, io, socket, client) => {
 //     await chatRoomDB.updateOne(
@@ -346,11 +398,108 @@ const handleReactionMessage = async (message, io, socket, client) => {
   }
 };
 
+const handleDeleteMessage = async (message, io, socket, client) => {
+  try {
+    const {
+      chatRoomId,
+      chatId,
+      messageId,
+      senderUserId,
+      eventType,
+      deletionType: requestedDeletionType
+    } = message
+
+    const priority = { 'me': 1, 'everyone': 2, 'permanent': 3 }
+
+    // 1. Cari pesan yang akan dihapus
+    const targetMessage = await chatRoomDB.findOne({
+      chatRoomId,
+      chatId,
+      messageId
+    })
+
+    if (!targetMessage) {
+      console.log(`Message not found: ${messageId}`)
+      return
+    }
+
+    const existingEntry = targetMessage.isDeleted.find(entry => entry.senderUserId === senderUserId)
+
+    // Helper untuk emit dengan isDeleted terbaru (tanpa property tambahan)
+    const emitWithLatestIsDeleted = async (actionLog) => {
+      const updatedMessage = await chatRoomDB.findOne({ chatRoomId, chatId, messageId })
+      io.emit('newMessage', {
+        chatRoomId,
+        chatId,
+        messageId,
+        isDeleted: updatedMessage.isDeleted.map(item=>({
+          senderUserId: item.senderUserId,
+          deletionType: item.deletionType
+        })),
+        eventType
+      })
+      console.log(actionLog)
+    }
+
+    if (existingEntry) {
+      const existingDeletionType = existingEntry.deletionType
+
+      if (existingDeletionType === requestedDeletionType) {
+        await emitWithLatestIsDeleted(`Message ${messageId} deletion (already exists) by ${senderUserId}`)
+        return
+      }
+
+      // Special case me + everyone → permanent
+      if (requestedDeletionType === 'me' && existingDeletionType === 'everyone') {
+        const upgradedDeletionType = 'permanent'
+        await chatRoomDB.updateOne(
+          { chatRoomId, chatId, messageId },
+          { $set: { "isDeleted.$[elem].deletionType": upgradedDeletionType } },
+          { arrayFilters: [{ "elem.senderUserId": senderUserId }] }
+        )
+        await emitWithLatestIsDeleted(`Message ${messageId} deletion (me + everyone → upgraded to permanent) by ${senderUserId}`)
+        return
+      }
+
+      // Kalau existing > request → skip update
+      if (priority[existingDeletionType] > priority[requestedDeletionType]) {
+        await emitWithLatestIsDeleted(`Message ${messageId} deletion (skip update, higher existing) by ${senderUserId}`)
+        return
+      }
+
+      // Kalau request > existing → update pakai request
+      await chatRoomDB.updateOne(
+        { chatRoomId, chatId, messageId },
+        { $set: { "isDeleted.$[elem].deletionType": requestedDeletionType } },
+        { arrayFilters: [{ "elem.senderUserId": senderUserId }] }
+      )
+      await emitWithLatestIsDeleted(`Message ${messageId} deletion (updated ${existingDeletionType} → ${requestedDeletionType}) by ${senderUserId}`)
+      return
+    }
+
+    // Kalau belum ada senderUserId → tambahkan baru
+    await chatRoomDB.updateOne(
+      { chatRoomId, chatId, messageId },
+      {
+        $addToSet: {
+          isDeleted: { senderUserId, deletionType: requestedDeletionType }
+        }
+      }
+    )
+    await emitWithLatestIsDeleted(`Message ${messageId} deletion (new entry ${requestedDeletionType}) by ${senderUserId}`)
+
+  } catch (error) {
+    console.error('Error handling delete message:', error)
+  }
+}
+
 const handleGetSendMessage = async (message, io, socket, client) => {
     if (message?.eventType === 'send-message') {
         sendMessage(message, io, socket, client)
     }else if(message?.eventType === 'reaction-message'){
         handleReactionMessage(message, io, socket, client)
+    }else if(message?.eventType === 'delete-message'){
+        handleDeleteMessage(message, io, socket, client)
     }
 }
 
