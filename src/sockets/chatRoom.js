@@ -150,6 +150,8 @@ const sendMessage = async (message, io, socket, client) => {
       timeId
     })
     await headerMessage.save()
+  }else {
+    timeId = headerMessageToday.timeId
   }
 
   // Tambahkan pesan utama (dengan timeId yang sama)
