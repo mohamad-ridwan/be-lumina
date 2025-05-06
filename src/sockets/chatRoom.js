@@ -129,8 +129,12 @@ const sendMessage = async (message, io, socket, client) => {
   const chatRoomId = message?.chatRoomId
   const chatId = message?.chatId
 
+  const todayStart = dayjs().startOf('day').valueOf()
+  const todayEnd = dayjs().endOf('day').valueOf()
+
   // Cari header yang ada hari ini
-  const headerMessageToday = await getTodayHeader(chatId, chatRoomId)
+  // const headerMessageToday = await getTodayHeader(chatId, chatRoomId, todayStart, todayEnd)
+  const headerMessageToday = false
 
   let timeId
   let headerMessage
@@ -157,46 +161,48 @@ const sendMessage = async (message, io, socket, client) => {
   }
 
   // Cek apakah recipient perlu header juga (kalau datanya kosong → dia butuh)
-  const recipientChatRoom = await chatRoomDB.find({
-      chatId,
-      chatRoomId,
-      $nor: [{
-          isDeleted: {
-              $elemMatch: {
-                  senderUserId: recipientProfileId,
-                  deletionType: { $in: ['me', 'permanent'] }
-              }
-          }
-      }]
-  })
-  // ==== Cek apakah semua item adalah header ====
-  const headers = recipientChatRoom.filter(msg => {
-    const itemDate = dayjs(Number(msg?.latestMessageTimestamp)).startOf('day')
-    return msg.isHeader === true && formatDate(itemDate) === 'Today'
-  });
-  const nonHeaders = recipientChatRoom.filter(msg => {
-    const itemDate = dayjs(Number(msg?.latestMessageTimestamp)).startOf('day')
-    return !msg.isHeader && formatDate(itemDate) === 'Today'
-  });
+  // const recipientChatRoom = await chatRoomDB.find({
+  //     chatId,
+  //     chatRoomId,
+  //     $nor: [{
+  //         isDeleted: {
+  //             $elemMatch: {
+  //                 senderUserId: recipientProfileId,
+  //                 deletionType: { $in: ['me', 'permanent'] }
+  //             }
+  //         }
+  //     }],
+  //     latestMessageTimestamp: { $gte: todayStart, $lte: todayEnd }
+  // })
+  // // ==== Cek apakah semua item adalah header ====
+  // const headers = recipientChatRoom.filter(msg => {
+  //   const itemDate = dayjs(Number(msg?.latestMessageTimestamp)).startOf('day')
+  //   return msg.isHeader === true && formatDate(itemDate) === 'Today'
+  // });
+  // const nonHeaders = recipientChatRoom.filter(msg => {
+  //   const itemDate = dayjs(Number(msg?.latestMessageTimestamp)).startOf('day')
+  //   return !msg.isHeader && formatDate(itemDate) === 'Today'
+  // });
 
-  const nonHeaderTimeIds = new Set(nonHeaders.map(msg => msg.timeId));
+  // const nonHeaderTimeIds = new Set(nonHeaders.map(msg => msg.timeId));
 
-  const headersWithoutMatchingNonHeader = headers.filter(header => 
-    !nonHeaderTimeIds.has(header.timeId)
-  );
+  // const headersWithoutMatchingNonHeader = headers.filter(header => 
+  //   !nonHeaderTimeIds.has(header.timeId)
+  // );
 
-  const allItemsAreOrphanHeaders = 
-    recipientChatRoom.length > 0 && !recipientChatRoom.every(msg => {
-      const itemDate = dayjs(Number(msg?.latestMessageTimestamp)).startOf('day')
-      return msg.isHeader === true && formatDate(itemDate) === 'Today'
-    }) &&
-    headersWithoutMatchingNonHeader.length === headers.length;
+  // const allItemsAreOrphanHeaders = 
+  //   recipientChatRoom.length > 0 && !recipientChatRoom.every(msg => {
+  //     const itemDate = dayjs(Number(msg?.latestMessageTimestamp)).startOf('day')
+  //     return msg.isHeader === true && formatDate(itemDate) === 'Today'
+  //   }) &&
+  //   headersWithoutMatchingNonHeader.length === headers.length;
 
-  // Siapa saja yang perlu header
-  const shouldEmitHeaderToSender = isNeedHeaderDate
-  const shouldEmitHeaderToRecipient = allItemsAreOrphanHeaders
+  // // Siapa saja yang perlu header
+  // const shouldEmitHeaderToSender = isNeedHeaderDate
+  // const shouldEmitHeaderToRecipient = allItemsAreOrphanHeaders
 
-  const shouldEmitHeader = shouldEmitHeaderToSender || shouldEmitHeaderToRecipient
+  // const shouldEmitHeader = shouldEmitHeaderToSender || shouldEmitHeaderToRecipient
+  const shouldEmitHeader = false
 
   // Tambahkan pesan utama (dengan timeId yang sama)
   const chatRoomData = {
@@ -264,10 +270,7 @@ const sendMessage = async (message, io, socket, client) => {
 }
 
 // Fungsi tambahan → cari header untuk tanggal ini (sekalian ambil timeId)
-const getTodayHeader = async (chatId, chatRoomId) => {
-  const todayStart = dayjs().startOf('day').valueOf()
-  const todayEnd = dayjs().endOf('day').valueOf()
-
+const getTodayHeader = async (chatId, chatRoomId, todayStart, todayEnd) => {
   return await chatRoomDB.findOne({
     chatId,
     chatRoomId,
