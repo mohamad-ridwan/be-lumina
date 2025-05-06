@@ -140,8 +140,8 @@ const sendMessage = async (message, io, socket, client) => {
 
   if (headerMessageToday) {
     // ✅ Header sudah ada
-    timeId = headerMessageToday.timeId
-    headerMessage = headerMessageToday
+    // timeId = headerMessageToday.timeId
+    // headerMessage = headerMessageToday
   } else {
     // ❌ Belum ada header → buat header baru
     timeId = generateRandomId(15)
@@ -201,7 +201,7 @@ const sendMessage = async (message, io, socket, client) => {
   // const shouldEmitHeaderToRecipient = allItemsAreOrphanHeaders
 
   // const shouldEmitHeader = shouldEmitHeaderToSender || shouldEmitHeaderToRecipient
-  const shouldEmitHeader = false
+  // const shouldEmitHeader = false
 
   // Tambahkan pesan utama (dengan timeId yang sama)
   const chatRoomData = {
@@ -247,7 +247,7 @@ const sendMessage = async (message, io, socket, client) => {
   )
 
   // Emit header dulu kalau perlu (kondisi gabungan)
-  if (shouldEmitHeader && headerMessage) {
+  if (headerMessage) {
     io.emit('newMessage', {
       ...message,
       timeId,
