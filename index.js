@@ -10,10 +10,10 @@ const { customHeader } = require('./src/utils/middlewares');
 const { chatRoom } = require('./src/sockets/chatRoom');
 const { usersSocket } = require('./src/sockets/users');
 const { chatsSocket } = require('./src/sockets/chats');
+const { origin } = require('./src/constant');
 
 const app = express()
 const server = http.createServer(app); // Buat server HTTP
-const origin = ["https://lumina-a8fa3.web.app", "http://localhost:3125"]
 const io = socketIo(server, { // Inisialisasi Socket.io
     cors: {
         origin, // Sesuaikan dengan origin aplikasi client Anda
