@@ -133,8 +133,7 @@ const sendMessage = async (message, io, socket, client) => {
   const todayEnd = dayjs().endOf('day').valueOf()
 
   // Cari header yang ada hari ini
-  // const headerMessageToday = await getTodayHeader(chatId, chatRoomId, todayStart, todayEnd)
-  const headerMessageToday = false
+  const headerMessageToday = await getTodayHeader(chatId, chatRoomId, todayStart, todayEnd)
 
   let timeId
   let headerMessage
