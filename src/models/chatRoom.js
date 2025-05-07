@@ -48,7 +48,10 @@ const chatRoom = new Schema(
                 deletionType: {type: String},
             }
         ],
-        timeId: { type: String }
+        timeId: { type: String },
+        document: {
+            type: Object
+        }
     },
     {
         timestamp: true,

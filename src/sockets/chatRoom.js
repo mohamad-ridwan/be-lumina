@@ -169,6 +169,9 @@ const sendMessage = async (message, io, socket, client) => {
   if (latestMessage?.replyView) {
     chatRoomData.replyView = latestMessage.replyView
   }
+  if(latestMessage?.document){
+    chatRoomData.document = latestMessage.document
+  }
 
   const newChatRoom = new chatRoomDB(chatRoomData)
   await newChatRoom.save()
