@@ -10,7 +10,8 @@ const { customHeader } = require('./src/utils/middlewares');
 const { chatRoom } = require('./src/sockets/chatRoom');
 const { usersSocket } = require('./src/sockets/users');
 const { chatsSocket } = require('./src/sockets/chats');
-const { origin } = require('./src/constant');
+
+const origin = ["https://lumina-id.web.app", "https://lumina-a8fa3.web.app", "http://localhost:3125"]
 
 const app = express()
 const server = http.createServer(app); // Buat server HTTP

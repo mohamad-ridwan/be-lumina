@@ -15,6 +15,4 @@ const HTTP_STATUS_CODE = {
     ACCOUNT_ALREADY_USE: 409
 };
 
-const origin = ["https://lumina-id.web.app", "https://lumina-a8fa3.web.app", "http://localhost:3125"]
-
-module.exports = { HTTP_STATUS_CODE, origin };
+module.exports = { HTTP_STATUS_CODE };
