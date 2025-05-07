@@ -9,7 +9,7 @@ const weekday = require('dayjs/plugin/weekday');
 const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
 const { generateRandomId } = require('../helpers/generateRandomId');
-const { formatDate } = require('../helpers/general');
+const { formatDate, generateBase64ThumbnailFromUrl } = require('../helpers/general');
 
 dayjs.extend(isToday);
 dayjs.extend(isYesterday);
@@ -171,6 +171,13 @@ const sendMessage = async (message, io, socket, client) => {
   }
   if(latestMessage?.document){
     chatRoomData.document = latestMessage.document
+
+    if(latestMessage.messageType === 'image'){
+      const thumbnail = await generateBase64ThumbnailFromUrl(latestMessage.document.url)
+      if(thumbnail){
+        chatRoomData.document.thumbnail = thumbnail
+      }
+    }
   }
 
   const newChatRoom = new chatRoomDB(chatRoomData)

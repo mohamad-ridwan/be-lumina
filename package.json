@@ -17,7 +17,9 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.13.0",
+    "node-fetch": "^2.7.0",
     "redis": "^4.7.0",
+    "sharp": "^0.34.1",
     "socket.io": "^4.8.1"
   },
   "devDependencies": {

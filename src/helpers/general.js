@@ -4,6 +4,8 @@ const isToday = require('dayjs/plugin/isToday');
 const isYesterday = require('dayjs/plugin/isYesterday');
 const weekOfYear = require('dayjs/plugin/weekOfYear');
 const weekday = require('dayjs/plugin/weekday');
+ const sharp = require('sharp')
+ const fetch = require('node-fetch')
 
 dayjs.extend(isToday);
 dayjs.extend(isYesterday);
@@ -28,4 +30,22 @@ const formatDate = (date) => {
     }
   }
 
-  module.exports = { formatDate }
+  async function generateBase64ThumbnailFromUrl(imageUrl) {
+    const response = await fetch(imageUrl)
+    if (!response.ok) {
+      throw new Error(`Failed to fetch image: ${response.statusText}`)
+    }
+  
+    const imageBuffer = await response.buffer()
+  
+    const resizedBuffer = await sharp(imageBuffer)
+      .resize(20, 20)
+      .blur()
+      .toFormat('jpeg')
+      .toBuffer()
+  
+    const base64 = `data:image/jpeg;base64,${resizedBuffer.toString('base64')}`
+    return base64
+  }
+
+  module.exports = { formatDate, generateBase64ThumbnailFromUrl }
