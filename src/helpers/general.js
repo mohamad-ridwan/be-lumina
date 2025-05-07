@@ -39,9 +39,8 @@ const formatDate = (date) => {
     const imageBuffer = await response.buffer()
   
     const resizedBuffer = await sharp(imageBuffer)
-      .resize(20, 20)
+      .jpeg({quality: 1})
       .blur()
-      .toFormat('jpeg')
       .toBuffer()
   
     const base64 = `data:image/jpeg;base64,${resizedBuffer.toString('base64')}`
