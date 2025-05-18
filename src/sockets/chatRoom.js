@@ -430,7 +430,6 @@ const handleReactionMessage = async (message, io, socket, client) => {
 
 const handleUpdateLatestMessageOnDeletedMessage = async (
   message,
-  io,
   latestMessageMainUserId,
   latestMessageSecondUserId
 ) => {
@@ -450,13 +449,6 @@ const handleUpdateLatestMessageOnDeletedMessage = async (
     if (!chatsCurrently?.latestMessage) {
       return;
     }
-
-    // const latestMessages = chatsCurrently.latestMessage?.filter(
-    //   (msg) => msg?.messageId === messageId
-    // );
-    // if (latestMessages.length === 0) {
-    //   return;
-    // }
 
     const latestMessageUserCurrently = chatsCurrently.latestMessage.find(
       (msg) => msg?.userId === senderUserId
@@ -511,13 +503,15 @@ const handleUpdateLatestMessageOnDeletedMessage = async (
       const updatedLatestMessages = chatsCurrently.latestMessage;
       updatedLatestMessages[latestMessageIndex] = newLatestMessage;
 
-      await chatsDB.updateOne(
+      const result = await chatsDB.findOneAndUpdate(
         { chatRoomId, chatId },
         {
           latestMessage: updatedLatestMessages,
         },
         { new: true }
       );
+
+      return result?.latestMessage;
     } else if (requestedDeletionType === "everyone") {
       const latestMessages = chatsCurrently.latestMessage;
       const indexLatestMessageMainUserId = latestMessages?.findIndex(
@@ -660,13 +654,14 @@ const handleUpdateLatestMessageOnDeletedMessage = async (
       }
 
       if (isMustUpdatedLatestMessages) {
-        await chatsDB.updateOne(
+        const result = await chatsDB.findOneAndUpdate(
           { chatRoomId, chatId },
           {
             latestMessage: latestMessages,
           },
           { new: true }
         );
+        return result?.latestMessage;
       }
     }
   } catch (error) {
@@ -703,26 +698,6 @@ const handleDeleteMessage = async (message, io, socket, client) => {
     const existingEntry = targetMessage.isDeleted.find(
       (entry) => entry.senderUserId === senderUserId
     );
-
-    // Helper untuk emit dengan isDeleted terbaru (tanpa property tambahan)
-    const emitWithLatestIsDeleted = async (actionLog) => {
-      const updatedMessage = await chatRoomDB.findOne({
-        chatRoomId,
-        chatId,
-        messageId,
-      });
-      io.emit("newMessage", {
-        chatRoomId,
-        chatId,
-        messageId,
-        isDeleted: updatedMessage.isDeleted.map((item) => ({
-          senderUserId: item.senderUserId,
-          deletionType: item.deletionType,
-        })),
-        eventType,
-      });
-      console.log(actionLog);
-    };
 
     let isMustUpdatedLatestMessages = false;
 
@@ -772,6 +747,43 @@ const handleDeleteMessage = async (message, io, socket, client) => {
       isMustUpdatedLatestMessages = true;
     }
 
+    // Helper untuk emit dengan isDeleted terbaru (tanpa property tambahan)
+    const emitWithLatestIsDeleted = async (actionLog) => {
+      const updatedMessage = await chatRoomDB.findOne({
+        chatRoomId,
+        chatId,
+        messageId,
+      });
+      // handle updated to chats db
+      let newLatestMessagesData = [];
+      if (isMustUpdatedLatestMessages || latestMessageSecondUserId) {
+        const updatedLatestMessages =
+          await handleUpdateLatestMessageOnDeletedMessage(
+            message,
+            latestMessageMainUserId,
+            latestMessageSecondUserId
+          );
+        if (updatedLatestMessages?.length > 0) {
+          newLatestMessagesData = updatedLatestMessages;
+        }
+      }
+      let sendNewMessageData = {
+        chatRoomId,
+        chatId,
+        messageId,
+        isDeleted: updatedMessage.isDeleted.map((item) => ({
+          senderUserId: item.senderUserId,
+          deletionType: item.deletionType,
+        })),
+        eventType,
+      };
+      if (newLatestMessagesData.length > 0) {
+        sendNewMessageData.latestMessage = newLatestMessagesData;
+      }
+      io.emit("newMessage", sendNewMessageData);
+      console.log(actionLog);
+    };
+
     if (existingEntry) {
       const existingDeletionType = existingEntry.deletionType;
 
@@ -818,14 +830,14 @@ const handleDeleteMessage = async (message, io, socket, client) => {
       );
 
       // handle updated to chats db
-      if (isMustUpdatedLatestMessages || latestMessageSecondUserId) {
-        handleUpdateLatestMessageOnDeletedMessage(
-          message,
-          io,
-          latestMessageMainUserId,
-          latestMessageSecondUserId
-        );
-      }
+      // if (isMustUpdatedLatestMessages || latestMessageSecondUserId) {
+      //   handleUpdateLatestMessageOnDeletedMessage(
+      //     message,
+      //     io,
+      //     latestMessageMainUserId,
+      //     latestMessageSecondUserId
+      //   );
+      // }
       return;
     }
 
@@ -841,15 +853,15 @@ const handleDeleteMessage = async (message, io, socket, client) => {
     await emitWithLatestIsDeleted(
       `Message ${messageId} deletion (new entry ${requestedDeletionType}) by ${senderUserId}`
     );
-    // handle updated to chats db
-    if (isMustUpdatedLatestMessages || latestMessageSecondUserId) {
-      handleUpdateLatestMessageOnDeletedMessage(
-        message,
-        io,
-        latestMessageMainUserId,
-        latestMessageSecondUserId
-      );
-    }
+    // // handle updated to chats db
+    // if (isMustUpdatedLatestMessages || latestMessageSecondUserId) {
+    //   handleUpdateLatestMessageOnDeletedMessage(
+    //     message,
+    //     io,
+    //     latestMessageMainUserId,
+    //     latestMessageSecondUserId
+    //   );
+    // }
   } catch (error) {
     console.error("Error handling delete message:", error);
   }
