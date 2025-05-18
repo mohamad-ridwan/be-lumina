@@ -490,7 +490,19 @@ const handleUpdateLatestMessageOnDeletedMessage = async (
         .sort({ latestMessageTimestamp: -1 }) // urutkan dari yang terbaru
         .lean(); // optional: untuk dapat plain JS object
       if (!latestMessage?.chatRoomId) {
-        return;
+        let newLatestMessages = chatsCurrently?.latestMessage;
+        newLatestMessages = newLatestMessages.filter(
+          (msg) => msg?.userId !== senderUserId
+        );
+
+        const result = await chatsDB.findOneAndUpdate(
+          { chatRoomId, chatId },
+          {
+            latestMessage: newLatestMessages,
+          },
+          { new: true }
+        );
+        return result?.latestMessage;
       }
 
       const newLatestMessage = {
