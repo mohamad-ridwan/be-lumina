@@ -264,12 +264,23 @@ const sendMessage = async (message, io, socket, client) => {
   // Emit header dulu kalau perlu (kondisi gabungan)
   if (headerMessage?.messageId) {
     io.emit("newMessage", {
-      ...message,
+      chatId,
+      chatRoomId,
+      eventType: message.eventType,
+      isNeedHeaderDate,
+      recipientProfileId,
       timeId,
       messageId: headerMessage.messageId,
       isHeader: true,
       latestMessageTimestamp: headerMessage.latestMessageTimestamp,
     });
+    // io.emit("newMessage", {
+    //   ...message,
+    //   timeId,
+    //   messageId: headerMessage.messageId,
+    //   isHeader: true,
+    //   latestMessageTimestamp: headerMessage.latestMessageTimestamp,
+    // });
   }
 
   // Emit pesan biasa (seperti biasa)
