@@ -816,6 +816,16 @@ const handleDeleteMessage = async (message, io, socket, client) => {
       await emitWithLatestIsDeleted(
         `Message ${messageId} deletion (updated ${existingDeletionType} → ${requestedDeletionType}) by ${senderUserId}`
       );
+
+      // handle updated to chats db
+      if (isMustUpdatedLatestMessages || latestMessageSecondUserId) {
+        handleUpdateLatestMessageOnDeletedMessage(
+          message,
+          io,
+          latestMessageMainUserId,
+          latestMessageSecondUserId
+        );
+      }
       return;
     }
 
