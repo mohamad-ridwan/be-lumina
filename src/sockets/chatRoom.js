@@ -428,6 +428,252 @@ const handleReactionMessage = async (message, io, socket, client) => {
   }
 };
 
+const handleUpdateLatestMessageOnDeletedMessage = async (
+  message,
+  io,
+  latestMessageMainUserId,
+  latestMessageSecondUserId
+) => {
+  try {
+    const {
+      chatRoomId,
+      chatId,
+      messageId,
+      senderUserId,
+      secondProfileId,
+      eventType,
+      deletionType: requestedDeletionType,
+    } = message;
+
+    const chatsCurrently = await chatsDB.findOne({ chatRoomId, chatId });
+
+    if (!chatsCurrently?.latestMessage) {
+      return;
+    }
+
+    // const latestMessages = chatsCurrently.latestMessage?.filter(
+    //   (msg) => msg?.messageId === messageId
+    // );
+    // if (latestMessages.length === 0) {
+    //   return;
+    // }
+
+    const latestMessageUserCurrently = chatsCurrently.latestMessage.find(
+      (msg) => msg?.userId === senderUserId
+    );
+    if (requestedDeletionType === "me" && !latestMessageUserCurrently) {
+      return;
+    }
+    if (
+      requestedDeletionType === "me" ||
+      requestedDeletionType === "permanent"
+    ) {
+      const latestMessage = await chatRoomDB
+        .findOne({
+          chatId,
+          chatRoomId,
+          isHeader: { $ne: true },
+          $nor: [
+            {
+              isDeleted: {
+                $elemMatch: {
+                  senderUserId: senderUserId,
+                  deletionType: { $in: ["me", "permanent"] },
+                },
+              },
+            },
+          ],
+        })
+        .sort({ latestMessageTimestamp: -1 }) // urutkan dari yang terbaru
+        .lean(); // optional: untuk dapat plain JS object
+      if (!latestMessage?.chatRoomId) {
+        return;
+      }
+
+      const newLatestMessage = {
+        messageId: latestMessage.messageId,
+        senderUserId: latestMessage.senderUserId,
+        messageType: latestMessage.messageType,
+        textMessage: latestMessage.textMessage,
+        latestMessageTimestamp: latestMessage.latestMessageTimestamp,
+        status: latestMessage.status,
+        userId: senderUserId,
+        timeId: latestMessage.timeId,
+        isDeleted: latestMessage?.isDeleted ?? [],
+      };
+      if (latestMessage?.document) {
+        newLatestMessage.document = latestMessage.document;
+      }
+
+      const latestMessageIndex = chatsCurrently.latestMessage.findIndex(
+        (msg) => msg.userId === senderUserId
+      );
+      const updatedLatestMessages = chatsCurrently.latestMessage;
+      updatedLatestMessages[latestMessageIndex] = newLatestMessage;
+
+      await chatsDB.updateOne(
+        { chatRoomId, chatId },
+        {
+          latestMessage: updatedLatestMessages,
+        },
+        { new: true }
+      );
+    } else if (requestedDeletionType === "everyone") {
+      const latestMessages = chatsCurrently.latestMessage;
+      const indexLatestMessageMainUserId = latestMessages?.findIndex(
+        (msg) => msg?.userId === senderUserId
+      );
+      const indexLatestMessageSecondUserId = latestMessages?.findIndex(
+        (msg) => msg?.userId === secondProfileId
+      );
+
+      let isMustUpdatedLatestMessages = false;
+
+      if (latestMessageMainUserId?.messageId === messageId) {
+        const newLatestMessageMainUserId = await chatRoomDB
+          .findOne({
+            chatId,
+            chatRoomId,
+            isHeader: { $ne: true },
+            $nor: [
+              {
+                isDeleted: {
+                  $elemMatch: {
+                    senderUserId: senderUserId,
+                    deletionType: { $in: ["me", "permanent"] },
+                  },
+                },
+              },
+            ],
+          })
+          .sort({ latestMessageTimestamp: -1 }) // urutkan dari yang terbaru
+          .lean();
+
+        if (
+          newLatestMessageMainUserId?.chatRoomId &&
+          indexLatestMessageMainUserId !== -1
+        ) {
+          const newLatestMessage = {
+            messageId: newLatestMessageMainUserId.messageId,
+            senderUserId: newLatestMessageMainUserId.senderUserId,
+            messageType: newLatestMessageMainUserId.messageType,
+            textMessage: newLatestMessageMainUserId.textMessage,
+            latestMessageTimestamp:
+              newLatestMessageMainUserId.latestMessageTimestamp,
+            status: newLatestMessageMainUserId.status,
+            userId: senderUserId,
+            timeId: newLatestMessageMainUserId.timeId,
+            isDeleted: newLatestMessageMainUserId?.isDeleted ?? [],
+          };
+          if (newLatestMessageMainUserId?.document) {
+            newLatestMessage.document = newLatestMessageMainUserId.document;
+          }
+          latestMessages[indexLatestMessageMainUserId] = newLatestMessage;
+          isMustUpdatedLatestMessages = true;
+        } else if (
+          newLatestMessageMainUserId?.chatRoomId &&
+          indexLatestMessageMainUserId === -1
+        ) {
+          const newLatestMessage = {
+            messageId: newLatestMessageMainUserId.messageId,
+            senderUserId: newLatestMessageMainUserId.senderUserId,
+            messageType: newLatestMessageMainUserId.messageType,
+            textMessage: newLatestMessageMainUserId.textMessage,
+            latestMessageTimestamp:
+              newLatestMessageMainUserId.latestMessageTimestamp,
+            status: newLatestMessageMainUserId.status,
+            userId: senderUserId,
+            timeId: newLatestMessageMainUserId.timeId,
+            isDeleted: newLatestMessageMainUserId?.isDeleted ?? [],
+          };
+          if (newLatestMessageMainUserId?.document) {
+            newLatestMessage.document = newLatestMessageMainUserId.document;
+          }
+          latestMessages.push(newLatestMessage);
+          isMustUpdatedLatestMessages = true;
+        }
+      }
+
+      if (latestMessageSecondUserId?.messageId === messageId) {
+        const newLatestMessageSecondUserId = await chatRoomDB
+          .findOne({
+            chatId,
+            chatRoomId,
+            isHeader: { $ne: true },
+            $nor: [
+              {
+                isDeleted: {
+                  $elemMatch: {
+                    senderUserId: secondProfileId,
+                    deletionType: { $in: ["me", "permanent"] },
+                  },
+                },
+              },
+            ],
+          })
+          .sort({ latestMessageTimestamp: -1 }) // urutkan dari yang terbaru
+          .lean();
+
+        if (
+          newLatestMessageSecondUserId?.chatRoomId &&
+          indexLatestMessageSecondUserId !== -1
+        ) {
+          const newLatestMessage = {
+            messageId: newLatestMessageSecondUserId.messageId,
+            senderUserId: newLatestMessageSecondUserId.senderUserId,
+            messageType: newLatestMessageSecondUserId.messageType,
+            textMessage: newLatestMessageSecondUserId.textMessage,
+            latestMessageTimestamp:
+              newLatestMessageSecondUserId.latestMessageTimestamp,
+            status: newLatestMessageSecondUserId.status,
+            userId: secondProfileId,
+            timeId: newLatestMessageSecondUserId.timeId,
+            isDeleted: newLatestMessageSecondUserId?.isDeleted ?? [],
+          };
+          if (newLatestMessageSecondUserId?.document) {
+            newLatestMessage.document = newLatestMessageSecondUserId.document;
+          }
+          latestMessages[indexLatestMessageSecondUserId] = newLatestMessage;
+          isMustUpdatedLatestMessages = true;
+        } else if (
+          newLatestMessageSecondUserId?.chatRoomId &&
+          indexLatestMessageSecondUserId === -1
+        ) {
+          const newLatestMessage = {
+            messageId: newLatestMessageSecondUserId.messageId,
+            senderUserId: newLatestMessageSecondUserId.senderUserId,
+            messageType: newLatestMessageSecondUserId.messageType,
+            textMessage: newLatestMessageSecondUserId.textMessage,
+            latestMessageTimestamp:
+              newLatestMessageSecondUserId.latestMessageTimestamp,
+            status: newLatestMessageSecondUserId.status,
+            userId: secondProfileId,
+            timeId: newLatestMessageSecondUserId.timeId,
+            isDeleted: newLatestMessageSecondUserId?.isDeleted ?? [],
+          };
+          if (newLatestMessageSecondUserId?.document) {
+            newLatestMessage.document = newLatestMessageSecondUserId.document;
+          }
+          latestMessages.push(newLatestMessage);
+          isMustUpdatedLatestMessages = true;
+        }
+      }
+
+      if (isMustUpdatedLatestMessages) {
+        await chatsDB.updateOne(
+          { chatRoomId, chatId },
+          {
+            latestMessage: latestMessages,
+          },
+          { new: true }
+        );
+      }
+    }
+  } catch (error) {
+    console.error("Error handling delete message:", error);
+  }
+};
+
 const handleDeleteMessage = async (message, io, socket, client) => {
   try {
     const {
@@ -436,6 +682,7 @@ const handleDeleteMessage = async (message, io, socket, client) => {
       messageId,
       senderUserId,
       eventType,
+      secondProfileId,
       deletionType: requestedDeletionType,
     } = message;
 
@@ -476,6 +723,54 @@ const handleDeleteMessage = async (message, io, socket, client) => {
       });
       console.log(actionLog);
     };
+
+    let isMustUpdatedLatestMessages = false;
+
+    const latestMessageMainUserId = await chatRoomDB
+      .findOne({
+        chatId,
+        chatRoomId,
+        isHeader: { $ne: true },
+        $nor: [
+          {
+            isDeleted: {
+              $elemMatch: {
+                senderUserId: senderUserId,
+                deletionType: { $in: ["me", "permanent"] },
+              },
+            },
+          },
+        ],
+      })
+      .sort({ latestMessageTimestamp: -1 }) // urutkan dari yang terbaru
+      .lean();
+
+    let latestMessageSecondUserId = null;
+
+    if (requestedDeletionType === "everyone") {
+      latestMessageSecondUserId = await chatRoomDB
+        .findOne({
+          chatId,
+          chatRoomId,
+          isHeader: { $ne: true },
+          $nor: [
+            {
+              isDeleted: {
+                $elemMatch: {
+                  senderUserId: secondProfileId,
+                  deletionType: { $in: ["me", "permanent"] },
+                },
+              },
+            },
+          ],
+        })
+        .sort({ latestMessageTimestamp: -1 }) // urutkan dari yang terbaru
+        .lean();
+    }
+
+    if (messageId === latestMessageMainUserId.messageId) {
+      isMustUpdatedLatestMessages = true;
+    }
 
     if (existingEntry) {
       const existingDeletionType = existingEntry.deletionType;
@@ -536,6 +831,15 @@ const handleDeleteMessage = async (message, io, socket, client) => {
     await emitWithLatestIsDeleted(
       `Message ${messageId} deletion (new entry ${requestedDeletionType}) by ${senderUserId}`
     );
+    // handle updated to chats db
+    if (isMustUpdatedLatestMessages || latestMessageSecondUserId) {
+      handleUpdateLatestMessageOnDeletedMessage(
+        message,
+        io,
+        latestMessageMainUserId,
+        latestMessageSecondUserId
+      );
+    }
   } catch (error) {
     console.error("Error handling delete message:", error);
   }
