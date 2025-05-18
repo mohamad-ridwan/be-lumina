@@ -458,14 +458,14 @@ const handleUpdateLatestMessageOnDeletedMessage = async (
     const chatsCurrently = await chatsDB.findOne({ chatRoomId, chatId });
 
     if (!chatsCurrently?.latestMessage) {
-      return;
+      return [];
     }
 
     const latestMessageUserCurrently = chatsCurrently.latestMessage.find(
       (msg) => msg?.userId === senderUserId
     );
     if (requestedDeletionType === "me" && !latestMessageUserCurrently) {
-      return;
+      return chatsCurrently?.latestMessage ?? [];
     }
     if (
       requestedDeletionType === "me" ||
@@ -689,6 +689,7 @@ const handleUpdateLatestMessageOnDeletedMessage = async (
     }
   } catch (error) {
     console.error("Error handling delete message:", error);
+    return null;
   }
 };
 
@@ -779,6 +780,7 @@ const handleDeleteMessage = async (message, io, socket, client) => {
       });
       // handle updated to chats db
       let newLatestMessagesData = [];
+      let isUpdatedLatestMessage = false;
       if (isMustUpdatedLatestMessages || latestMessageSecondUserId) {
         const updatedLatestMessages =
           await handleUpdateLatestMessageOnDeletedMessage(
@@ -786,6 +788,9 @@ const handleDeleteMessage = async (message, io, socket, client) => {
             latestMessageMainUserId,
             latestMessageSecondUserId
           );
+        if (updatedLatestMessages) {
+          isUpdatedLatestMessage = true;
+        }
         if (updatedLatestMessages?.length > 0) {
           newLatestMessagesData = updatedLatestMessages;
         }
@@ -799,6 +804,7 @@ const handleDeleteMessage = async (message, io, socket, client) => {
           deletionType: item.deletionType,
         })),
         eventType,
+        isUpdatedLatestMessage,
       };
       if (newLatestMessagesData.length > 0) {
         sendNewMessageData.latestMessage = newLatestMessagesData;
