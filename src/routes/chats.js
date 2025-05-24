@@ -1,9 +1,8 @@
-const router = require('express').Router()
+const router = require("express").Router();
 
-const {
-    getChats,
-} = require('../controllers/chats')
+const { getChats, getChatsPagination } = require("../controllers/chats");
 
-router.get('/', getChats)
+// router.get('/', getChats)
+router.get("/", getChatsPagination);
 
-module.exports = router
+module.exports = router;
