@@ -3,17 +3,56 @@ const chats = require("../models/chats");
 
 exports.getChatsPagination = async (req, res, next) => {
   try {
-    const { userId, page = 1, limit = 20 } = req.query;
+    const { userId, limit = 10, chatId } = req.query;
 
     if (!userId || !userId.trim()) {
-      return res.status(400).json({ message: "userId required" });
+      return res.status(HTTP_STATUS_CODE.BAD_REQUEST).json({
+        message: "userId required",
+      });
     }
 
-    const pageNumber = parseInt(page);
     const limitNumber = parseInt(limit);
-    const skip = (pageNumber - 1) * limitNumber;
+    let anchorTimestamp = null;
 
-    const pipeline = [
+    // Cari timestamp dari chatId anchor (jika ada)
+    if (chatId) {
+      const anchorChat = await chats.aggregate([
+        {
+          $match: {
+            chatId: chatId,
+            userIds: { $in: [userId] },
+            latestMessage: { $exists: true, $ne: [] },
+          },
+        },
+        {
+          $addFields: {
+            latestUserMessage: {
+              $first: {
+                $filter: {
+                  input: "$latestMessage",
+                  as: "msg",
+                  cond: { $eq: ["$$msg.userId", userId] },
+                },
+              },
+            },
+          },
+        },
+        {
+          $project: {
+            latestUserMessageTimestamp: {
+              $toLong: "$latestUserMessage.latestMessageTimestamp",
+            },
+          },
+        },
+      ]);
+
+      if (anchorChat.length > 0) {
+        anchorTimestamp = anchorChat[0].latestUserMessageTimestamp;
+      }
+    }
+
+    // Pipeline dasar (untuk pagination + count)
+    const basePipeline = [
       {
         $match: {
           userIds: { $in: [userId] },
@@ -21,7 +60,6 @@ exports.getChatsPagination = async (req, res, next) => {
         },
       },
       {
-        // Tambahkan field 'latestUserMessageTimestamp' dari latestMessage yg match userId
         $addFields: {
           latestUserMessage: {
             $first: {
@@ -38,39 +76,44 @@ exports.getChatsPagination = async (req, res, next) => {
         $addFields: {
           latestUserMessageTimestamp: {
             $toLong: "$latestUserMessage.latestMessageTimestamp",
-            // atau gunakan $toDate jika field tersebut format ISO
           },
         },
       },
-      {
-        $sort: {
-          latestUserMessageTimestamp: -1,
-        },
-      },
-      {
-        $skip: skip,
-      },
-      {
-        $limit: limitNumber,
-      },
     ];
 
-    const chatsCurrently = await chats.aggregate(pipeline);
+    if (anchorTimestamp !== null) {
+      basePipeline.push({
+        $match: {
+          $expr: {
+            $lt: ["$latestUserMessageTimestamp", anchorTimestamp],
+          },
+        },
+      });
+    }
 
-    const total = await chats.countDocuments({
-      userIds: { $in: [userId] },
-      latestMessage: { $exists: true, $ne: [] },
-    });
+    // Hitung total data (tanpa pagination)
+    const countPipeline = [...basePipeline, { $count: "total" }];
+    const totalResult = await chats.aggregate(countPipeline);
+    const totalData = totalResult[0]?.total ?? 0;
 
-    const totalPage = Math.ceil(total / limitNumber);
+    // Tambahkan pagination
+    const paginatedPipeline = [
+      ...basePipeline,
+      { $sort: { latestUserMessageTimestamp: -1 } },
+      { $limit: limitNumber },
+    ];
 
-    return res.status(200).json({
+    const chatsCurrently = await chats.aggregate(paginatedPipeline);
+
+    const isNext = chatsCurrently.length === limitNumber;
+
+    return res.status(HTTP_STATUS_CODE.OK).json({
       message: "Chats Data",
       data: chatsCurrently,
-      page: pageNumber,
+      totalData,
       limit: limitNumber,
-      totalPage,
-      totalData: total,
+      isNext,
+      nextChatId: chatsCurrently[chatsCurrently.length - 1]?.chatId ?? null,
     });
   } catch (error) {
     next(error);
