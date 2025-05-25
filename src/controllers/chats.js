@@ -80,7 +80,10 @@ exports.getChatsPagination = async (req, res, next) => {
               {
                 latestMessage: {
                   $elemMatch: {
-                    textMessage: { $regex: search, $options: "i" },
+                    $or: [
+                      { textMessage: { $regex: search, $options: "i" } },
+                      { "document.caption": { $regex: search, $options: "i" } },
+                    ],
                   },
                 },
               },
