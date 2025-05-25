@@ -1,5 +1,6 @@
 const chatRoomDB = require("../models/chatRoom");
 const chatsDB = require("../models/chats");
+const usersDB = require("../models/users");
 const dayjs = require("dayjs");
 require("dayjs/locale/id");
 const isToday = require("dayjs/plugin/isToday");
@@ -261,6 +262,11 @@ const sendMessage = async (message, io, socket, client) => {
     { new: true }
   );
 
+  const senderUserId = updatedLatestMessages.find(
+    (msg) => msg.userId !== recipientProfileId
+  );
+  const senderUserProfile = await usersDB.findOne({ id: senderUserId?.userId });
+
   // Emit header dulu kalau perlu (kondisi gabungan)
   if (headerMessage?.messageId) {
     io.emit("newMessage", {
@@ -294,6 +300,10 @@ const sendMessage = async (message, io, socket, client) => {
   // })
   io.emit("newMessage", {
     ...message,
+    username: senderUserProfile?.username,
+    image: senderUserProfile?.image,
+    imgCropped: senderUserProfile?.imgCropped,
+    thumbnail: senderUserProfile?.thumbnail,
     latestMessage: updatedLatestMessages,
     unreadCount: newUnreadCount,
   });

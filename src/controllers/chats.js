@@ -1,9 +1,10 @@
 const { HTTP_STATUS_CODE } = require("../constant");
 const chats = require("../models/chats");
+const usersDB = require("../models/users");
 
 exports.getChatsPagination = async (req, res, next) => {
   try {
-    const { userId, limit = 10, chatId } = req.query;
+    const { userId, limit = 20, chatId, search = "" } = req.query;
 
     if (!userId || !userId.trim()) {
       return res.status(HTTP_STATUS_CODE.BAD_REQUEST).json({
@@ -14,7 +15,21 @@ exports.getChatsPagination = async (req, res, next) => {
     const limitNumber = parseInt(limit);
     let anchorTimestamp = null;
 
-    // Cari timestamp dari chatId anchor (jika ada)
+    // Cari userId dari hasil search username (jika ada search query)
+    let matchedUserIdsFromUsername = [];
+
+    if (search) {
+      const matchedUsers = await usersDB
+        .find({
+          username: { $regex: search, $options: "i" },
+          id: { $ne: userId }, // validasi: tidak termasuk userId sendiri
+        })
+        .select("id");
+
+      matchedUserIdsFromUsername = matchedUsers.map((user) => user.id);
+    }
+
+    // Ambil timestamp dari chatId anchor (jika ada)
     if (chatId) {
       const anchorChat = await chats.aggregate([
         {
@@ -51,12 +66,26 @@ exports.getChatsPagination = async (req, res, next) => {
       }
     }
 
-    // Pipeline dasar (untuk pagination + count)
+    // Pipeline dasar
     const basePipeline = [
       {
         $match: {
           userIds: { $in: [userId] },
           latestMessage: { $exists: true, $ne: [] },
+          ...(search && {
+            $or: [
+              ...(matchedUserIdsFromUsername.length > 0
+                ? [{ userIds: { $in: matchedUserIdsFromUsername } }]
+                : []),
+              {
+                latestMessage: {
+                  $elemMatch: {
+                    textMessage: { $regex: search, $options: "i" },
+                  },
+                },
+              },
+            ],
+          }),
         },
       },
       {
@@ -91,12 +120,12 @@ exports.getChatsPagination = async (req, res, next) => {
       });
     }
 
-    // Hitung total data (tanpa pagination)
+    // Hitung total
     const countPipeline = [...basePipeline, { $count: "total" }];
     const totalResult = await chats.aggregate(countPipeline);
     const totalData = totalResult[0]?.total ?? 0;
 
-    // Tambahkan pagination
+    // Pagination
     const paginatedPipeline = [
       ...basePipeline,
       { $sort: { latestUserMessageTimestamp: -1 } },
@@ -104,7 +133,6 @@ exports.getChatsPagination = async (req, res, next) => {
     ];
 
     const chatsCurrently = await chats.aggregate(paginatedPipeline);
-
     const isNext = chatsCurrently.length === limitNumber;
 
     return res.status(HTTP_STATUS_CODE.OK).json({
@@ -112,11 +140,13 @@ exports.getChatsPagination = async (req, res, next) => {
       data: chatsCurrently,
       totalData,
       limit: limitNumber,
+      itemCount: chatsCurrently.length,
       isNext,
       nextChatId: chatsCurrently[chatsCurrently.length - 1]?.chatId ?? null,
     });
   } catch (error) {
     next(error);
+    console.error("Error in getChatsPagination:", error);
   }
 };
 
