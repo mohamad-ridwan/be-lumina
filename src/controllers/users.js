@@ -13,7 +13,7 @@ exports.updateProfile = async (req, res, next) => {
         .json({ message: "User ID is required" });
     }
 
-    const { image, username, imgCropped } = req.body;
+    const { image, username, imgCropped, isDeleteImage } = req.body;
 
     // Build update object dynamically
     const updateFields = {};
@@ -27,6 +27,11 @@ exports.updateProfile = async (req, res, next) => {
     }
     if (username) updateFields.username = username;
     if (imgCropped) updateFields.imgCropped = imgCropped;
+    if (isDeleteImage) {
+      updateFields.image = null;
+      updateFields.thumbnail = null;
+      updateFields.imgCropped = null;
+    }
 
     if (Object.keys(updateFields).length === 0) {
       return res
