@@ -146,6 +146,115 @@ exports.getMessagesAround = async (req, res) => {
   }
 };
 
+exports.getMediaMessagesAround = async (req, res) => {
+  const { chatRoomId, messageId } = req.params;
+  const profileId = req.query.profileId;
+  const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+
+  if (!profileId) {
+    return res.status(400).json({ error: "Missing profileId in query" });
+  }
+
+  try {
+    // Temukan pesan target yang merupakan media (punya field document)
+    const targetMessage = await chatRoom.findOne({
+      chatRoomId,
+      messageId,
+      document: { $type: "object" },
+      $nor: [
+        {
+          isDeleted: {
+            $elemMatch: {
+              senderUserId: profileId,
+              deletionType: { $in: ["me", "permanent", "everyone"] },
+            },
+          },
+        },
+      ],
+    });
+
+    if (!targetMessage) {
+      return res
+        .status(404)
+        .json({ error: "Media message not found or deleted" });
+    }
+
+    const targetTimestamp = Number(targetMessage.latestMessageTimestamp);
+    const targetMessageId = targetMessage.messageId;
+    const halfLimit = Math.floor(limit / 2);
+
+    // Ambil media sebelum target
+    const beforeMessages = await chatRoom
+      .find({
+        chatRoomId,
+        document: { $type: "object" },
+        $nor: [
+          {
+            isDeleted: {
+              $elemMatch: {
+                senderUserId: profileId,
+                deletionType: { $in: ["me", "permanent"] },
+              },
+            },
+          },
+        ],
+        $or: [
+          { latestMessageTimestamp: { $lt: targetTimestamp } },
+          {
+            latestMessageTimestamp: targetTimestamp,
+            messageId: { $lt: targetMessageId },
+          },
+        ],
+      })
+      .sort({ latestMessageTimestamp: -1, messageId: -1 })
+      .limit(halfLimit);
+
+    // Ambil media sesudah target
+    const afterLimit = limit - beforeMessages.length - 1;
+
+    const afterMessages = await chatRoom
+      .find({
+        chatRoomId,
+        document: { $type: "object" },
+        $nor: [
+          {
+            isDeleted: {
+              $elemMatch: {
+                senderUserId: profileId,
+                deletionType: { $in: ["me", "permanent"] },
+              },
+            },
+          },
+        ],
+        $or: [
+          { latestMessageTimestamp: { $gt: targetTimestamp } },
+          {
+            latestMessageTimestamp: targetTimestamp,
+            messageId: { $gt: targetMessageId },
+          },
+        ],
+      })
+      .sort({ latestMessageTimestamp: 1, messageId: 1 })
+      .limit(afterLimit > 0 ? afterLimit : 0);
+
+    // Gabungkan semuanya
+    const result = [
+      ...beforeMessages.reverse(),
+      targetMessage,
+      ...afterMessages,
+    ];
+
+    res.json({
+      mediaMessages: result,
+      targetMessageId: messageId,
+      total: result.length,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
 exports.getMessagesPagination = async (req, res, next) => {
   try {
     const {
