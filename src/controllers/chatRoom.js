@@ -6,11 +6,13 @@ const { generateRandomId } = require("../helpers/generateRandomId");
 
 exports.getMessagesAround = async (req, res) => {
   const { chatRoomId, messageId } = req.params;
-  const profileId = req.query.profileId;
+  const { profileId, recipientId } = req.query;
   const limit = Math.min(parseInt(req.query.limit) || 50, 100); // Default 50, max 100
 
-  if (!profileId) {
-    return res.status(400).json({ error: "Missing profileId in query" });
+  if (!profileId || !recipientId) {
+    return res
+      .status(400)
+      .json({ error: "Missing profileId or recipientId in query" });
   }
 
   try {
@@ -24,6 +26,14 @@ exports.getMessagesAround = async (req, res) => {
             $elemMatch: {
               senderUserId: profileId,
               deletionType: { $in: ["me", "permanent", "everyone"] },
+            },
+          },
+        },
+        {
+          isDeleted: {
+            $elemMatch: {
+              senderUserId: recipientId,
+              deletionType: { $in: ["everyone"] },
             },
           },
         },
@@ -148,11 +158,13 @@ exports.getMessagesAround = async (req, res) => {
 
 exports.getMediaMessagesAround = async (req, res) => {
   const { chatRoomId, messageId } = req.params;
-  const profileId = req.query.profileId;
+  const { profileId, recipientId } = req.query;
   const limit = Math.min(parseInt(req.query.limit) || 20, 50);
 
-  if (!profileId) {
-    return res.status(400).json({ error: "Missing profileId in query" });
+  if (!profileId || !recipientId) {
+    return res
+      .status(400)
+      .json({ error: "Missing profileId or recipientId in query" });
   }
 
   try {
@@ -167,6 +179,14 @@ exports.getMediaMessagesAround = async (req, res) => {
             $elemMatch: {
               senderUserId: profileId,
               deletionType: { $in: ["me", "permanent", "everyone"] },
+            },
+          },
+        },
+        {
+          isDeleted: {
+            $elemMatch: {
+              senderUserId: recipientId,
+              deletionType: { $in: ["everyone"] },
             },
           },
         },
@@ -193,7 +213,15 @@ exports.getMediaMessagesAround = async (req, res) => {
             isDeleted: {
               $elemMatch: {
                 senderUserId: profileId,
-                deletionType: { $in: ["me", "permanent"] },
+                deletionType: { $in: ["me", "permanent", "everyone"] },
+              },
+            },
+          },
+          {
+            isDeleted: {
+              $elemMatch: {
+                senderUserId: recipientId,
+                deletionType: { $in: ["everyone"] },
               },
             },
           },
@@ -221,7 +249,15 @@ exports.getMediaMessagesAround = async (req, res) => {
             isDeleted: {
               $elemMatch: {
                 senderUserId: profileId,
-                deletionType: { $in: ["me", "permanent"] },
+                deletionType: { $in: ["me", "permanent", "everyone"] },
+              },
+            },
+          },
+          {
+            isDeleted: {
+              $elemMatch: {
+                senderUserId: recipientId,
+                deletionType: { $in: ["everyone"] },
               },
             },
           },
