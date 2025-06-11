@@ -16,6 +16,7 @@ const origin = [
   "https://lumina-a8fa3.web.app",
   "http://localhost:3125",
   "http://192.168.1.10:3125",
+  "http://localhost:4173",
 ];
 
 const app = express();
@@ -27,6 +28,8 @@ const io = socketIo(server, {
     methods: ["GET", "POST"],
   },
 });
+
+app.locals.io = io;
 
 const PORT = process.env.PORT || 4001;
 

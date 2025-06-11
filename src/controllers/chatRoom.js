@@ -3,6 +3,248 @@ const chats = require("../models/chats");
 const chatRoom = require("../models/chatRoom");
 const { HTTP_STATUS_CODE } = require("../constant");
 const { generateRandomId } = require("../helpers/generateRandomId");
+const path = require("path");
+const fs = require("fs").promises;
+const {
+  processVideo,
+  BASE_UPLOAD_DIR,
+  generateThumbnailFromVideo,
+} = require("../helpers/general");
+const { uploadFileToFirebase } = require("../utils/firebase");
+
+exports.uploadVideoMessage = async (req, res) => {
+  let originalInputFilePath = null; // Tambahkan ini untuk cleanup yang lebih baik
+  let compressedVideoFilePath = null; // Tambahkan ini untuk cleanup yang lebih baik
+  let downloadedVideoTempPath = null; // Untuk cleanup video yang didownload
+  let thumbnailTempFilePath = null; // Untuk cleanup thumbnail lokal
+
+  try {
+    if (!req.file) {
+      return res.status(400).send("Tidak ada file yang diupload.");
+    }
+    originalInputFilePath = req.file.path;
+
+    const message = JSON.parse(req.body.message);
+    const { chatRoomId, latestMessage } = message;
+    const { senderUserId, messageId, document } = latestMessage;
+
+    const io = req.app.locals.io;
+
+    const originalFileName = req.file.originalname;
+    const inputFilePath = req.file.path;
+    const mimetype = req.file.mimetype;
+
+    // Pastikan Anda menggunakan penamaan file output yang unik
+    const timestamp = Date.now();
+    const originalNameWithoutExt = path.parse(originalFileName).name;
+    const outputFileName = `compressed_${originalNameWithoutExt}_${timestamp}.mp4`; // <<< Pastikan unik!
+
+    const outputFilePath = path.join(BASE_UPLOAD_DIR, outputFileName);
+    compressedVideoFilePath = outputFilePath;
+
+    console.log("Memulai pemrosesan video...");
+
+    const { filePath: compressedFilePath, buffer: compressedBuffer } =
+      await processVideo(inputFilePath, outputFilePath, [], (percentage) => {
+        console.log(`Progress kompresi: ${percentage}%`);
+        // Anda bisa mengirim progress ke frontend di sini (misalnya via WebSocket)
+        io.emit("video-message-progress", {
+          ...message,
+          latestMessage: {
+            ...message.latestMessage,
+            document: {
+              ...message.latestMessage.document,
+              thumbnail: document.thumbnail,
+              progress: percentage,
+            },
+          },
+        });
+
+        chatRoom
+          .updateOne(
+            { chatRoomId: chatRoomId, messageId: messageId },
+            { $set: { "document.progress": percentage } }
+          )
+          .then(() => {
+            console.log(
+              `Progress untuk message ${messageId} di chatRoom ${chatRoomId} diupdate ke ${percentage}%`
+            );
+          })
+          .catch((dbErr) => {
+            console.error(
+              `Gagal mengupdate progress database untuk message ${messageId}:`,
+              dbErr
+            );
+            // Anda mungkin ingin mengirim notifikasi error ke frontend juga
+            // io.to(processId).emit("video-message-progress-error", { messageId, error: dbErr.message });
+          });
+      });
+
+    const compressedFileBase64 = compressedBuffer.toString("base64");
+
+    const destinationPath = `lumina/videos/lumina-${generateRandomId(15)}`;
+
+    const downloadURL = await uploadFileToFirebase(
+      compressedBuffer,
+      destinationPath,
+      mimetype,
+      io,
+      message
+    );
+
+    if (!downloadURL) {
+      throw new Error(
+        "Video download URL tidak tersedia untuk membuat thumbnail."
+      );
+    }
+
+    // const thumbnailFileName = `thumbnail_${originalNameWithoutExt}_${timestamp}.jpg`;
+    // const thumbnailTempDir = BASE_UPLOAD_DIR; // Gunakan direktori yang sama untuk file sementara
+
+    // const { thumbnailBuffer, videoTempPath, thumbnailPath } =
+    //   await generateThumbnailFromVideo(
+    //     downloadURL,
+    //     thumbnailTempDir,
+    //     thumbnailFileName,
+    //     5 // Ambil thumbnail dari detik ke-5
+    //   );
+
+    // downloadedVideoTempPath = videoTempPath; // Simpan untuk cleanup
+    // thumbnailTempFilePath = path.join(BASE_UPLOAD_DIR, thumbnailFileName);
+
+    // const thumbnailStorageDestinationPath = `lumina/videos/lumina-${generateRandomId(
+    //   15
+    // )}`;
+    // const thumbnailMimetype = "image/jpeg"; // Sesuaikan jika output PNG
+    // const thumbnailDownloadURL = await uploadFileToFirebase(
+    //   thumbnailBuffer,
+    //   thumbnailStorageDestinationPath,
+    //   thumbnailMimetype
+    // );
+    // console.log(`Thumbnail diunggah ke Firebase Storage: ***`);
+
+    io.emit("video-message-progress-done", {
+      ...message,
+      latestMessage: {
+        ...message.latestMessage,
+        document: {
+          ...message.latestMessage.document,
+          mimetype,
+          url: downloadURL,
+          thumbnail: document.thumbnail,
+          progress: 100,
+          isProgressDone: true,
+          isCancelled: false,
+        },
+      },
+    });
+
+    chatRoom
+      .updateOne(
+        { chatRoomId: chatRoomId, messageId: messageId },
+        {
+          $set: {
+            "document.progress": 100,
+            "document.isProgressDone": true,
+            "document.url": downloadURL,
+          },
+        }
+      )
+      .then(() => {
+        console.log(
+          `Progress untuk message ${messageId} di chatRoom ${chatRoomId} diupdate ke ${100}%`
+        );
+      })
+      .catch((dbErr) => {
+        console.error(
+          `Gagal mengupdate progress database untuk message ${messageId}:`,
+          dbErr
+        );
+        // Anda mungkin ingin mengirim notifikasi error ke frontend juga
+        // io.to(processId).emit("video-message-progress-error", { messageId, error: dbErr.message });
+      });
+
+    console.log("Pemrosesan video selesai.");
+
+    // --- Mengirimkan Base64 ke Client ---
+    res.status(200).json({
+      message: "Video berhasil diupload dan diproses!",
+      originalFile: originalFileName,
+      // Tidak perlu kirim compressedFilePath jika hanya butuh Base64
+      compressedFileBase64: compressedFileBase64, // Mengirim Buffer sebagai Base64
+    });
+  } catch (error) {
+    console.error("Error dalam getBufferVideo:", error);
+    // Hapus file yang sudah diunggah oleh Multer jika terjadi error pemrosesan
+    if (req.file && req.file.path) {
+      fs.unlink(req.file.path, (unlinkErr) => {
+        if (unlinkErr)
+          console.error(
+            `Gagal menghapus file terunggah setelah error ${req.file.path}:`,
+            unlinkErr
+          );
+      });
+    }
+    res
+      .status(500)
+      .send("Terjadi kesalahan server internal selama pemrosesan video.");
+  } finally {
+    if (originalInputFilePath) {
+      await fs
+        .unlink(originalInputFilePath)
+        .then(() => console.log(`File asli dihapus: ${originalInputFilePath}`))
+        .catch((err) =>
+          console.error(
+            `Gagal menghapus file input asli ${originalInputFilePath}:`,
+            err
+          )
+        );
+    }
+    if (compressedVideoFilePath) {
+      await fs
+        .unlink(compressedVideoFilePath)
+        .then(() =>
+          console.log(
+            `File terkompresi lokal dihapus: ${compressedVideoFilePath}`
+          )
+        )
+        .catch((err) =>
+          console.error(
+            `Gagal menghapus file terkompresi lokal ${compressedVideoFilePath}:`,
+            err
+          )
+        );
+    }
+    if (downloadedVideoTempPath) {
+      await fs
+        .unlink(downloadedVideoTempPath)
+        .then(() =>
+          console.log(
+            `Video yang didownload sementara dihapus: ${downloadedVideoTempPath}`
+          )
+        )
+        .catch((err) =>
+          console.error(
+            `Gagal menghapus video yang didownload sementara ${downloadedVideoTempPath}:`,
+            err
+          )
+        );
+    }
+    if (thumbnailTempFilePath) {
+      await fs
+        .unlink(thumbnailTempFilePath)
+        .then(() =>
+          console.log(`Thumbnail sementara dihapus: ${thumbnailTempFilePath}`)
+        )
+        .catch((err) =>
+          console.error(
+            `Gagal menghapus thumbnail sementara ${thumbnailTempFilePath}:`,
+            err
+          )
+        );
+    }
+  }
+};
 
 exports.getMessagesAround = async (req, res) => {
   const { chatRoomId, messageId } = req.params;
@@ -14,6 +256,32 @@ exports.getMessagesAround = async (req, res) => {
       .status(400)
       .json({ error: "Missing profileId or recipientId in query" });
   }
+
+  const queryMediaOnProgress = {
+    $and: [
+      { senderUserId: { $ne: profileId } }, // senderUserId BUKAN profileId saat ini
+      { "document.isProgressDone": false }, // document.isProgressDone adalah true
+    ],
+  };
+  const queryMediaOnCancelled = {
+    $and: [
+      { senderUserId: { $ne: profileId } }, // senderUserId BUKAN profileId saat ini
+      { "document.isCancelled": true }, // document.isProgressDone adalah true
+    ],
+  };
+
+  const queryMediaOnProgressRecipient = {
+    $and: [
+      { senderUserId: { $ne: recipientId } }, // senderUserId BUKAN profileId saat ini
+      { "document.isProgressDone": false }, // document.isProgressDone adalah true
+    ],
+  };
+  const queryMediaOnCancelledRecipient = {
+    $and: [
+      { senderUserId: { $ne: recipientId } }, // senderUserId BUKAN profileId saat ini
+      { "document.isCancelled": true }, // document.isProgressDone adalah true
+    ],
+  };
 
   try {
     // Ambil pesan target
@@ -37,6 +305,10 @@ exports.getMessagesAround = async (req, res) => {
             },
           },
         },
+        queryMediaOnProgress,
+        queryMediaOnCancelled,
+        queryMediaOnProgressRecipient,
+        queryMediaOnCancelledRecipient,
       ],
     });
 
@@ -63,6 +335,8 @@ exports.getMessagesAround = async (req, res) => {
               },
             },
           },
+          queryMediaOnProgress,
+          queryMediaOnCancelled,
         ],
         $or: [
           { latestMessageTimestamp: { $lt: targetTimestamp } },
@@ -91,6 +365,8 @@ exports.getMessagesAround = async (req, res) => {
                 },
               },
             },
+            queryMediaOnProgress,
+            queryMediaOnCancelled,
           ],
           $or: [
             {
@@ -126,6 +402,8 @@ exports.getMessagesAround = async (req, res) => {
               },
             },
           },
+          queryMediaOnProgress,
+          queryMediaOnCancelled,
         ],
         $or: [
           { latestMessageTimestamp: { $gt: targetTimestamp } },
@@ -167,6 +445,32 @@ exports.getMediaMessagesAround = async (req, res) => {
       .json({ error: "Missing profileId or recipientId in query" });
   }
 
+  const queryMediaOnProgress = {
+    $and: [
+      { senderUserId: { $ne: profileId } }, // senderUserId BUKAN profileId saat ini
+      { "document.isProgressDone": false }, // document.isProgressDone adalah true
+    ],
+  };
+  const queryMediaOnCancelled = {
+    $and: [
+      { senderUserId: { $ne: profileId } }, // senderUserId BUKAN profileId saat ini
+      { "document.isCancelled": true }, // document.isProgressDone adalah true
+    ],
+  };
+
+  const queryMediaOnProgressRecipient = {
+    $and: [
+      { senderUserId: { $ne: recipientId } }, // senderUserId BUKAN profileId saat ini
+      { "document.isProgressDone": false }, // document.isProgressDone adalah true
+    ],
+  };
+  const queryMediaOnCancelledRecipient = {
+    $and: [
+      { senderUserId: { $ne: recipientId } }, // senderUserId BUKAN profileId saat ini
+      { "document.isCancelled": true }, // document.isProgressDone adalah true
+    ],
+  };
+
   try {
     // Temukan pesan target yang merupakan media (punya field document)
     const targetMessage = await chatRoom.findOne({
@@ -190,6 +494,10 @@ exports.getMediaMessagesAround = async (req, res) => {
             },
           },
         },
+        queryMediaOnProgress,
+        queryMediaOnCancelled,
+        queryMediaOnProgressRecipient,
+        queryMediaOnCancelledRecipient,
       ],
     });
 
@@ -225,6 +533,10 @@ exports.getMediaMessagesAround = async (req, res) => {
               },
             },
           },
+          queryMediaOnProgress,
+          queryMediaOnCancelled,
+          queryMediaOnProgressRecipient,
+          queryMediaOnCancelledRecipient,
         ],
         $or: [
           { latestMessageTimestamp: { $lt: targetTimestamp } },
@@ -261,6 +573,10 @@ exports.getMediaMessagesAround = async (req, res) => {
               },
             },
           },
+          queryMediaOnProgress,
+          queryMediaOnCancelled,
+          queryMediaOnProgressRecipient,
+          queryMediaOnCancelledRecipient,
         ],
         $or: [
           { latestMessageTimestamp: { $gt: targetTimestamp } },
@@ -303,22 +619,43 @@ exports.getMessagesPagination = async (req, res, next) => {
     } = req.query;
     const limit = parseInt(req.query.limit) || 20;
 
+    const queryMediaOnProgress = {
+      $and: [
+        { senderUserId: { $ne: profileId } }, // senderUserId BUKAN profileId saat ini
+        { "document.isProgressDone": false }, // document.isProgressDone adalah true
+      ],
+    };
+    const queryMediaOnCancelled = {
+      $and: [
+        { senderUserId: { $ne: profileId } }, // senderUserId BUKAN profileId saat ini
+        { "document.isCancelled": true }, // document.isProgressDone adalah true
+      ],
+    };
+
     if (isFirstMessage) {
-      const messages = await chatRoom
-        .find({
-          chatId,
-          chatRoomId,
-          $nor: [
-            {
-              isDeleted: {
-                $elemMatch: {
-                  senderUserId: profileId,
-                  deletionType: { $in: ["me", "permanent"] },
-                },
+      const queryConditions = {
+        chatId,
+        chatRoomId,
+        // $nor array sekarang berisi dua kondisi pengecualian
+        $nor: [
+          // Kondisi 1: Pengecualian pesan yang dihapus oleh profileId saat ini
+          {
+            isDeleted: {
+              $elemMatch: {
+                senderUserId: profileId,
+                deletionType: { $in: ["me", "permanent"] },
               },
             },
-          ],
-        })
+          },
+          // Kondisi 2: Pengecualian pesan yang BUKAN dari profileId saat ini,
+          //           DAN isProgressDone: true, DAN isCancelled: false
+          queryMediaOnProgress,
+          queryMediaOnCancelled,
+        ],
+      };
+
+      const messages = await chatRoom
+        .find(queryConditions)
         .sort({ latestMessageTimestamp: -1, isHeader: 1 })
         .limit(20);
 
@@ -395,6 +732,8 @@ exports.getMessagesPagination = async (req, res, next) => {
               },
             },
           },
+          queryMediaOnProgress,
+          queryMediaOnCancelled,
         ],
         latestMessageTimestamp: { $lt: timestamp },
       };
@@ -413,6 +752,8 @@ exports.getMessagesPagination = async (req, res, next) => {
               },
             },
           },
+          queryMediaOnProgress,
+          queryMediaOnCancelled,
         ],
         latestMessageTimestamp: { $gt: timestamp },
       };
