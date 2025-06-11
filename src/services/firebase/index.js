@@ -2,7 +2,7 @@
 const firebaseAdmin = require("firebase-admin");
 
 // Cara 1: Menggunakan file service account (disarankan untuk produksi)
-const serviceAccount = require("../../services/firebase/firebase-credential.json");
+const serviceAccount = require("../../../firebase-credential.json");
 
 firebaseAdmin.initializeApp({
   credential: firebaseAdmin.credential.cert(serviceAccount),
