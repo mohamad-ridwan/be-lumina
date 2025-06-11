@@ -9,7 +9,7 @@ firebaseAdmin.initializeApp({
   storageBucket: "e-learning-rp.appspot.com", // Opsional, hanya jika menggunakan Cloud Storage
 });
 
-// Cara 2: Menggunakan environment variable (lebih aman untuk beberapa deployment)
+// Cara 2: Menggunkan environment variable (lebih aman untuk beberapa deployment)
 // const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY); // Pastikan ini adalah string JSON
 // admin.initializeApp({
 //   credential: admin.credential.cert(serviceAccount),
