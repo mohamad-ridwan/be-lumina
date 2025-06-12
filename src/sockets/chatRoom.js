@@ -22,6 +22,8 @@ dayjs.extend(weekday);
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
+dayjs.tz.setDefault("Asia/Jakarta");
+
 const isThereMessageToday = async (chatId, chatRoomId) => {
   const todayStartUTC = dayjs()
     .tz("Asia/Jakarta")

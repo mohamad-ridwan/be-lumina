@@ -4,6 +4,8 @@ const isToday = require("dayjs/plugin/isToday");
 const isYesterday = require("dayjs/plugin/isYesterday");
 const weekOfYear = require("dayjs/plugin/weekOfYear");
 const weekday = require("dayjs/plugin/weekday");
+const utc = require("dayjs/plugin/utc");
+const timezone = require("dayjs/plugin/timezone");
 const sharp = require("sharp");
 const fetch = require("node-fetch");
 const { spawn } = require("child_process");
@@ -17,6 +19,10 @@ dayjs.extend(isToday);
 dayjs.extend(isYesterday);
 dayjs.extend(weekOfYear);
 dayjs.extend(weekday);
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
+dayjs.tz.setDefault("Asia/Jakarta");
 
 const formatDate = (date) => {
   const today = dayjs().startOf("day");
