@@ -186,14 +186,14 @@ const sendMessage = async (message, io, socket, client) => {
   if (latestMessage?.document) {
     chatRoomData.document = latestMessage.document;
 
-    if (latestMessage.messageType === "image") {
-      const thumbnail = await generateBase64ThumbnailFromUrl(
-        latestMessage.document.url
-      );
-      if (thumbnail) {
-        chatRoomData.document.thumbnail = thumbnail;
-      }
-    }
+    // if (latestMessage.messageType === "image") {
+    //   const thumbnail = await generateBase64ThumbnailFromUrl(
+    //     latestMessage.document.url
+    //   );
+    //   if (thumbnail) {
+    //     chatRoomData.document.thumbnail = thumbnail;
+    //   }
+    // }
   }
 
   const newChatRoom = new chatRoomDB(chatRoomData);
@@ -924,4 +924,4 @@ const chatRoom = {
   markMessageAsRead,
 };
 
-module.exports = { chatRoom };
+module.exports = { chatRoom, sendMessage };

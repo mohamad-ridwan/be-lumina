@@ -46,6 +46,7 @@ client
   .connect()
   .then(() => {
     console.log("Redis client connected");
+    app.locals.redisClient = client;
   })
   .catch((err) => {
     console.error("Redis connection error:", err);

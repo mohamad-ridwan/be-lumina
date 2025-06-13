@@ -9,8 +9,8 @@ const {
   getMessagesPagination,
   getMessagesAround,
   getMediaMessagesAround,
+  uploadMediaMessage,
   // getBatchChatRoom
-  uploadVideoMessage,
 } = require("../controllers/chatRoom");
 
 const BASE_UPLOAD_DIR = path.join(__dirname, "..", "..", "uploads"); // Mengarah ke be-lumina/uploads
@@ -37,11 +37,7 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 router.post("/", getChatRoom);
-router.post(
-  "/upload-video-message",
-  upload.single("videoFile"),
-  uploadVideoMessage
-);
+router.post("/upload-media-message", upload.single("file"), uploadMediaMessage);
 router.get("/stream", stream);
 router.get("/messages", getMessagesPagination);
 router.get(
