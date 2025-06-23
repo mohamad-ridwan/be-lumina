@@ -5,8 +5,12 @@ const {
   BASE_UPLOAD_DIR,
   processImage,
   generateThumbnailFromVideo,
+  isUserInRoom,
+  getTodayHeader,
 } = require("../../helpers/general");
 const chatRoom = require("../../models/chatRoom");
+const chatsDB = require("../../models/chats");
+const usersDB = require("../../models/users");
 const { generateRandomId } = require("../../helpers/generateRandomId");
 const { uploadFileToFirebase } = require("../../utils/firebase");
 const { sendMessage } = require("../../sockets/chatRoom");
@@ -24,8 +28,14 @@ const uploadImageService = async (req, res) => {
 
     originalInputFilePath = req.file.path; // Path file asli dari Multer
     const message = JSON.parse(req.body.message); // Objek pesan dari frontend
-    const { chatRoomId, latestMessage } = message;
-    const { messageId, document } = latestMessage;
+    const {
+      chatId,
+      chatRoomId,
+      latestMessage,
+      recipientProfileId,
+      isNeedHeaderDate,
+    } = message;
+    const { senderUserId, messageId, document } = latestMessage;
 
     const io = req.app.locals.io; // Mengakses instance Socket.IO dari app.locals
     const client = req.app.locals.redisClient;
@@ -100,28 +110,48 @@ const uploadImageService = async (req, res) => {
       throw new Error("Image download URL tidak tersedia.");
     }
 
-    io.emit("media-message-progress-done", {
-      ...message,
-      latestMessage: {
-        ...message.latestMessage,
-        document: {
-          ...message.latestMessage.document,
-          url: downloadURL,
-          progress: 100,
-          isProgressDone: true,
-          isCancelled: false,
-        },
-      },
-    });
+    // mulai proses update chatRoom dan chatsDB
+    // Cari header yang ada hari ini
+    const headerMessageToday = await getTodayHeader(chatId, chatRoomId);
 
-    chatRoom
+    const completionTimestamp = Date.now();
+
+    let completionTimeId;
+    let headerMessage;
+    let headerId;
+
+    if (!headerMessageToday) {
+      // ❌ Belum ada header → buat header baru
+      completionTimeId = generateRandomId(15);
+      headerId = generateRandomId(15);
+
+      headerMessage = new chatRoom({
+        chatId,
+        chatRoomId,
+        messageId: headerId,
+        isHeader: true,
+        senderUserId: latestMessage?.senderUserId,
+        latestMessageTimestamp: completionTimestamp,
+        timeId: completionTimeId,
+        completionTimestamp,
+        completionTimeId,
+      });
+      await headerMessage.save();
+    } else {
+      completionTimeId = headerMessageToday.timeId;
+      headerId = headerMessageToday.messageId;
+    }
+
+    await chatRoom
       .updateOne(
-        { chatRoomId: chatRoomId, messageId: messageId },
+        { chatRoomId, messageId },
         {
           $set: {
             "document.progress": 100,
             "document.isProgressDone": true,
             "document.url": downloadURL,
+            completionTimestamp,
+            completionTimeId,
           },
         }
       )
@@ -138,6 +168,117 @@ const uploadImageService = async (req, res) => {
         // Anda mungkin ingin mengirim notifikasi error ke frontend juga
         // io.to(processId).emit("video-message-progress-error", { messageId, error: dbErr.message });
       });
+
+    // update unreadcount & get latest message
+    const chatsCurrently = await chatsDB.findOne({ chatRoomId, chatId });
+    const secondUserId = Object.keys(chatsCurrently?.unreadCount || {}).find(
+      (id) => id !== latestMessage?.senderUserId
+    );
+    const currentMainUserUnreadCount =
+      chatsCurrently?.unreadCount?.[senderUserId] || 0;
+    const currentSecondUserUnreadCount =
+      chatsCurrently?.unreadCount?.[secondUserId] || 0;
+
+    const isSecondUserInRoom = await isUserInRoom(
+      chatId,
+      chatRoomId,
+      secondUserId,
+      client
+    );
+
+    const newUnreadCount = {
+      [latestMessage.senderUserId]: currentMainUserUnreadCount,
+      [secondUserId]: isSecondUserInRoom ? 0 : currentSecondUserUnreadCount + 1,
+    };
+
+    // Update latestMessage sebagai array
+    let updatedLatestMessages = Array.isArray(chatsCurrently.latestMessage)
+      ? [...chatsCurrently.latestMessage]
+      : [];
+
+    const latestMessageWithUserId2 = {
+      ...latestMessage,
+      userId: recipientProfileId,
+      timeId: completionTimeId,
+      completionTimestamp,
+      completionTimeId,
+    };
+
+    latestMessageWithUserId2.document = {
+      ...message.latestMessage.document,
+      mimetype,
+      url: downloadURL,
+      progress: 100,
+      isProgressDone: true,
+      isCancelled: false,
+    };
+
+    const existingIndexUserId2 = updatedLatestMessages.findIndex(
+      (item) => item.userId === recipientProfileId
+    );
+
+    if (existingIndexUserId2 !== -1) {
+      updatedLatestMessages[existingIndexUserId2] = latestMessageWithUserId2;
+    } else {
+      updatedLatestMessages.push(latestMessageWithUserId2);
+    }
+
+    updatedLatestMessages = updatedLatestMessages.filter(
+      (item) => item?.userId
+    );
+
+    await chatsDB.updateOne(
+      { chatRoomId, chatId },
+      {
+        unreadCount: newUnreadCount,
+        latestMessage: updatedLatestMessages,
+      },
+      { new: true }
+    );
+
+    // emit header dulu
+    if (headerMessage?.messageId) {
+      io.emit("newMessage", {
+        chatId,
+        chatRoomId,
+        eventType: message.eventType,
+        isNeedHeaderDate,
+        recipientProfileId,
+        timeId: completionTimeId,
+        messageId: headerMessage.messageId,
+        isHeader: true,
+        isFromMedia: true,
+        latestMessageTimestamp: headerMessage.latestMessageTimestamp,
+        completionTimestamp,
+        completionTimeId,
+      });
+    }
+
+    const senderUserProfile = await usersDB.findOne({ id: senderUserId });
+
+    io.emit("media-message-progress-done", {
+      ...message,
+      latestMessage: {
+        ...message.latestMessage,
+        document: {
+          ...message.latestMessage.document,
+          url: downloadURL,
+          progress: 100,
+          isProgressDone: true,
+          isCancelled: false,
+        },
+        completionTimestamp,
+        completionTimeId,
+      },
+      updatedChatLatestMessages: updatedLatestMessages,
+      username: senderUserProfile?.username,
+      image: senderUserProfile?.image,
+      imgCropped: senderUserProfile?.imgCropped,
+      thumbnail: senderUserProfile?.thumbnail,
+      unreadCount: newUnreadCount,
+      timeId: completionTimeId,
+      headerId,
+    });
 
     console.log("Pemrosesan gambar selesai.");
 
@@ -209,7 +350,13 @@ const uploadVideoService = async (req, res) => {
     originalInputFilePath = req.file.path;
 
     const message = JSON.parse(req.body.message);
-    const { chatRoomId, latestMessage } = message;
+    const {
+      chatRoomId,
+      chatId,
+      isNeedHeaderDate,
+      latestMessage,
+      recipientProfileId,
+    } = message;
     const { senderUserId, messageId, document } = latestMessage;
 
     const io = req.app.locals.io;
@@ -451,23 +598,39 @@ const uploadVideoService = async (req, res) => {
     //   `Thumbnail diunggah ke Firebase Storage: ${thumbnailDownloadURL}`
     // );
 
-    io.emit("media-message-progress-done", {
-      ...message,
-      latestMessage: {
-        ...message.latestMessage,
-        document: {
-          ...message.latestMessage.document,
-          mimetype,
-          url: downloadURL,
-          poster: thumbnailDownloadURL,
-          progress: 100,
-          isProgressDone: true,
-          isCancelled: false,
-        },
-      },
-    });
+    // mulai proses update chatRoom dan chatsDB
+    // Cari header yang ada hari ini
+    const headerMessageToday = await getTodayHeader(chatId, chatRoomId);
 
-    chatRoom
+    const completionTimestamp = Date.now();
+
+    let completionTimeId;
+    let headerMessage;
+    let headerId;
+
+    if (!headerMessageToday) {
+      // ❌ Belum ada header → buat header baru
+      completionTimeId = generateRandomId(15);
+      headerId = generateRandomId(15);
+
+      headerMessage = new chatRoom({
+        chatId,
+        chatRoomId,
+        messageId: headerId,
+        isHeader: true,
+        senderUserId: latestMessage?.senderUserId,
+        latestMessageTimestamp: completionTimestamp,
+        timeId: completionTimeId,
+        completionTimestamp,
+        completionTimeId,
+      });
+      await headerMessage.save();
+    } else {
+      completionTimeId = headerMessageToday.timeId;
+      headerId = headerMessageToday.messageId;
+    }
+
+    await chatRoom
       .updateOne(
         { chatRoomId: chatRoomId, messageId: messageId },
         {
@@ -476,6 +639,8 @@ const uploadVideoService = async (req, res) => {
             "document.isProgressDone": true,
             "document.poster": thumbnailDownloadURL,
             "document.url": downloadURL,
+            completionTimestamp,
+            completionTimeId,
           },
         }
       )
@@ -492,6 +657,120 @@ const uploadVideoService = async (req, res) => {
         // Anda mungkin ingin mengirim notifikasi error ke frontend juga
         // io.to(processId).emit("video-message-progress-error", { messageId, error: dbErr.message });
       });
+
+    // update unreadcount & get latest message
+    const chatsCurrently = await chatsDB.findOne({ chatRoomId, chatId });
+    const secondUserId = Object.keys(chatsCurrently?.unreadCount || {}).find(
+      (id) => id !== latestMessage?.senderUserId
+    );
+    const currentMainUserUnreadCount =
+      chatsCurrently?.unreadCount?.[senderUserId] || 0;
+    const currentSecondUserUnreadCount =
+      chatsCurrently?.unreadCount?.[secondUserId] || 0;
+
+    const isSecondUserInRoom = await isUserInRoom(
+      chatId,
+      chatRoomId,
+      secondUserId,
+      client
+    );
+
+    const newUnreadCount = {
+      [latestMessage.senderUserId]: currentMainUserUnreadCount,
+      [secondUserId]: isSecondUserInRoom ? 0 : currentSecondUserUnreadCount + 1,
+    };
+
+    // Update latestMessage sebagai array
+    let updatedLatestMessages = Array.isArray(chatsCurrently.latestMessage)
+      ? [...chatsCurrently.latestMessage]
+      : [];
+
+    const latestMessageWithUserId2 = {
+      ...latestMessage,
+      userId: recipientProfileId,
+      timeId: completionTimeId,
+      completionTimestamp,
+      completionTimeId,
+    };
+
+    latestMessageWithUserId2.document = {
+      ...message.latestMessage.document,
+      mimetype,
+      url: downloadURL,
+      poster: thumbnailDownloadURL,
+      progress: 100,
+      isProgressDone: true,
+      isCancelled: false,
+    };
+
+    const existingIndexUserId2 = updatedLatestMessages.findIndex(
+      (item) => item.userId === recipientProfileId
+    );
+
+    if (existingIndexUserId2 !== -1) {
+      updatedLatestMessages[existingIndexUserId2] = latestMessageWithUserId2;
+    } else {
+      updatedLatestMessages.push(latestMessageWithUserId2);
+    }
+
+    updatedLatestMessages = updatedLatestMessages.filter(
+      (item) => item?.userId
+    );
+
+    await chatsDB.updateOne(
+      { chatRoomId, chatId },
+      {
+        unreadCount: newUnreadCount,
+        latestMessage: updatedLatestMessages,
+      },
+      { new: true }
+    );
+
+    // emit header dulu
+    if (headerMessage?.messageId) {
+      io.emit("newMessage", {
+        chatId,
+        chatRoomId,
+        eventType: message.eventType,
+        isNeedHeaderDate,
+        recipientProfileId,
+        timeId: completionTimeId,
+        messageId: headerMessage.messageId,
+        isHeader: true,
+        isFromMedia: true,
+        latestMessageTimestamp: headerMessage.latestMessageTimestamp,
+        completionTimestamp,
+        completionTimeId,
+      });
+    }
+
+    const senderUserProfile = await usersDB.findOne({ id: senderUserId });
+
+    io.emit("media-message-progress-done", {
+      ...message,
+      latestMessage: {
+        ...message.latestMessage,
+        document: {
+          ...message.latestMessage.document,
+          mimetype,
+          url: downloadURL,
+          poster: thumbnailDownloadURL,
+          progress: 100,
+          isProgressDone: true,
+          isCancelled: false,
+        },
+        completionTimestamp,
+        completionTimeId,
+      },
+      updatedChatLatestMessages: updatedLatestMessages,
+      username: senderUserProfile?.username,
+      image: senderUserProfile?.image,
+      imgCropped: senderUserProfile?.imgCropped,
+      thumbnail: senderUserProfile?.thumbnail,
+      unreadCount: newUnreadCount,
+      timeId: completionTimeId,
+      headerId,
+    });
 
     console.log("Pemrosesan video selesai.");
 

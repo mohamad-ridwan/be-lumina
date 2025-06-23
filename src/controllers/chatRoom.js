@@ -7,6 +7,7 @@ const {
   uploadVideoService,
   uploadImageService,
 } = require("../services/chatRoom/uploadFileService");
+const { getSortTimestampAggregationField } = require("../helpers/general");
 
 exports.uploadMediaMessage = async (req, res) => {
   const message = JSON.parse(req.body.message);
@@ -54,34 +55,36 @@ exports.getMessagesAround = async (req, res) => {
     ],
   };
 
+  const baseFilterConditions = () => ({
+    chatRoomId,
+    messageId,
+    $nor: [
+      {
+        isDeleted: {
+          $elemMatch: {
+            senderUserId: profileId,
+            deletionType: { $in: ["me", "permanent", "everyone"] },
+          },
+        },
+      },
+      {
+        isDeleted: {
+          $elemMatch: {
+            senderUserId: recipientId,
+            deletionType: { $in: ["everyone", "permanent"] },
+          },
+        },
+      },
+      queryMediaOnProgress,
+      queryMediaOnCancelled,
+      queryMediaOnProgressRecipient,
+      queryMediaOnCancelledRecipient,
+    ],
+  });
+
   try {
     // Ambil pesan target
-    const targetMessage = await chatRoom.findOne({
-      chatRoomId,
-      messageId,
-      $nor: [
-        {
-          isDeleted: {
-            $elemMatch: {
-              senderUserId: profileId,
-              deletionType: { $in: ["me", "permanent", "everyone"] },
-            },
-          },
-        },
-        {
-          isDeleted: {
-            $elemMatch: {
-              senderUserId: recipientId,
-              deletionType: { $in: ["everyone"] },
-            },
-          },
-        },
-        queryMediaOnProgress,
-        queryMediaOnCancelled,
-        queryMediaOnProgressRecipient,
-        queryMediaOnCancelledRecipient,
-      ],
-    });
+    const targetMessage = await chatRoom.findOne(baseFilterConditions());
 
     if (!targetMessage) {
       return res
@@ -89,43 +92,18 @@ exports.getMessagesAround = async (req, res) => {
         .json({ error: "Message not found or already deleted for this user" });
     }
 
-    const targetTimestamp = Number(targetMessage.latestMessageTimestamp);
+    const targetTimestamp =
+      targetMessage?.senderUserId !== profileId &&
+      targetMessage?.completionTimestamp
+        ? Number(targetMessage.completionTimestamp)
+        : Number(targetMessage.latestMessageTimestamp);
     const targetMessageId = targetMessage.messageId;
     const halfLimit = Math.floor(limit / 2);
 
-    // Ambil pesan sebelum target
-    let beforeMessages = await chatRoom
-      .find({
-        chatRoomId,
-        $nor: [
-          {
-            isDeleted: {
-              $elemMatch: {
-                senderUserId: profileId,
-                deletionType: { $in: ["me", "permanent"] },
-              },
-            },
-          },
-          queryMediaOnProgress,
-          queryMediaOnCancelled,
-        ],
-        $or: [
-          { latestMessageTimestamp: { $lt: targetTimestamp } },
-          {
-            latestMessageTimestamp: targetTimestamp,
-            messageId: { $lt: targetMessageId },
-          },
-        ],
-      })
-      .sort({ latestMessageTimestamp: -1, messageId: -1 })
-      .limit(halfLimit);
-
-    // Jika pesan teratas adalah header, ambil 1 tambahan di bawahnya
-    if (beforeMessages.length > 0 && beforeMessages[0]?.isHeader === true) {
-      const topMessage = beforeMessages[beforeMessages.length - 1];
-
-      const extraMessage = await chatRoom
-        .findOne({
+    // 2. Ambil Pesan Sebelum Target (Menggunakan Aggregation)
+    const beforePipeline = [
+      {
+        $match: {
           chatRoomId,
           $nor: [
             {
@@ -139,19 +117,131 @@ exports.getMessagesAround = async (req, res) => {
             queryMediaOnProgress,
             queryMediaOnCancelled,
           ],
+        },
+      }, // Filter dasar yang sudah di-refactor
+      {
+        $addFields: {
+          sortTimestamp: getSortTimestampAggregationField(profileId),
+        },
+      },
+      {
+        $match: {
           $or: [
+            { sortTimestamp: { $lt: targetTimestamp } }, // Lebih lama dari target
             {
-              latestMessageTimestamp: {
-                $lt: topMessage.latestMessageTimestamp,
-              },
-            },
-            {
-              latestMessageTimestamp: topMessage.latestMessageTimestamp,
-              messageId: { $lt: topMessage.messageId },
+              sortTimestamp: targetTimestamp,
+              messageId: { $lt: targetMessageId }, // Jika timestamp sama, urutkan berdasarkan messageId
             },
           ],
-        })
-        .sort({ latestMessageTimestamp: -1, messageId: -1 });
+        },
+      },
+      { $sort: { sortTimestamp: -1, messageId: -1 } }, // Urutkan descending untuk ambil yang paling dekat ke target
+      { $limit: halfLimit },
+    ];
+
+    // Ambil pesan sebelum target
+    // let beforeMessages = await chatRoom
+    //   .find({
+    //     chatRoomId,
+    //     $nor: [
+    //       {
+    //         isDeleted: {
+    //           $elemMatch: {
+    //             senderUserId: profileId,
+    //             deletionType: { $in: ["me", "permanent"] },
+    //           },
+    //         },
+    //       },
+    //       queryMediaOnProgress,
+    //       queryMediaOnCancelled,
+    //     ],
+    //     $or: [
+    //       { latestMessageTimestamp: { $lt: targetTimestamp } },
+    //       {
+    //         latestMessageTimestamp: targetTimestamp,
+    //         messageId: { $lt: targetMessageId },
+    //       },
+    //     ],
+    //   })
+    //   .sort({ latestMessageTimestamp: -1, messageId: -1 })
+    //   .limit(halfLimit);
+
+    let beforeMessages = await chatRoom.aggregate(beforePipeline);
+
+    // Jika pesan teratas adalah header, ambil 1 tambahan di bawahnya
+    if (beforeMessages.length > 0 && beforeMessages[0]?.isHeader === true) {
+      const topMessage = beforeMessages[beforeMessages.length - 1];
+
+      const topMessageSortTimestamp = topMessage.sortTimestamp;
+      const topMessageId = topMessage.messageId;
+
+      const extraPipeline = [
+        {
+          $match: {
+            chatRoomId,
+            $nor: [
+              {
+                isDeleted: {
+                  $elemMatch: {
+                    senderUserId: profileId,
+                    deletionType: { $in: ["me", "permanent"] },
+                  },
+                },
+              },
+              queryMediaOnProgress,
+              queryMediaOnCancelled,
+            ],
+          },
+        },
+        {
+          $addFields: {
+            sortTimestamp: getSortTimestampAggregationField(profileId),
+          },
+        },
+        {
+          $match: {
+            $or: [
+              { sortTimestamp: { $lt: topMessageSortTimestamp } },
+              {
+                sortTimestamp: topMessageSortTimestamp,
+                messageId: { $lt: topMessageId },
+              },
+            ],
+          },
+        },
+        { $sort: { sortTimestamp: -1, messageId: -1 } },
+        { $limit: 1 },
+      ];
+
+      // const extraMessage = await chatRoom
+      //   .findOne({
+      //     chatRoomId,
+      //     $nor: [
+      //       {
+      //         isDeleted: {
+      //           $elemMatch: {
+      //             senderUserId: profileId,
+      //             deletionType: { $in: ["me", "permanent"] },
+      //           },
+      //         },
+      //       },
+      //       queryMediaOnProgress,
+      //       queryMediaOnCancelled,
+      //     ],
+      //     $or: [
+      //       {
+      //         latestMessageTimestamp: {
+      //           $lt: topMessage.latestMessageTimestamp,
+      //         },
+      //       },
+      //       {
+      //         latestMessageTimestamp: topMessage.latestMessageTimestamp,
+      //         messageId: { $lt: topMessage.messageId },
+      //       },
+      //     ],
+      //   })
+      //   .sort({ latestMessageTimestamp: -1, messageId: -1 });
+      const [extraMessage] = await chatRoom.aggregate(extraPipeline);
 
       if (extraMessage) {
         beforeMessages.push(extraMessage);
@@ -161,31 +251,71 @@ exports.getMessagesAround = async (req, res) => {
     // Ambil pesan sesudah target
     const afterLimit = limit - beforeMessages.length - 1;
 
-    const afterMessages = await chatRoom
-      .find({
-        chatRoomId,
-        $nor: [
-          {
-            isDeleted: {
-              $elemMatch: {
-                senderUserId: profileId,
-                deletionType: { $in: ["me", "permanent"] },
+    const afterPipeline = [
+      {
+        $match: {
+          chatRoomId,
+          $nor: [
+            {
+              isDeleted: {
+                $elemMatch: {
+                  senderUserId: profileId,
+                  deletionType: { $in: ["me", "permanent"] },
+                },
               },
             },
-          },
-          queryMediaOnProgress,
-          queryMediaOnCancelled,
-        ],
-        $or: [
-          { latestMessageTimestamp: { $gt: targetTimestamp } },
-          {
-            latestMessageTimestamp: targetTimestamp,
-            messageId: { $gt: targetMessageId },
-          },
-        ],
-      })
-      .sort({ latestMessageTimestamp: 1, messageId: 1 })
-      .limit(afterLimit > 0 ? afterLimit : 0);
+            queryMediaOnProgress,
+            queryMediaOnCancelled,
+          ],
+        },
+      }, // Filter dasar
+      {
+        $addFields: {
+          sortTimestamp: getSortTimestampAggregationField(profileId),
+        },
+      },
+      {
+        $match: {
+          $or: [
+            { sortTimestamp: { $gt: targetTimestamp } }, // Lebih baru dari target
+            {
+              sortTimestamp: targetTimestamp,
+              messageId: { $gt: targetMessageId }, // Jika timestamp sama, urutkan berdasarkan messageId
+            },
+          ],
+        },
+      },
+      { $sort: { sortTimestamp: 1, messageId: 1 } }, // Urutkan ascending
+      { $limit: afterLimit > 0 ? afterLimit : 0 },
+    ];
+
+    // const afterMessages = await chatRoom
+    //   .find({
+    //     chatRoomId,
+    //     $nor: [
+    //       {
+    //         isDeleted: {
+    //           $elemMatch: {
+    //             senderUserId: profileId,
+    //             deletionType: { $in: ["me", "permanent"] },
+    //           },
+    //         },
+    //       },
+    //       queryMediaOnProgress,
+    //       queryMediaOnCancelled,
+    //     ],
+    //     $or: [
+    //       { latestMessageTimestamp: { $gt: targetTimestamp } },
+    //       {
+    //         latestMessageTimestamp: targetTimestamp,
+    //         messageId: { $gt: targetMessageId },
+    //       },
+    //     ],
+    //   })
+    //   .sort({ latestMessageTimestamp: 1, messageId: 1 })
+    //   .limit(afterLimit > 0 ? afterLimit : 0);
+
+    const afterMessages = await chatRoom.aggregate(afterPipeline);
 
     // Gabungkan semua
     const result = [
@@ -242,34 +372,38 @@ exports.getMediaMessagesAround = async (req, res) => {
     ],
   };
 
+  const baseFilterConditions = () => ({
+    chatRoomId,
+    document: { $type: "object" },
+    $nor: [
+      {
+        isDeleted: {
+          $elemMatch: {
+            senderUserId: profileId,
+            deletionType: { $in: ["me", "permanent", "everyone"] },
+          },
+        },
+      },
+      {
+        isDeleted: {
+          $elemMatch: {
+            senderUserId: recipientId,
+            deletionType: { $in: ["everyone", "permanent"] },
+          },
+        },
+      },
+      queryMediaOnProgress,
+      queryMediaOnCancelled,
+      queryMediaOnProgressRecipient,
+      queryMediaOnCancelledRecipient,
+    ],
+  });
+
   try {
     // Temukan pesan target yang merupakan media (punya field document)
     const targetMessage = await chatRoom.findOne({
-      chatRoomId,
+      ...baseFilterConditions(),
       messageId,
-      document: { $type: "object" },
-      $nor: [
-        {
-          isDeleted: {
-            $elemMatch: {
-              senderUserId: profileId,
-              deletionType: { $in: ["me", "permanent", "everyone"] },
-            },
-          },
-        },
-        {
-          isDeleted: {
-            $elemMatch: {
-              senderUserId: recipientId,
-              deletionType: { $in: ["everyone"] },
-            },
-          },
-        },
-        queryMediaOnProgress,
-        queryMediaOnCancelled,
-        queryMediaOnProgressRecipient,
-        queryMediaOnCancelledRecipient,
-      ],
     });
 
     if (!targetMessage) {
@@ -278,87 +412,139 @@ exports.getMediaMessagesAround = async (req, res) => {
         .json({ error: "Media message not found or deleted" });
     }
 
-    const targetTimestamp = Number(targetMessage.latestMessageTimestamp);
+    const targetTimestamp =
+      targetMessage.senderUserId !== profileId &&
+      targetMessage.completionTimestamp
+        ? Number(targetMessage.completionTimestamp)
+        : Number(targetMessage.latestMessageTimestamp);
     const targetMessageId = targetMessage.messageId;
     const halfLimit = Math.floor(limit / 2);
 
+    // 2. Ambil Media Sebelum Target
+    const beforePipeline = [
+      { $match: baseFilterConditions() }, // Filter dasar
+      {
+        $addFields: {
+          sortTimestamp: getSortTimestampAggregationField(profileId),
+        },
+      },
+      {
+        $match: {
+          $or: [
+            { sortTimestamp: { $lt: targetTimestamp } }, // Lebih lama dari target
+            {
+              sortTimestamp: targetTimestamp,
+              messageId: { $lt: targetMessageId }, // Jika timestamp sama, urutkan berdasarkan messageId
+            },
+          ],
+        },
+      },
+      { $sort: { sortTimestamp: -1, messageId: -1 } }, // Urutkan descending untuk ambil yang paling dekat ke target
+      { $limit: halfLimit },
+    ];
+
     // Ambil media sebelum target
-    const beforeMessages = await chatRoom
-      .find({
-        chatRoomId,
-        document: { $type: "object" },
-        $nor: [
-          {
-            isDeleted: {
-              $elemMatch: {
-                senderUserId: profileId,
-                deletionType: { $in: ["me", "permanent", "everyone"] },
-              },
-            },
-          },
-          {
-            isDeleted: {
-              $elemMatch: {
-                senderUserId: recipientId,
-                deletionType: { $in: ["everyone"] },
-              },
-            },
-          },
-          queryMediaOnProgress,
-          queryMediaOnCancelled,
-          queryMediaOnProgressRecipient,
-          queryMediaOnCancelledRecipient,
-        ],
-        $or: [
-          { latestMessageTimestamp: { $lt: targetTimestamp } },
-          {
-            latestMessageTimestamp: targetTimestamp,
-            messageId: { $lt: targetMessageId },
-          },
-        ],
-      })
-      .sort({ latestMessageTimestamp: -1, messageId: -1 })
-      .limit(halfLimit);
+    // const beforeMessages = await chatRoom
+    //   .find({
+    //     chatRoomId,
+    //     document: { $type: "object" },
+    //     $nor: [
+    //       {
+    //         isDeleted: {
+    //           $elemMatch: {
+    //             senderUserId: profileId,
+    //             deletionType: { $in: ["me", "permanent", "everyone"] },
+    //           },
+    //         },
+    //       },
+    //       {
+    //         isDeleted: {
+    //           $elemMatch: {
+    //             senderUserId: recipientId,
+    //             deletionType: { $in: ["everyone"] },
+    //           },
+    //         },
+    //       },
+    //       queryMediaOnProgress,
+    //       queryMediaOnCancelled,
+    //       queryMediaOnProgressRecipient,
+    //       queryMediaOnCancelledRecipient,
+    //     ],
+    //     $or: [
+    //       { latestMessageTimestamp: { $lt: targetTimestamp } },
+    //       {
+    //         latestMessageTimestamp: targetTimestamp,
+    //         messageId: { $lt: targetMessageId },
+    //       },
+    //     ],
+    //   })
+    //   .sort({ latestMessageTimestamp: -1, messageId: -1 })
+    //   .limit(halfLimit);
+    const beforeMessages = await chatRoom.aggregate(beforePipeline);
 
     // Ambil media sesudah target
     const afterLimit = limit - beforeMessages.length - 1;
 
-    const afterMessages = await chatRoom
-      .find({
-        chatRoomId,
-        document: { $type: "object" },
-        $nor: [
-          {
-            isDeleted: {
-              $elemMatch: {
-                senderUserId: profileId,
-                deletionType: { $in: ["me", "permanent", "everyone"] },
-              },
+    const afterPipeline = [
+      { $match: baseFilterConditions() }, // Filter dasar
+      {
+        $addFields: {
+          sortTimestamp: getSortTimestampAggregationField(profileId),
+        },
+      },
+      {
+        $match: {
+          $or: [
+            { sortTimestamp: { $gt: targetTimestamp } }, // Lebih baru dari target
+            {
+              sortTimestamp: targetTimestamp,
+              messageId: { $gt: targetMessageId }, // Jika timestamp sama, urutkan berdasarkan messageId
             },
-          },
-          {
-            isDeleted: {
-              $elemMatch: {
-                senderUserId: recipientId,
-                deletionType: { $in: ["everyone"] },
-              },
-            },
-          },
-          queryMediaOnProgress,
-          queryMediaOnCancelled,
-          queryMediaOnProgressRecipient,
-          queryMediaOnCancelledRecipient,
-        ],
-        $or: [
-          { latestMessageTimestamp: { $gt: targetTimestamp } },
-          {
-            latestMessageTimestamp: targetTimestamp,
-            messageId: { $gt: targetMessageId },
-          },
-        ],
-      })
-      .sort({ latestMessageTimestamp: 1, messageId: 1 })
-      .limit(afterLimit > 0 ? afterLimit : 0);
+          ],
+        },
+      },
+      { $sort: { sortTimestamp: 1, messageId: 1 } }, // Urutkan ascending untuk ambil yang paling dekat ke target
+      { $limit: afterLimit > 0 ? afterLimit : 0 },
+    ];
+
+    // const afterMessages = await chatRoom
+    //   .find({
+    //     chatRoomId,
+    //     document: { $type: "object" },
+    //     $nor: [
+    //       {
+    //         isDeleted: {
+    //           $elemMatch: {
+    //             senderUserId: profileId,
+    //             deletionType: { $in: ["me", "permanent", "everyone"] },
+    //           },
+    //         },
+    //       },
+    //       {
+    //         isDeleted: {
+    //           $elemMatch: {
+    //             senderUserId: recipientId,
+    //             deletionType: { $in: ["everyone"] },
+    //           },
+    //         },
+    //       },
+    //       queryMediaOnProgress,
+    //       queryMediaOnCancelled,
+    //       queryMediaOnProgressRecipient,
+    //       queryMediaOnCancelledRecipient,
+    //     ],
+    //     $or: [
+    //       { latestMessageTimestamp: { $gt: targetTimestamp } },
+    //       {
+    //         latestMessageTimestamp: targetTimestamp,
+    //         messageId: { $gt: targetMessageId },
+    //       },
+    //     ],
+    //   })
+    //   .sort({ latestMessageTimestamp: 1, messageId: 1 })
+    //   .limit(afterLimit > 0 ? afterLimit : 0);
+
+    const afterMessages = await chatRoom.aggregate(afterPipeline);
 
     // Gabungkan semuanya
     const result = [
@@ -403,42 +589,80 @@ exports.getMessagesPagination = async (req, res, next) => {
       ],
     };
 
-    if (isFirstMessage) {
-      const queryConditions = {
-        chatId,
-        chatRoomId,
-        // $nor array sekarang berisi dua kondisi pengecualian
-        $nor: [
-          // Kondisi 1: Pengecualian pesan yang dihapus oleh profileId saat ini
-          {
-            isDeleted: {
-              $elemMatch: {
-                senderUserId: profileId,
-                deletionType: { $in: ["me", "permanent"] },
-              },
+    // --- LOGIC BARU UNTUK MENENTUKAN sortTimestamp ---
+    const getSortTimestampField = () => {
+      return {
+        $cond: {
+          if: {
+            $and: [
+              { $ne: ["$senderUserId", profileId] }, // Jika senderUserId BUKAN profileId
+              { $ne: ["$completionTimestamp", null] }, // DAN completionTimestamp tidak null
+            ],
+          },
+          then: { $toDouble: "$completionTimestamp" }, // Gunakan completionTimestamp
+          else: { $toDouble: "$latestMessageTimestamp" }, // Jika tidak, gunakan latestMessageTimestamp
+        },
+      };
+    };
+
+    const queryConditions = {
+      chatId,
+      chatRoomId,
+      // $nor array sekarang berisi dua kondisi pengecualian
+      $nor: [
+        // Kondisi 1: Pengecualian pesan yang dihapus oleh profileId saat ini
+        {
+          isDeleted: {
+            $elemMatch: {
+              senderUserId: profileId,
+              deletionType: { $in: ["me", "permanent"] },
             },
           },
-          // Kondisi 2: Pengecualian pesan yang BUKAN dari profileId saat ini,
-          //           DAN isProgressDone: true, DAN isCancelled: false
-          queryMediaOnProgress,
-          queryMediaOnCancelled,
-        ],
-      };
+        },
+        // Kondisi 2: Pengecualian pesan yang BUKAN dari profileId saat ini,
+        //           DAN isProgressDone: true, DAN isCancelled: false
+        queryMediaOnProgress,
+        queryMediaOnCancelled,
+      ],
+    };
 
-      const messages = await chatRoom
-        .find(queryConditions)
-        .sort({ latestMessageTimestamp: -1, isHeader: 1 })
-        .limit(20);
+    if (isFirstMessage) {
+      // const messages = await chatRoom
+      //   .find(queryConditions)
+      //   .sort({ latestMessageTimestamp: -1, isHeader: 1 })
+      //   .limit(20);
+
+      const messages = await chatRoom.aggregate([
+        { $match: queryConditions },
+        {
+          $addFields: {
+            // Membuat field 'sortTimestamp'
+            sortTimestamp: getSortTimestampField(),
+          },
+        },
+        { $sort: { sortTimestamp: -1, isHeader: 1 } }, // Urutkan berdasarkan sortTimestamp yang baru dibuat
+        { $limit: 20 },
+      ]);
 
       // ==== Cek apakah semua item adalah header ====
       const headers = messages.filter((msg) => msg.isHeader === true);
       const nonHeaders = messages.filter((msg) => !msg.isHeader);
 
-      const nonHeaderTimeIds = new Set(nonHeaders.map((msg) => msg.timeId));
-
-      const headersWithoutMatchingNonHeader = headers.filter(
-        (header) => !nonHeaderTimeIds.has(header.timeId)
+      const nonHeaderTimeIds = new Set(
+        nonHeaders.map((msg) => {
+          if (msg?.senderUserId !== profileId && msg?.completionTimeId) {
+            return msg.completionTimeId;
+          }
+          return msg.timeId;
+        })
       );
+
+      const headersWithoutMatchingNonHeader = headers.filter((header) => {
+        if (header?.senderUserId !== profileId && header?.completionTimeId) {
+          return !nonHeaderTimeIds.has(header.completionTimeId);
+        }
+        return !nonHeaderTimeIds.has(header.timeId);
+      });
 
       const allItemsAreOrphanHeaders =
         messages.length > 0 &&
@@ -455,12 +679,20 @@ exports.getMessagesPagination = async (req, res, next) => {
         const messageNonHeaders = messages.filter((msg) => !msg?.isHeader);
 
         const headersTimeId = new Set(
-          messageNonHeaders.map((msg) => msg.timeId)
+          messageNonHeaders.map((msg) => {
+            if (msg?.senderUserId !== profileId && msg?.completionTimeId) {
+              return msg.completionTimeId;
+            }
+            return msg.timeId;
+          })
         );
 
-        const messagesCurrently = messages.filter((msg) =>
-          headersTimeId.has(msg.timeId)
-        );
+        const messagesCurrently = messages.filter((msg) => {
+          if (msg?.senderUserId !== profileId && msg?.completionTimeId) {
+            return headersTimeId.has(msg.completionTimeId);
+          }
+          return headersTimeId.has(msg.timeId);
+        });
 
         return res.json({
           isFirstMessage,
@@ -477,7 +709,9 @@ exports.getMessagesPagination = async (req, res, next) => {
     }
 
     // Temukan anchor message berdasarkan messageId
-    const anchor = await chatRoom.findOne({ chatId, chatRoomId, messageId });
+    const anchor = await chatRoom
+      .findOne({ chatId, chatRoomId, messageId })
+      .lean();
 
     if (!anchor) {
       return res.status(404).json({ error: "Anchor message not found." });
@@ -485,105 +719,201 @@ exports.getMessagesPagination = async (req, res, next) => {
 
     const timestamp = Number(anchor.latestMessageTimestamp);
 
+    // Tentukan anchorTimestamp berdasarkan logic baru
+    const anchorTimestamp =
+      anchor.senderUserId !== profileId && anchor.completionTimestamp
+        ? Number(anchor.completionTimestamp)
+        : Number(anchor.latestMessageTimestamp);
+
     let query = {};
     let sort = {};
 
+    let pipeline = [];
+    let sortOrder = 0; // Untuk sort di JS setelah fetching
+
     // ⛔️ FIXED: Tukar logika prev & next
     if (direction === "next") {
-      // Sebelumnya prev → sekarang jadi next
-      query = {
-        chatId,
-        chatRoomId,
-        $nor: [
-          {
-            isDeleted: {
-              $elemMatch: {
-                senderUserId: profileId,
-                deletionType: { $in: ["me", "permanent"] },
-              },
-            },
+      // // Sebelumnya prev → sekarang jadi next
+      // query = {
+      //   chatId,
+      //   chatRoomId,
+      //   $nor: [
+      //     {
+      //       isDeleted: {
+      //         $elemMatch: {
+      //           senderUserId: profileId,
+      //           deletionType: { $in: ["me", "permanent"] },
+      //         },
+      //       },
+      //     },
+      //     queryMediaOnProgress,
+      //     queryMediaOnCancelled,
+      //   ],
+      //   latestMessageTimestamp: { $lt: timestamp },
+      // };
+      // sort = { latestMessageTimestamp: -1 };
+
+      pipeline.push(
+        { $match: queryConditions },
+        {
+          $addFields: {
+            sortTimestamp: getSortTimestampField(),
           },
-          queryMediaOnProgress,
-          queryMediaOnCancelled,
-        ],
-        latestMessageTimestamp: { $lt: timestamp },
-      };
-      sort = { latestMessageTimestamp: -1 };
+        },
+        { $match: { sortTimestamp: { $lt: anchorTimestamp } } },
+        { $sort: { sortTimestamp: -1 } }, // Ambil yang paling baru (lebih dekat ke anchor) dulu
+        { $limit: limit }
+      );
+      sortOrder = 1; // Akan diurutkan ASCENDING (dari lama ke baru) di JS
     } else if (direction === "prev") {
-      // Sebelumnya next → sekarang jadi prev
-      query = {
-        chatId,
-        chatRoomId,
-        $nor: [
-          {
-            isDeleted: {
-              $elemMatch: {
-                senderUserId: profileId,
-                deletionType: { $in: ["me", "permanent"] },
-              },
-            },
+      // // Sebelumnya next → sekarang jadi prev
+      // query = {
+      //   chatId,
+      //   chatRoomId,
+      //   $nor: [
+      //     {
+      //       isDeleted: {
+      //         $elemMatch: {
+      //           senderUserId: profileId,
+      //           deletionType: { $in: ["me", "permanent"] },
+      //         },
+      //       },
+      //     },
+      //     queryMediaOnProgress,
+      //     queryMediaOnCancelled,
+      //   ],
+      //   latestMessageTimestamp: { $gt: timestamp },
+      // };
+      // sort = { latestMessageTimestamp: 1 };
+
+      pipeline.push(
+        { $match: queryConditions },
+        {
+          $addFields: {
+            sortTimestamp: getSortTimestampField(),
           },
-          queryMediaOnProgress,
-          queryMediaOnCancelled,
-        ],
-        latestMessageTimestamp: { $gt: timestamp },
-      };
-      sort = { latestMessageTimestamp: 1 };
+        },
+        { $match: { sortTimestamp: { $gt: anchorTimestamp } } },
+        { $sort: { sortTimestamp: 1 } }, // Ambil yang paling lama (lebih dekat ke anchor) dulu
+        { $limit: limit }
+      );
+      sortOrder = -1; // Akan diurutkan DESCENDING (dari baru ke lama) di JS
     } else {
       return res
         .status(400)
         .json({ error: 'Invalid direction. Use "prev" or "next".' });
     }
 
-    const messages = await chatRoom.find(query).sort(sort).limit(limit).lean();
+    // const messages = await chatRoom.find(query).sort(sort).limit(limit).lean();
+    const messages = await chatRoom.aggregate(pipeline);
 
     const totalMessages = await chatRoom.countDocuments({ chatId, chatRoomId });
 
     const messageNonHeaders = messages.filter((msg) => !msg?.isHeader);
-    const headersTimeId = new Set(messageNonHeaders.map((msg) => msg.timeId));
-    const messagesCurrently = messages.filter((msg) =>
-      headersTimeId.has(msg.timeId)
+    const headersTimeId = new Set(
+      messageNonHeaders.map((msg) => {
+        if (msg?.senderUserId !== profileId && msg?.completionTimeId) {
+          return msg.completionTimeId;
+        }
+        return msg.timeId;
+      })
     );
+    const messagesCurrently = messages.filter((msg) => {
+      if (msg?.senderUserId !== profileId && msg?.completionTimeId) {
+        return headersTimeId.has(msg.completionTimeId);
+      }
+      return headersTimeId.has(msg.timeId);
+    });
 
-    const firstMessage = await chatRoom
-      .findOne({ chatId, chatRoomId })
-      .sort({ latestMessageTimestamp: 1 });
+    // const firstMessage = await chatRoom
+    //   .findOne({ chatId, chatRoomId })
+    //   .sort({ latestMessageTimestamp: 1 });
 
-    const lastMessage = await chatRoom
-      .findOne({ chatId, chatRoomId })
-      .sort({ latestMessageTimestamp: -1 });
+    const firstMessageDoc = await chatRoom.aggregate([
+      { $match: queryConditions },
+      { $addFields: { sortTimestamp: getSortTimestampField() } },
+      { $sort: { sortTimestamp: 1 } },
+      { $limit: 1 },
+    ]);
 
-    const hasPrev = timestamp < Number(lastMessage.latestMessageTimestamp);
-    const hasNext = timestamp > Number(firstMessage.latestMessageTimestamp);
+    // const lastMessage = await chatRoom
+    //   .findOne({ chatId, chatRoomId })
+    //   .sort({ latestMessageTimestamp: -1 });
+
+    const lastMessageDoc = await chatRoom.aggregate([
+      { $match: queryConditions },
+      { $addFields: { sortTimestamp: getSortTimestampField() } },
+      { $sort: { sortTimestamp: -1 } },
+      { $limit: 1 },
+    ]);
+
+    // const hasPrev = timestamp < Number(lastMessage.latestMessageTimestamp);
+    // const hasNext = timestamp > Number(firstMessage.latestMessageTimestamp);
+    const hasPrev =
+      firstMessageDoc.length > 0 &&
+      anchorTimestamp > Number(firstMessageDoc[0].sortTimestamp);
+    const hasNext =
+      lastMessageDoc.length > 0 &&
+      anchorTimestamp < Number(lastMessageDoc[0].sortTimestamp);
 
     // ✅ Tetap balik jika dari arah 'next' (sekarang ambil dari paling baru → lama)
-    const sortedMessages =
-      direction === "next" ? messagesCurrently.reverse() : messagesCurrently;
+    // const sortedMessages =
+    //   direction === "next" ? messagesCurrently.reverse() : messagesCurrently;
+
+    // Sorting akhir di JavaScript berdasarkan `sortOrder`
+    messagesCurrently.sort((a, b) => {
+      const aSortTimestamp =
+        a.senderUserId !== profileId && a.completionTimestamp
+          ? Number(a.completionTimestamp)
+          : Number(a.latestMessageTimestamp);
+      const bSortTimestamp =
+        b.senderUserId !== profileId && b.completionTimestamp
+          ? Number(b.completionTimestamp)
+          : Number(b.latestMessageTimestamp);
+
+      if (aSortTimestamp === bSortTimestamp) {
+        if (a.isHeader && !b.isHeader) return 1;
+        if (!a.isHeader && b.isHeader) return -1;
+        return 0;
+      }
+      return sortOrder === 1
+        ? aSortTimestamp - bSortTimestamp
+        : bSortTimestamp - aSortTimestamp;
+    });
 
     return res.json({
-      data: sortedMessages
-        .map((item) => ({
-          ...item,
-          latestMessageTimestamp: Number(item.latestMessageTimestamp),
-        }))
-        .sort((a, b) => {
-          if (a.latestMessageTimestamp === b.latestMessageTimestamp) {
-            if (a.isHeader && !b.isHeader) return 1;
-            if (!a.isHeader && b.isHeader) return -1;
-            return 0;
-          }
-          return b.latestMessageTimestamp - a.latestMessageTimestamp;
-        }),
+      // data: sortedMessages
+      //   .map((item) => ({
+      //     ...item,
+      //     latestMessageTimestamp: Number(item.latestMessageTimestamp),
+      //   }))
+      //   .sort((a, b) => {
+      //     if (a.latestMessageTimestamp === b.latestMessageTimestamp) {
+      //       if (a.isHeader && !b.isHeader) return 1;
+      //       if (!a.isHeader && b.isHeader) return -1;
+      //       return 0;
+      //     }
+      //     return b.latestMessageTimestamp - a.latestMessageTimestamp;
+      //   }),
+      data: messagesCurrently.map((item) => ({
+        ...item,
+        latestMessageTimestamp: Number(item.latestMessageTimestamp),
+        completionTimestamp: item.completionTimestamp
+          ? Number(item.completionTimestamp)
+          : null,
+      })),
       meta: {
         anchorMessageId: anchor.messageId,
         hasPrev,
         hasNext,
         totalMessages,
-        fetchedCount: sortedMessages.length,
+        // fetchedCount: sortedMessages.length,
+        fetchCount: messagesCurrently.length,
         direction,
       },
     });
   } catch (err) {
+    console.log("err-get-messages-pagination :", err);
     next(err);
   }
 };

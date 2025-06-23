@@ -60,7 +60,7 @@ dbConnection()
         // origin: "https://<nama-app-frontend>.vercel.app" // Sesuaikan untuk production
       })
     );
-    app.use(express.json());
+    app.use(express.json({ limit: "50mb" })); // Tambahkan limit untuk JSON
     app.use(express.urlencoded({ extended: true }));
 
     app.use(customHeader);

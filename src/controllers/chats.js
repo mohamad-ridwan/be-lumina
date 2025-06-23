@@ -2,47 +2,204 @@ const { HTTP_STATUS_CODE } = require("../constant");
 const chats = require("../models/chats");
 const usersDB = require("../models/users");
 
+// exports.getChatsPagination = async (req, res, next) => {
+//   try {
+//     const { userId, limit = 20, chatId, search = "" } = req.query;
+
+//     if (!userId || !userId.trim()) {
+//       return res.status(HTTP_STATUS_CODE.BAD_REQUEST).json({
+//         message: "userId required",
+//       });
+//     }
+
+//     const limitNumber = parseInt(limit);
+//     let anchorTimestamp = null;
+
+//     // Cari userId dari hasil search username (jika ada search query)
+//     let matchedUserIdsFromUsername = [];
+
+//     if (search) {
+//       const matchedUsers = await usersDB
+//         .find({
+//           username: { $regex: search, $options: "i" },
+//           id: { $ne: userId }, // validasi: tidak termasuk userId sendiri
+//         })
+//         .select("id");
+
+//       matchedUserIdsFromUsername = matchedUsers.map((user) => user.id);
+//     }
+
+//     // Ambil timestamp dari chatId anchor (jika ada)
+//     if (chatId) {
+//       const anchorChat = await chats.aggregate([
+//         {
+//           $match: {
+//             chatId: chatId,
+//             userIds: { $in: [userId] },
+//             latestMessage: { $exists: true, $ne: [] },
+//           },
+//         },
+//         {
+//           $addFields: {
+//             latestUserMessage: {
+//               $first: {
+//                 $filter: {
+//                   input: "$latestMessage",
+//                   as: "msg",
+//                   cond: { $eq: ["$$msg.userId", userId] },
+//                 },
+//               },
+//             },
+//           },
+//         },
+//         {
+//           $project: {
+//             latestUserMessageTimestamp: {
+//               $toLong: "$latestUserMessage.latestMessageTimestamp",
+//             },
+//           },
+//         },
+//       ]);
+
+//       if (anchorChat.length > 0) {
+//         anchorTimestamp = anchorChat[0].latestUserMessageTimestamp;
+//       }
+//     }
+
+//     // Pipeline dasar
+//     const basePipeline = [
+//       {
+//         $match: {
+//           userIds: { $in: [userId] },
+//           latestMessage: { $exists: true, $ne: [] },
+//           ...(search && {
+//             $or: [
+//               ...(matchedUserIdsFromUsername.length > 0
+//                 ? [{ userIds: { $in: matchedUserIdsFromUsername } }]
+//                 : []),
+//               {
+//                 latestMessage: {
+//                   $elemMatch: {
+//                     $or: [
+//                       { textMessage: { $regex: search, $options: "i" } },
+//                       { "document.caption": { $regex: search, $options: "i" } },
+//                     ],
+//                   },
+//                 },
+//               },
+//             ],
+//           }),
+//         },
+//       },
+//       {
+//         $addFields: {
+//           latestUserMessage: {
+//             $first: {
+//               $filter: {
+//                 input: "$latestMessage",
+//                 as: "msg",
+//                 cond: { $eq: ["$$msg.userId", userId] },
+//               },
+//             },
+//           },
+//         },
+//       },
+//       {
+//         $addFields: {
+//           latestUserMessageTimestamp: {
+//             $toLong: "$latestUserMessage.latestMessageTimestamp",
+//           },
+//         },
+//       },
+//     ];
+
+//     if (anchorTimestamp !== null) {
+//       basePipeline.push({
+//         $match: {
+//           $expr: {
+//             $lt: ["$latestUserMessageTimestamp", anchorTimestamp],
+//           },
+//         },
+//       });
+//     }
+
+//     // Hitung total
+//     const countPipeline = [...basePipeline, { $count: "total" }];
+//     const totalResult = await chats.aggregate(countPipeline);
+//     const totalData = totalResult[0]?.total ?? 0;
+
+//     // Pagination
+//     const paginatedPipeline = [
+//       ...basePipeline,
+//       { $sort: { latestUserMessageTimestamp: -1 } },
+//       { $limit: limitNumber },
+//     ];
+
+//     const chatsCurrently = await chats.aggregate(paginatedPipeline);
+//     const isNext = chatsCurrently.length === limitNumber;
+
+//     return res.status(HTTP_STATUS_CODE.OK).json({
+//       message: "Chats Data",
+//       data: chatsCurrently,
+//       totalData,
+//       limit: limitNumber,
+//       itemCount: chatsCurrently.length,
+//       isNext,
+//       nextChatId: chatsCurrently[chatsCurrently.length - 1]?.chatId ?? null,
+//     });
+//   } catch (error) {
+//     next(error);
+//     console.error("Error in getChatsPagination:", error);
+//   }
+// };
+
 exports.getChatsPagination = async (req, res, next) => {
   try {
     const { userId, limit = 20, chatId, search = "" } = req.query;
 
     if (!userId || !userId.trim()) {
-      return res.status(HTTP_STATUS_CODE.BAD_REQUEST).json({
-        message: "userId required",
-      });
+      return res.status(400).json({ message: "userId required" });
     }
 
     const limitNumber = parseInt(limit);
     let anchorTimestamp = null;
 
-    // Cari userId dari hasil search username (jika ada search query)
     let matchedUserIdsFromUsername = [];
 
     if (search) {
       const matchedUsers = await usersDB
         .find({
           username: { $regex: search, $options: "i" },
-          id: { $ne: userId }, // validasi: tidak termasuk userId sendiri
+          id: { $ne: userId },
         })
         .select("id");
 
       matchedUserIdsFromUsername = matchedUsers.map((user) => user.id);
     }
 
-    // Ambil timestamp dari chatId anchor (jika ada)
+    // Handle anchor timestamp via chatId
     if (chatId) {
       const anchorChat = await chats.aggregate([
         {
           $match: {
-            chatId: chatId,
+            chatId,
             userIds: { $in: [userId] },
             latestMessage: { $exists: true, $ne: [] },
           },
         },
         {
           $addFields: {
+            otherUserMessage: {
+              $last: {
+                $filter: {
+                  input: "$latestMessage",
+                  as: "msg",
+                  cond: { $ne: ["$$msg.senderUserId", userId] },
+                },
+              },
+            },
             latestUserMessage: {
-              $first: {
+              $last: {
                 $filter: {
                   input: "$latestMessage",
                   as: "msg",
@@ -53,20 +210,34 @@ exports.getChatsPagination = async (req, res, next) => {
           },
         },
         {
-          $project: {
+          $addFields: {
+            completionTimestamp: {
+              $toLong: "$otherUserMessage.completionTimestamp",
+            },
             latestUserMessageTimestamp: {
               $toLong: "$latestUserMessage.latestMessageTimestamp",
             },
+            calculatedSortTimestamp: {
+              $ifNull: [
+                { $toLong: "$otherUserMessage.completionTimestamp" },
+                { $toLong: "$latestUserMessage.latestMessageTimestamp" },
+              ],
+            },
+          },
+        },
+        {
+          $project: {
+            calculatedSortTimestamp: 1,
           },
         },
       ]);
 
       if (anchorChat.length > 0) {
-        anchorTimestamp = anchorChat[0].latestUserMessageTimestamp;
+        anchorTimestamp = anchorChat[0].calculatedSortTimestamp;
       }
     }
 
-    // Pipeline dasar
+    // Base pipeline for all data
     const basePipeline = [
       {
         $match: {
@@ -93,8 +264,17 @@ exports.getChatsPagination = async (req, res, next) => {
       },
       {
         $addFields: {
+          otherUserMessage: {
+            $last: {
+              $filter: {
+                input: "$latestMessage",
+                as: "msg",
+                cond: { $ne: ["$$msg.senderUserId", userId] },
+              },
+            },
+          },
           latestUserMessage: {
-            $first: {
+            $last: {
               $filter: {
                 input: "$latestMessage",
                 as: "msg",
@@ -106,39 +286,49 @@ exports.getChatsPagination = async (req, res, next) => {
       },
       {
         $addFields: {
+          completionTimestamp: {
+            $toLong: "$otherUserMessage.completionTimestamp",
+          },
           latestUserMessageTimestamp: {
             $toLong: "$latestUserMessage.latestMessageTimestamp",
+          },
+          calculatedSortTimestamp: {
+            $ifNull: [
+              { $toLong: "$otherUserMessage.completionTimestamp" },
+              { $toLong: "$latestUserMessage.latestMessageTimestamp" },
+            ],
           },
         },
       },
     ];
 
+    // Anchor filter
     if (anchorTimestamp !== null) {
       basePipeline.push({
         $match: {
           $expr: {
-            $lt: ["$latestUserMessageTimestamp", anchorTimestamp],
+            $lt: ["$calculatedSortTimestamp", anchorTimestamp],
           },
         },
       });
     }
 
-    // Hitung total
+    // Count total data
     const countPipeline = [...basePipeline, { $count: "total" }];
     const totalResult = await chats.aggregate(countPipeline);
     const totalData = totalResult[0]?.total ?? 0;
 
-    // Pagination
+    // Paginated result
     const paginatedPipeline = [
       ...basePipeline,
-      { $sort: { latestUserMessageTimestamp: -1 } },
+      { $sort: { calculatedSortTimestamp: -1 } },
       { $limit: limitNumber },
     ];
 
     const chatsCurrently = await chats.aggregate(paginatedPipeline);
     const isNext = chatsCurrently.length === limitNumber;
 
-    return res.status(HTTP_STATUS_CODE.OK).json({
+    return res.status(200).json({
       message: "Chats Data",
       data: chatsCurrently,
       totalData,
@@ -148,8 +338,8 @@ exports.getChatsPagination = async (req, res, next) => {
       nextChatId: chatsCurrently[chatsCurrently.length - 1]?.chatId ?? null,
     });
   } catch (error) {
-    next(error);
     console.error("Error in getChatsPagination:", error);
+    next(error);
   }
 };
 

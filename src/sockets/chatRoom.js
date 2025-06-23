@@ -13,6 +13,9 @@ const { generateRandomId } = require("../helpers/generateRandomId");
 const {
   formatDate,
   generateBase64ThumbnailFromUrl,
+  isUserInRoom,
+  getTodayHeader,
+  findLatestMessageForUser,
 } = require("../helpers/general");
 
 dayjs.extend(isToday);
@@ -48,17 +51,6 @@ const isThereMessageToday = async (chatId, chatRoomId) => {
     return false;
   }
 };
-
-async function isUserInRoom(chatId, chatRoomId, userId, client) {
-  return await new Promise((resolve, reject) => {
-    client
-      .sCard(`chats:${chatId}:room:${chatRoomId}:users:${userId}`)
-      .then((res) => {
-        resolve(res > 0);
-      })
-      .catch((err) => reject(err));
-  });
-}
 
 const handleDisconnected = (
   { chatRoomId, chatId, userId, socketId },
@@ -148,11 +140,12 @@ const sendMessage = async (message, io, socket, client) => {
 
   let timeId;
   let headerMessage;
+  let headerId;
 
   if (!headerMessageToday) {
     // ❌ Belum ada header → buat header baru
     timeId = generateRandomId(15);
-    const headerId = generateRandomId(15);
+    headerId = generateRandomId(15);
 
     headerMessage = new chatRoomDB({
       chatId,
@@ -166,6 +159,7 @@ const sendMessage = async (message, io, socket, client) => {
     await headerMessage.save();
   } else {
     timeId = headerMessageToday.timeId;
+    headerId = headerMessageToday.messageId;
   }
 
   // Tambahkan pesan utama (dengan timeId yang sama)
@@ -215,7 +209,11 @@ const sendMessage = async (message, io, socket, client) => {
 
   const newUnreadCount = {
     [latestMessage.senderUserId]: 0,
-    [secondUserId]: isSecondUserInRoom ? 0 : currentUnreadCount + 1,
+    [secondUserId]: isSecondUserInRoom
+      ? 0
+      : latestMessage?.document
+      ? currentUnreadCount
+      : currentUnreadCount + 1,
   };
 
   // Update latestMessage sebagai array
@@ -259,7 +257,6 @@ const sendMessage = async (message, io, socket, client) => {
     {
       unreadCount: newUnreadCount,
       latestMessage: updatedLatestMessages,
-      // latestMessageTimestamp: latestMessage?.latestMessageTimestamp
     },
     { new: true }
   );
@@ -269,7 +266,7 @@ const sendMessage = async (message, io, socket, client) => {
   );
   const senderUserProfile = await usersDB.findOne({ id: senderUserId?.userId });
 
-  // Emit header dulu kalau perlu (kondisi gabungan)
+  // Emit header dulu
   if (headerMessage?.messageId) {
     io.emit("newMessage", {
       chatId,
@@ -281,25 +278,11 @@ const sendMessage = async (message, io, socket, client) => {
       messageId: headerMessage.messageId,
       isHeader: true,
       latestMessageTimestamp: headerMessage.latestMessageTimestamp,
+      isFromMedia: latestMessage?.document?.type ? true : null,
+      senderUserId: latestMessage?.senderUserId,
     });
-    // io.emit("newMessage", {
-    //   ...message,
-    //   timeId,
-    //   messageId: headerMessage.messageId,
-    //   isHeader: true,
-    //   latestMessageTimestamp: headerMessage.latestMessageTimestamp,
-    // });
   }
 
-  // Emit pesan biasa (seperti biasa)
-  // io.emit('newMessage', {
-  //   ...message,
-  //   latestMessage: {
-  //     ...message.latestMessage,
-  //     timeId
-  //   },
-  //   unreadCount: newUnreadCount
-  // })
   io.emit("newMessage", {
     ...message,
     username: senderUserProfile?.username,
@@ -308,19 +291,8 @@ const sendMessage = async (message, io, socket, client) => {
     thumbnail: senderUserProfile?.thumbnail,
     latestMessage: updatedLatestMessages,
     unreadCount: newUnreadCount,
-  });
-};
-
-// Fungsi tambahan → cari header untuk tanggal ini (sekalian ambil timeId)
-const getTodayHeader = async (chatId, chatRoomId) => {
-  const todayStart = dayjs().startOf("day").valueOf();
-  const todayEnd = dayjs().endOf("day").valueOf();
-
-  return await chatRoomDB.findOne({
-    chatId,
-    chatRoomId,
-    isHeader: true,
-    latestMessageTimestamp: { $gte: todayStart, $lte: todayEnd },
+    timeId,
+    headerId,
   });
 };
 
@@ -483,24 +455,30 @@ const handleUpdateLatestMessageOnDeletedMessage = async (
       requestedDeletionType === "me" ||
       requestedDeletionType === "permanent"
     ) {
-      const latestMessage = await chatRoomDB
-        .findOne({
-          chatId,
-          chatRoomId,
-          isHeader: { $ne: true },
-          $nor: [
-            {
-              isDeleted: {
-                $elemMatch: {
-                  senderUserId: senderUserId,
-                  deletionType: { $in: ["me", "permanent"] },
-                },
-              },
-            },
-          ],
-        })
-        .sort({ latestMessageTimestamp: -1 }) // urutkan dari yang terbaru
-        .lean(); // optional: untuk dapat plain JS object
+      // const latestMessage = await chatRoomDB
+      //   .findOne({
+      //     chatId,
+      //     chatRoomId,
+      //     isHeader: { $ne: true },
+      //     $nor: [
+      //       {
+      //         isDeleted: {
+      //           $elemMatch: {
+      //             senderUserId: senderUserId,
+      //             deletionType: { $in: ["me", "permanent"] },
+      //           },
+      //         },
+      //       },
+      //     ],
+      //   })
+      //   .sort({ latestMessageTimestamp: -1 }) // urutkan dari yang terbaru
+      //   .lean(); // optional: untuk dapat plain JS object
+
+      const latestMessage = await findLatestMessageForUser(
+        chatId,
+        chatRoomId,
+        senderUserId
+      );
       if (!latestMessage?.chatRoomId) {
         let newLatestMessages = chatsCurrently?.latestMessage;
         newLatestMessages = newLatestMessages.filter(
@@ -531,6 +509,13 @@ const handleUpdateLatestMessageOnDeletedMessage = async (
       if (latestMessage?.document) {
         newLatestMessage.document = latestMessage.document;
       }
+      if (latestMessage?.completionTimestamp) {
+        newLatestMessage.completionTimestamp =
+          latestMessage.completionTimestamp;
+      }
+      if (latestMessage?.completionTimeId) {
+        newLatestMessage.completionTimeId = latestMessage.completionTimeId;
+      }
 
       const latestMessageIndex = chatsCurrently.latestMessage.findIndex(
         (msg) => msg.userId === senderUserId
@@ -559,24 +544,29 @@ const handleUpdateLatestMessageOnDeletedMessage = async (
       let isMustUpdatedLatestMessages = false;
 
       if (latestMessageMainUserId?.messageId === messageId) {
-        const newLatestMessageMainUserId = await chatRoomDB
-          .findOne({
-            chatId,
-            chatRoomId,
-            isHeader: { $ne: true },
-            $nor: [
-              {
-                isDeleted: {
-                  $elemMatch: {
-                    senderUserId: senderUserId,
-                    deletionType: { $in: ["me", "permanent"] },
-                  },
-                },
-              },
-            ],
-          })
-          .sort({ latestMessageTimestamp: -1 }) // urutkan dari yang terbaru
-          .lean();
+        // const newLatestMessageMainUserId = await chatRoomDB
+        //   .findOne({
+        //     chatId,
+        //     chatRoomId,
+        //     isHeader: { $ne: true },
+        //     $nor: [
+        //       {
+        //         isDeleted: {
+        //           $elemMatch: {
+        //             senderUserId: senderUserId,
+        //             deletionType: { $in: ["me", "permanent"] },
+        //           },
+        //         },
+        //       },
+        //     ],
+        //   })
+        //   .sort({ latestMessageTimestamp: -1 }) // urutkan dari yang terbaru
+        //   .lean();
+        const newLatestMessageMainUserId = await findLatestMessageForUser(
+          chatId,
+          chatRoomId,
+          senderUserId // profileId untuk filter di helper
+        );
 
         if (
           newLatestMessageMainUserId?.chatRoomId &&
@@ -596,6 +586,14 @@ const handleUpdateLatestMessageOnDeletedMessage = async (
           };
           if (newLatestMessageMainUserId?.document) {
             newLatestMessage.document = newLatestMessageMainUserId.document;
+          }
+          if (newLatestMessageMainUserId?.completionTimestamp) {
+            newLatestMessage.completionTimestamp =
+              newLatestMessageMainUserId.completionTimestamp;
+          }
+          if (newLatestMessageMainUserId?.completionTimeId) {
+            newLatestMessage.completionTimeId =
+              newLatestMessageMainUserId.completionTimeId;
           }
           latestMessages[indexLatestMessageMainUserId] = newLatestMessage;
           isMustUpdatedLatestMessages = true;
@@ -618,30 +616,43 @@ const handleUpdateLatestMessageOnDeletedMessage = async (
           if (newLatestMessageMainUserId?.document) {
             newLatestMessage.document = newLatestMessageMainUserId.document;
           }
+          if (newLatestMessageMainUserId?.completionTimestamp) {
+            newLatestMessage.completionTimestamp =
+              newLatestMessageMainUserId.completionTimestamp;
+          }
+          if (newLatestMessageMainUserId?.completionTimeId) {
+            newLatestMessage.completionTimeId =
+              newLatestMessageMainUserId.completionTimeId;
+          }
           latestMessages.push(newLatestMessage);
           isMustUpdatedLatestMessages = true;
         }
       }
 
       if (latestMessageSecondUserId?.messageId === messageId) {
-        const newLatestMessageSecondUserId = await chatRoomDB
-          .findOne({
-            chatId,
-            chatRoomId,
-            isHeader: { $ne: true },
-            $nor: [
-              {
-                isDeleted: {
-                  $elemMatch: {
-                    senderUserId: secondProfileId,
-                    deletionType: { $in: ["me", "permanent"] },
-                  },
-                },
-              },
-            ],
-          })
-          .sort({ latestMessageTimestamp: -1 }) // urutkan dari yang terbaru
-          .lean();
+        // const newLatestMessageSecondUserId = await chatRoomDB
+        //   .findOne({
+        //     chatId,
+        //     chatRoomId,
+        //     isHeader: { $ne: true },
+        //     $nor: [
+        //       {
+        //         isDeleted: {
+        //           $elemMatch: {
+        //             senderUserId: secondProfileId,
+        //             deletionType: { $in: ["me", "permanent"] },
+        //           },
+        //         },
+        //       },
+        //     ],
+        //   })
+        //   .sort({ latestMessageTimestamp: -1 }) // urutkan dari yang terbaru
+        //   .lean();
+        const newLatestMessageSecondUserId = await findLatestMessageForUser(
+          chatId,
+          chatRoomId,
+          secondProfileId // profileId untuk filter di helper
+        );
 
         if (
           newLatestMessageSecondUserId?.chatRoomId &&
@@ -661,6 +672,14 @@ const handleUpdateLatestMessageOnDeletedMessage = async (
           };
           if (newLatestMessageSecondUserId?.document) {
             newLatestMessage.document = newLatestMessageSecondUserId.document;
+          }
+          if (newLatestMessageSecondUserId?.completionTimestamp) {
+            newLatestMessage.completionTimestamp =
+              newLatestMessageSecondUserId.completionTimestamp;
+          }
+          if (newLatestMessageSecondUserId?.completionTimeId) {
+            newLatestMessage.completionTimeId =
+              newLatestMessageSecondUserId.completionTimeId;
           }
           latestMessages[indexLatestMessageSecondUserId] = newLatestMessage;
           isMustUpdatedLatestMessages = true;
@@ -683,6 +702,14 @@ const handleUpdateLatestMessageOnDeletedMessage = async (
           if (newLatestMessageSecondUserId?.document) {
             newLatestMessage.document = newLatestMessageSecondUserId.document;
           }
+          if (newLatestMessageSecondUserId?.completionTimestamp) {
+            newLatestMessage.completionTimestamp =
+              newLatestMessageSecondUserId.completionTimestamp;
+          }
+          if (newLatestMessageSecondUserId?.completionTimeId) {
+            newLatestMessage.completionTimeId =
+              newLatestMessageSecondUserId.completionTimeId;
+          }
           latestMessages.push(newLatestMessage);
           isMustUpdatedLatestMessages = true;
         }
@@ -704,6 +731,165 @@ const handleUpdateLatestMessageOnDeletedMessage = async (
     return null;
   }
 };
+
+// const handleUpdateLatestMessageOnDeletedMessage = async (
+//   message,
+//   latestMessageMainUserId_fetched, // Ini sudah yang sudah di-fetch dengan sort logic baru
+//   latestMessageSecondUserId_fetched // Ini juga sudah di-fetch dengan sort logic baru
+// ) => {
+//   try {
+//     const {
+//       chatRoomId,
+//       chatId,
+//       senderUserId, // User yang melakukan delete
+//       secondProfileId, // User lain
+//       deletionType: requestedDeletionType,
+//     } = message;
+
+//     const chatsCurrently = await chatsDB.findOne({ chatRoomId, chatId });
+
+//     if (!chatsCurrently?.latestMessage) {
+//       return [];
+//     }
+
+//     let updatedLatestMessages = [...chatsCurrently.latestMessage]; // Buat salinan untuk imutabilitas
+
+//     let isUpdated = false;
+
+//     // Logic untuk senderUserId
+//     const indexMainUser = updatedLatestMessages.findIndex(
+//       (msg) => msg?.userId === senderUserId
+//     );
+
+//     if (
+//       requestedDeletionType === "me" ||
+//       requestedDeletionType === "permanent"
+//     ) {
+//       if (latestMessageMainUserId_fetched) {
+//         // Jika ada pesan terbaru yang valid
+//         const newLatestMessageForMainUser = {
+//           messageId: latestMessageMainUserId_fetched.messageId,
+//           senderUserId: latestMessageMainUserId_fetched.senderUserId,
+//           messageType: latestMessageMainUserId_fetched.messageType,
+//           textMessage: latestMessageMainUserId_fetched.textMessage,
+//           latestMessageTimestamp:
+//             latestMessageMainUserId_fetched.latestMessageTimestamp,
+//           status: latestMessageMainUserId_fetched.status,
+//           userId: senderUserId, // Penting: userId di sini adalah user yang melihat latest message ini
+//           timeId: latestMessageMainUserId_fetched.timeId,
+//           isDeleted: latestMessageMainUserId_fetched?.isDeleted ?? [],
+//           document: latestMessageMainUserId_fetched?.document, // Tambahkan document jika ada
+//           completionTimestamp:
+//             latestMessageMainUserId_fetched?.completionTimestamp, // Tambahkan completionTimestamp
+//           completionTimeId: latestMessageMainUserId_fetched?.completionTimeId, // Tambahkan completionTimeId
+//         };
+
+//         if (indexMainUser !== -1) {
+//           updatedLatestMessages[indexMainUser] = newLatestMessageForMainUser;
+//         } else {
+//           updatedLatestMessages.push(newLatestMessageForMainUser);
+//         }
+//         isUpdated = true;
+//       } else {
+//         // Tidak ada latest message yang valid untuk main user, hapus entry mereka
+//         if (indexMainUser !== -1) {
+//           updatedLatestMessages.splice(indexMainUser, 1);
+//           isUpdated = true;
+//         }
+//       }
+//     } else if (requestedDeletionType === "everyone") {
+//       // Logic untuk senderUserId
+//       if (latestMessageMainUserId_fetched) {
+//         const newLatestMessageForMainUser = {
+//           messageId: latestMessageMainUserId_fetched.messageId,
+//           senderUserId: latestMessageMainUserId_fetched.senderUserId,
+//           messageType: latestMessageMainUserId_fetched.messageType,
+//           textMessage: latestMessageMainUserId_fetched.textMessage,
+//           latestMessageTimestamp:
+//             latestMessageMainUserId_fetched.latestMessageTimestamp,
+//           status: latestMessageMainUserId_fetched.status,
+//           userId: senderUserId, // Penting: userId di sini adalah user yang melihat latest message ini
+//           timeId: latestMessageMainUserId_fetched.timeId,
+//           isDeleted: latestMessageMainUserId_fetched?.isDeleted ?? [],
+//           document: latestMessageMainUserId_fetched?.document,
+//           completionTimestamp:
+//             latestMessageMainUserId_fetched?.completionTimestamp,
+//           completionTimeId: latestMessageMainUserId_fetched?.completionTimeId,
+//         };
+
+//         if (indexMainUser !== -1) {
+//           updatedLatestMessages[indexMainUser] = newLatestMessageForMainUser;
+//         } else {
+//           updatedLatestMessages.push(newLatestMessageForMainUser);
+//         }
+//         isUpdated = true;
+//       } else {
+//         if (indexMainUser !== -1) {
+//           // Jika sudah tidak ada latest message, hapus dari latestMessages
+//           updatedLatestMessages.splice(indexMainUser, 1);
+//           isUpdated = true;
+//         }
+//       }
+
+//       // Logic untuk secondProfileId
+//       const indexSecondUser = updatedLatestMessages.findIndex(
+//         (msg) => msg?.userId === secondProfileId
+//       );
+
+//       if (latestMessageSecondUserId_fetched) {
+//         const newLatestMessageForSecondUser = {
+//           messageId: latestMessageSecondUserId_fetched.messageId,
+//           senderUserId: latestMessageSecondUserId_fetched.senderUserId,
+//           messageType: latestMessageSecondUserId_fetched.messageType,
+//           textMessage: latestMessageSecondUserId_fetched.textMessage,
+//           latestMessageTimestamp:
+//             latestMessageSecondUserId_fetched.latestMessageTimestamp,
+//           status: latestMessageSecondUserId_fetched.status,
+//           userId: secondProfileId, // Penting: userId di sini adalah user yang melihat latest message ini
+//           timeId: latestMessageSecondUserId_fetched.timeId,
+//           isDeleted: latestMessageSecondUserId_fetched?.isDeleted ?? [],
+//           document: latestMessageSecondUserId_fetched?.document,
+//           completionTimestamp:
+//             latestMessageSecondUserId_fetched?.completionTimestamp,
+//           completionTimeId: latestMessageSecondUserId_fetched?.completionTimeId,
+//         };
+
+//         if (indexSecondUser !== -1) {
+//           updatedLatestMessages[indexSecondUser] =
+//             newLatestMessageForSecondUser;
+//         } else {
+//           updatedLatestMessages.push(newLatestMessageForSecondUser);
+//         }
+//         isUpdated = true;
+//       } else {
+//         if (indexSecondUser !== -1) {
+//           // Jika sudah tidak ada latest message, hapus dari latestMessages
+//           updatedLatestMessages.splice(indexSecondUser, 1);
+//           isUpdated = true;
+//         }
+//       }
+//     }
+
+//     if (isUpdated) {
+//       const result = await chatsDB.findOneAndUpdate(
+//         { chatRoomId, chatId },
+//         {
+//           latestMessage: updatedLatestMessages,
+//         },
+//         { new: true }
+//       );
+//       return result?.latestMessage;
+//     } else {
+//       return chatsCurrently?.latestMessage ?? []; // Return original if no update happened
+//     }
+//   } catch (error) {
+//     console.error(
+//       "Error handling update latest message on deleted message:",
+//       error
+//     );
+//     return null;
+//   }
+// };
 
 const handleDeleteMessage = async (message, io, socket, client) => {
   try {
@@ -737,49 +923,64 @@ const handleDeleteMessage = async (message, io, socket, client) => {
 
     let isMustUpdatedLatestMessages = false;
 
-    const latestMessageMainUserId = await chatRoomDB
-      .findOne({
-        chatId,
-        chatRoomId,
-        isHeader: { $ne: true },
-        $nor: [
-          {
-            isDeleted: {
-              $elemMatch: {
-                senderUserId: senderUserId,
-                deletionType: { $in: ["me", "permanent"] },
-              },
-            },
-          },
-        ],
-      })
-      .sort({ latestMessageTimestamp: -1 }) // urutkan dari yang terbaru
-      .lean();
+    // const latestMessageMainUserId = await chatRoomDB
+    //   .findOne({
+    //     chatId,
+    //     chatRoomId,
+    //     isHeader: { $ne: true },
+    //     $nor: [
+    //       {
+    //         isDeleted: {
+    //           $elemMatch: {
+    //             senderUserId: senderUserId,
+    //             deletionType: { $in: ["me", "permanent"] },
+    //           },
+    //         },
+    //       },
+    //     ],
+    //   })
+    //   .sort({ latestMessageTimestamp: -1 }) // urutkan dari yang terbaru
+    //   .lean();
+
+    // --- REVISI PENTING: Gunakan findLatestMessageForUser helper ---
+    // Mencari latestMessage untuk user yang melakukan penghapusan (senderUserId)
+    const latestMessageMainUserId = await findLatestMessageForUser(
+      chatId,
+      chatRoomId,
+      senderUserId // profileId untuk filter di helper
+    );
 
     let latestMessageSecondUserId = null;
 
     if (requestedDeletionType === "everyone") {
-      latestMessageSecondUserId = await chatRoomDB
-        .findOne({
-          chatId,
-          chatRoomId,
-          isHeader: { $ne: true },
-          $nor: [
-            {
-              isDeleted: {
-                $elemMatch: {
-                  senderUserId: secondProfileId,
-                  deletionType: { $in: ["me", "permanent"] },
-                },
-              },
-            },
-          ],
-        })
-        .sort({ latestMessageTimestamp: -1 }) // urutkan dari yang terbaru
-        .lean();
+      // latestMessageSecondUserId = await chatRoomDB
+      //   .findOne({
+      //     chatId,
+      //     chatRoomId,
+      //     isHeader: { $ne: true },
+      //     $nor: [
+      //       {
+      //         isDeleted: {
+      //           $elemMatch: {
+      //             senderUserId: secondProfileId,
+      //             deletionType: { $in: ["me", "permanent"] },
+      //           },
+      //         },
+      //       },
+      //     ],
+      //   })
+      //   .sort({ latestMessageTimestamp: -1 }) // urutkan dari yang terbaru
+      //   .lean();
+
+      // Mencari latestMessage untuk user lain (secondProfileId)
+      latestMessageSecondUserId = await findLatestMessageForUser(
+        chatId,
+        chatRoomId,
+        secondProfileId // profileId untuk filter di helper
+      );
     }
 
-    if (messageId === latestMessageMainUserId.messageId) {
+    if (messageId === latestMessageMainUserId?.messageId) {
       isMustUpdatedLatestMessages = true;
     }
 

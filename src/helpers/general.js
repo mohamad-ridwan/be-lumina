@@ -14,6 +14,7 @@ const fs = require("fs"); // <<< Impor modul 'fs' secara normal
 const fsp = require("fs").promises;
 const ffmpegPath = require("ffmpeg-static");
 const axios = require("axios");
+const chatRoomDB = require("../models/chatRoom");
 
 dayjs.extend(isToday);
 dayjs.extend(isYesterday);
@@ -257,7 +258,7 @@ async function processImage(
         inputFilePath, // Input file
         "-y", // Overwrite output file if it exists
         "-q:v",
-        "5", // Kualitas kompresi gambar (0-31, 0 = lossless, 31 = terburuk). 5-10 umumnya memberikan keseimbangan baik.
+        "31", // Kualitas kompresi gambar (0-31, 0 = lossless, 31 = terburuk). 5-10 umumnya memberikan keseimbangan baik.
         outputFilePath, // Output file
       ];
     }
@@ -529,6 +530,90 @@ async function generateThumbnailFromVideo(
 //   }
 // }
 
+async function isUserInRoom(chatId, chatRoomId, userId, client) {
+  return await new Promise((resolve, reject) => {
+    client
+      .sCard(`chats:${chatId}:room:${chatRoomId}:users:${userId}`)
+      .then((res) => {
+        resolve(res > 0);
+      })
+      .catch((err) => reject(err));
+  });
+}
+
+// Fungsi tambahan → cari header untuk tanggal ini (sekalian ambil timeId)
+const getTodayHeader = async (chatId, chatRoomId) => {
+  const todayStart = dayjs().startOf("day").valueOf();
+  const todayEnd = dayjs().endOf("day").valueOf();
+
+  return await chatRoomDB.findOne({
+    chatId,
+    chatRoomId,
+    isHeader: true,
+    latestMessageTimestamp: { $gte: todayStart, $lte: todayEnd },
+  });
+};
+
+// Fungsi helper untuk mendapatkan sortTimestamp field definition untuk aggregation
+const getSortTimestampAggregationField = (profileId) => {
+  return {
+    $cond: {
+      if: {
+        $and: [
+          { $ne: ["$senderUserId", profileId] }, // Jika senderUserId BUKAN profileId yang sedang login
+          { $ne: ["$completionTimestamp", null] }, // DAN completionTimestamp tidak null
+        ],
+      },
+      then: { $toDouble: "$completionTimestamp" }, // Maka gunakan completionTimestamp
+      else: { $toDouble: "$latestMessageTimestamp" }, // Selain itu, gunakan latestMessageTimestamp
+    },
+  };
+};
+
+// Fungsi helper untuk mendapatkan latest message berdasarkan profileId dan kondisi
+const findLatestMessageForUser = async (
+  chatId,
+  chatRoomId,
+  profileIdToMatch
+) => {
+  try {
+    const pipeline = [
+      {
+        $match: {
+          chatId,
+          chatRoomId,
+          isHeader: { $ne: true },
+          // Pastikan pesan tidak dihapus oleh profileIdToMatch
+          isDeleted: {
+            $not: {
+              $elemMatch: {
+                senderUserId: profileIdToMatch,
+                deletionType: { $in: ["me", "permanent"] },
+              },
+            },
+          },
+        },
+      },
+      {
+        $addFields: {
+          // Tambahkan field sortTimestamp dengan logika kompleks
+          sortTimestamp: getSortTimestampAggregationField(profileIdToMatch),
+        },
+      },
+      {
+        $sort: { sortTimestamp: -1 }, // Urutkan dari yang terbaru
+      },
+      { $limit: 1 }, // Hanya ambil satu dokumen (yang paling baru)
+    ];
+
+    const result = await chatRoomDB.aggregate(pipeline);
+    return result.length > 0 ? result[0] : null;
+  } catch (error) {
+    console.error("Error in findLatestMessageForUser:", error);
+    return null;
+  }
+};
+
 module.exports = {
   formatDate,
   generateBase64ThumbnailFromUrl,
@@ -536,4 +621,8 @@ module.exports = {
   processVideo,
   generateThumbnailFromVideo,
   processImage,
+  isUserInRoom,
+  getTodayHeader,
+  findLatestMessageForUser,
+  getSortTimestampAggregationField,
 };
