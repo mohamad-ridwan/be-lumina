@@ -1,6 +1,7 @@
 const chatRoomDB = require("../models/chatRoom");
+const toolsDB = require("../models/tools");
 const genAI = require("../services/gemini");
-const availableTools = require("../tools/productTools");
+// const availableTools = require("../tools/productTools");
 const { availableFunctions } = require("../services/product");
 const { generateRandomId } = require("../helpers/generateRandomId");
 
@@ -107,12 +108,12 @@ const processNewMessageWithAI = async (
   const latestMessageTimestamp = Date.now();
   const newMessageId = generateRandomId(15);
   try {
-    // return response.text;
+    const tools = await toolsDB.find();
     const chat = genAI.chats.create({
       model: "gemini-2.5-flash",
       //   history: formattedHisory,
       config: {
-        tools: availableTools,
+        tools: [{ functionDeclarations: tools }],
         // temperature: 0.5,
       },
     });
@@ -197,7 +198,7 @@ const processNewMessageWithAI = async (
       agenda,
       newMessageId,
     });
-    throw error; // Melempar error agar bisa ditangani di tempat lain
+    return error;
   }
 };
 

@@ -336,13 +336,7 @@ const cancelBotMessageJob = async (
   }
 };
 
-const createScheduleBotMessage = async (
-  message,
-  io,
-  socket,
-  agenda,
-  client
-) => {
+const createScheduleAIMessage = async (message, io, socket, agenda, client) => {
   const { latestMessage, isNeedHeaderDate, recipientProfileId, role } = message;
 
   const chatRoomId = message?.chatRoomId;
@@ -380,7 +374,7 @@ const createScheduleBotMessage = async (
   }
 
   const schedule = await agenda.schedule(
-    "in 1 minutes",
+    "in 5 seconds",
     "sendMessageToCustomer",
     message
   );
@@ -536,9 +530,9 @@ const sendMessage = async (
 
   // if (usingBot) {
   //   // handleGetNewMessageForBot(message, io, socket, client, agenda);
-  //   await createScheduleBotMessage(message, io, socket, agenda, client);
+  //   await createScheduleAIMessage(message, io, socket, agenda, client);
   // }
-  await createScheduleBotMessage(message, io, socket, agenda, client);
+  await createScheduleAIMessage(message, io, socket, agenda, client);
 
   // Emit header dulu
   if (headerMessage?.messageId) {
