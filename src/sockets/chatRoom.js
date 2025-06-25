@@ -11,12 +11,11 @@ const utc = require("dayjs/plugin/utc");
 const timezone = require("dayjs/plugin/timezone");
 const { generateRandomId } = require("../helpers/generateRandomId");
 const {
-  formatDate,
-  generateBase64ThumbnailFromUrl,
   isUserInRoom,
   getTodayHeader,
   findLatestMessageForUser,
 } = require("../helpers/general");
+const { processNewMessageWithAI } = require("../utils/gemini");
 
 dayjs.extend(isToday);
 dayjs.extend(isYesterday);
@@ -129,7 +128,52 @@ const markMessageAsRead = async (message, io) => {
 //     });
 // }
 
-const sendMessage = async (message, io, socket, client) => {
+const handleGetNewMessageForBot = async (message, io, socket, client) => {
+  const { latestMessage, isNeedHeaderDate, recipientProfileId, role } = message;
+
+  if (role === "admin" && !latestMessage?.textMessage) {
+    return;
+  }
+
+  const chatRoomId = message?.chatRoomId;
+  const chatId = message?.chatId;
+
+  const senderUserId = recipientProfileId;
+  const newRecipientProfileId = latestMessage?.senderUserId;
+
+  io.emit("typing-start", {
+    recipientId: newRecipientProfileId,
+    senderId: senderUserId,
+  });
+  const textMessageFromAI = await processNewMessageWithAI(
+    [],
+    latestMessage.textMessage
+  );
+  console.log("Text message from AI:", textMessageFromAI);
+  let newMessageForUser = {
+    chatId,
+    chatRoomId,
+    eventType: "send-message",
+    latestMessage: {
+      latestMessageTimestamp: Date.now(),
+      messageId: generateRandomId(15),
+      messageType: "text",
+      senderUserId,
+      status: "UNREAD",
+      textMessage: textMessageFromAI,
+    },
+    recipientProfileId: newRecipientProfileId,
+    role: "admin",
+  };
+
+  sendMessage(newMessageForUser, io, socket, client, false);
+  io.emit("typing-stop", {
+    recipientId: newRecipientProfileId,
+    senderId: senderUserId,
+  });
+};
+
+const sendMessage = async (message, io, socket, client, usingBot = true) => {
   const { latestMessage, isNeedHeaderDate, recipientProfileId } = message;
 
   const chatRoomId = message?.chatRoomId;
@@ -294,6 +338,9 @@ const sendMessage = async (message, io, socket, client) => {
     timeId,
     headerId,
   });
+  if (usingBot) {
+    handleGetNewMessageForBot(message, io, socket, client);
+  }
 };
 
 // const sendMessage = async (message, io, socket, client) => {
@@ -1125,4 +1172,7 @@ const chatRoom = {
   markMessageAsRead,
 };
 
-module.exports = { chatRoom, sendMessage };
+module.exports = {
+  chatRoom,
+  sendMessage,
+};

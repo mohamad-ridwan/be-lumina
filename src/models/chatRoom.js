@@ -28,6 +28,11 @@ const chatRoom = new Schema(
     status: {
       type: String,
     },
+    role: {
+      type: String,
+      enum: ["user", "model"],
+      default: "user",
+    },
     isHeader: {
       type: Boolean,
     },
