@@ -541,6 +541,22 @@ async function isUserInRoom(chatId, chatRoomId, userId, client) {
   });
 }
 
+const existingBotReplyMessageJob = async (
+  chatId,
+  chatRoomId,
+  userId,
+  client
+) => {
+  try {
+    const existingJobId = await client.get(
+      `bot-message:chats:${chatId}:room:${chatRoomId}:userId:${userId}`
+    );
+    return existingJobId;
+  } catch (error) {
+    return error;
+  }
+};
+
 // Fungsi tambahan → cari header untuk tanggal ini (sekalian ambil timeId)
 const getTodayHeader = async (chatId, chatRoomId) => {
   const todayStart = dayjs().startOf("day").valueOf();
@@ -625,4 +641,5 @@ module.exports = {
   getTodayHeader,
   findLatestMessageForUser,
   getSortTimestampAggregationField,
+  existingBotReplyMessageJob,
 };

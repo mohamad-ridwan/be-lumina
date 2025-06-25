@@ -1,6 +1,7 @@
 const chatRoomDB = require("../models/chatRoom");
 const chatsDB = require("../models/chats");
 const usersDB = require("../models/users");
+const mongoose = require("mongoose");
 const dayjs = require("dayjs");
 require("dayjs/locale/id");
 const isToday = require("dayjs/plugin/isToday");
@@ -14,6 +15,7 @@ const {
   isUserInRoom,
   getTodayHeader,
   findLatestMessageForUser,
+  existingBotReplyMessageJob,
 } = require("../helpers/general");
 const { processNewMessageWithAI } = require("../utils/gemini");
 
@@ -128,10 +130,122 @@ const markMessageAsRead = async (message, io) => {
 //     });
 // }
 
-const handleGetNewMessageForBot = async (message, io, socket, client) => {
+const handleSendMessageFromAI = async (
+  generatedText,
+  message,
+  latestMessageTimestamp,
+  { io, socket, client, agenda, newMessageId }
+) => {
   const { latestMessage, isNeedHeaderDate, recipientProfileId, role } = message;
 
-  if (role === "admin" && !latestMessage?.textMessage) {
+  const chatRoomId = message?.chatRoomId;
+  const chatId = message?.chatId;
+
+  const senderUserId = recipientProfileId;
+  const newRecipientProfileId = latestMessage?.senderUserId;
+
+  let newMessageForUser = {
+    chatId,
+    chatRoomId,
+    eventType: "send-message",
+    latestMessage: {
+      latestMessageTimestamp,
+      messageId: newMessageId,
+      messageType: "text",
+      senderUserId,
+      status: "UNREAD",
+      textMessage:
+        generatedText ??
+        "Maaf kami tidak tersedia untuk saat ini. Mohon coba lagi nanti.",
+    },
+    recipientProfileId: newRecipientProfileId,
+    role: "admin",
+  };
+
+  const isAvailableMessage = await chatRoomDB.findOne({
+    chatId,
+    chatRoomId,
+    messageId: newMessageId,
+  });
+
+  if (!isAvailableMessage?._id) {
+    await sendMessage(newMessageForUser, io, socket, client, agenda, false);
+  } else {
+    isAvailableMessage.textMessage = generatedText;
+    await isAvailableMessage.save();
+    // await chatRoomDB.findOneAndUpdate(
+    //   {
+    //     chatId,
+    //     chatRoomId,
+    //     messageId: newMessageId,
+    //   },
+    //   { textMessage: generatedText }
+    // );
+
+    // Update chats
+    const chatsCurrently = await chatsDB.findOne({ chatRoomId, chatId });
+
+    // Update latestMessage sebagai array
+    let updatedLatestMessages = Array.isArray(chatsCurrently.latestMessage)
+      ? [...chatsCurrently.latestMessage]
+      : [];
+
+    const existingIndexUserId1 = updatedLatestMessages.findIndex(
+      (item) =>
+        item.userId === chatsCurrently.userIds[0] &&
+        item?.messageId === newMessageId
+    );
+    const existingIndexUserId2 = updatedLatestMessages.findIndex(
+      (item) =>
+        item.userId === chatsCurrently.userIds[1] &&
+        item?.messageId === newMessageId
+    );
+
+    if (existingIndexUserId1 !== -1) {
+      updatedLatestMessages[existingIndexUserId1].textMessage = generatedText;
+    }
+    if (existingIndexUserId2 !== -1) {
+      updatedLatestMessages[existingIndexUserId2].textMessage = generatedText;
+    }
+
+    updatedLatestMessages = updatedLatestMessages.filter(
+      (item) => item?.userId
+    );
+
+    await chatsDB.updateOne(
+      { chatRoomId, chatId },
+      {
+        latestMessage: updatedLatestMessages,
+      }
+    );
+
+    const senderUserProfile = await usersDB.findOne({
+      id: newRecipientProfileId,
+    });
+
+    io.emit("updateMessage", {
+      ...newMessageForUser,
+      username: senderUserProfile?.username,
+      image: senderUserProfile?.image,
+      imgCropped: senderUserProfile?.imgCropped,
+      thumbnail: senderUserProfile?.thumbnail,
+      latestMessage: updatedLatestMessages,
+      messageUpdated: newMessageForUser.latestMessage,
+    });
+  }
+  return;
+};
+
+const handleGetNewMessageForBot = async (
+  message,
+  io,
+  socket,
+  client,
+  agenda
+) => {
+  const { latestMessage, isNeedHeaderDate, recipientProfileId, role } = message;
+
+  if (role === "admin" || latestMessage?.messageType !== "text") {
     return;
   }
 
@@ -145,35 +259,145 @@ const handleGetNewMessageForBot = async (message, io, socket, client) => {
     recipientId: newRecipientProfileId,
     senderId: senderUserId,
   });
-  const textMessageFromAI = await processNewMessageWithAI(
-    [],
-    latestMessage.textMessage
-  );
-  console.log("Text message from AI:", textMessageFromAI);
-  let newMessageForUser = {
-    chatId,
-    chatRoomId,
-    eventType: "send-message",
-    latestMessage: {
-      latestMessageTimestamp: Date.now(),
-      messageId: generateRandomId(15),
-      messageType: "text",
-      senderUserId,
-      status: "UNREAD",
-      textMessage: textMessageFromAI,
-    },
-    recipientProfileId: newRecipientProfileId,
-    role: "admin",
-  };
+  // const textMessageFromAI = await processNewMessageWithAI([], message);
+  // let newMessageForUser = {
+  //   chatId,
+  //   chatRoomId,
+  //   eventType: "send-message",
+  //   latestMessage: {
+  //     latestMessageTimestamp: Date.now(),
+  //     messageId: generateRandomId(15),
+  //     messageType: "text",
+  //     senderUserId,
+  //     status: "UNREAD",
+  //     textMessage:
+  //       textMessageFromAI ?? "Maaf kami tidak tersedia untuk saat ini.",
+  //   },
+  //   recipientProfileId: newRecipientProfileId,
+  //   role: "admin",
+  // };
 
-  sendMessage(newMessageForUser, io, socket, client, false);
+  // sendMessage(newMessageForUser, io, socket, client, agenda, false);
+
+  await processNewMessageWithAI(
+    [],
+    message,
+    async (
+      responseText,
+      message,
+      latestMessageTimestamp,
+      { io, socket, client, agenda, newMessageId }
+    ) => {
+      const result = await handleSendMessageFromAI(
+        responseText,
+        message,
+        latestMessageTimestamp,
+        { io, socket, client, agenda, newMessageId }
+      );
+      return result;
+    },
+    { io, socket, client, agenda }
+  );
   io.emit("typing-stop", {
     recipientId: newRecipientProfileId,
     senderId: senderUserId,
   });
 };
 
-const sendMessage = async (message, io, socket, client, usingBot = true) => {
+const cancelBotMessageJob = async (
+  chatId,
+  chatRoomId,
+  userId,
+  existingJobId,
+  agenda,
+  client
+) => {
+  if (existingJobId) {
+    // 2. Jika ada job lama, batalkan job tersebut di Agenda
+    console.log(
+      `Membatalkan job balasan bot yang sudah ada (${existingJobId}) untuk chatRoom: ${chatRoomId}`
+    );
+    try {
+      // agenda.cancel() akan menghapus job dari MongoDB
+      const objectIdToCancel = new mongoose.Types.ObjectId(existingJobId);
+      await agenda.cancel({ _id: objectIdToCancel });
+    } catch (cancelError) {
+      // Ini bisa terjadi jika job sudah selesai dieksekusi atau dibatalkan oleh proses lain
+      console.warn(
+        `Gagal membatalkan job Agenda ${existingJobId}:`,
+        cancelError.message
+      );
+    }
+
+    // Hapus juga entri dari Redis
+    await client.del(
+      `bot-message:chats:${chatId}:room:${chatRoomId}:userId:${userId}`
+    );
+  }
+};
+
+const createScheduleBotMessage = async (
+  message,
+  io,
+  socket,
+  agenda,
+  client
+) => {
+  const { latestMessage, isNeedHeaderDate, recipientProfileId, role } = message;
+
+  const chatRoomId = message?.chatRoomId;
+  const chatId = message?.chatId;
+
+  const senderUserId = recipientProfileId;
+  // const newRecipientProfileId = latestMessage?.senderUserId;
+
+  let userIdForBot = null;
+
+  if (role === "admin") {
+    userIdForBot = latestMessage?.senderUserId;
+  } else {
+    userIdForBot = senderUserId;
+  }
+
+  const existingJobId = await existingBotReplyMessageJob(
+    chatId,
+    chatRoomId,
+    userIdForBot,
+    client
+  );
+
+  await cancelBotMessageJob(
+    chatId,
+    chatRoomId,
+    userIdForBot,
+    existingJobId,
+    agenda,
+    client
+  );
+
+  if (role === "admin" || !latestMessage?.textMessage) {
+    return;
+  }
+
+  const schedule = await agenda.schedule(
+    "in 5 seconds",
+    "sendMessageToCustomer",
+    message
+  );
+  await client.set(
+    `bot-message:chats:${chatId}:room:${chatRoomId}:userId:${senderUserId}`,
+    schedule.attrs._id.toString()
+  );
+};
+
+const sendMessage = async (
+  message,
+  io,
+  socket,
+  client,
+  agenda,
+  usingBot = true
+) => {
   const { latestMessage, isNeedHeaderDate, recipientProfileId } = message;
 
   const chatRoomId = message?.chatRoomId;
@@ -310,6 +534,12 @@ const sendMessage = async (message, io, socket, client, usingBot = true) => {
   );
   const senderUserProfile = await usersDB.findOne({ id: senderUserId?.userId });
 
+  // if (usingBot) {
+  //   // handleGetNewMessageForBot(message, io, socket, client, agenda);
+  //   await createScheduleBotMessage(message, io, socket, agenda, client);
+  // }
+  await createScheduleBotMessage(message, io, socket, agenda, client);
+
   // Emit header dulu
   if (headerMessage?.messageId) {
     io.emit("newMessage", {
@@ -338,9 +568,6 @@ const sendMessage = async (message, io, socket, client, usingBot = true) => {
     timeId,
     headerId,
   });
-  if (usingBot) {
-    handleGetNewMessageForBot(message, io, socket, client);
-  }
 };
 
 // const sendMessage = async (message, io, socket, client) => {
@@ -1156,9 +1383,9 @@ const handleDeleteMessage = async (message, io, socket, client) => {
   }
 };
 
-const handleGetSendMessage = async (message, io, socket, client) => {
+const handleGetSendMessage = async (message, io, socket, client, agenda) => {
   if (message?.eventType === "send-message") {
-    sendMessage(message, io, socket, client);
+    sendMessage(message, io, socket, client, agenda);
   } else if (message?.eventType === "reaction-message") {
     handleReactionMessage(message, io, socket, client);
   } else if (message?.eventType === "delete-message") {
@@ -1170,9 +1397,11 @@ const chatRoom = {
   handleDisconnected,
   handleGetSendMessage,
   markMessageAsRead,
+  handleGetNewMessageForBot,
 };
 
 module.exports = {
   chatRoom,
   sendMessage,
+  handleSendMessageFromAI,
 };

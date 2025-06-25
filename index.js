@@ -10,6 +10,7 @@ const { customHeader } = require("./src/utils/middlewares");
 const { chatRoom } = require("./src/sockets/chatRoom");
 const { usersSocket } = require("./src/sockets/users");
 const { chatsSocket } = require("./src/sockets/chats");
+const { Agenda } = require("@hokify/agenda");
 
 const origin = [
   "https://lumina-id.web.app",
@@ -71,10 +72,35 @@ dbConnection()
     //     console.log(`Server is running on port ${PORT}`)
     // })
 
+    const agenda = new Agenda({
+      db: {
+        address: process.env.MONGO_DB_URI,
+        collection: "agendaJobs",
+      },
+    });
+
     // Socket.io Connection
     io.on("connection", (socket) => {
       console.log("A user connected", socket.id);
       const socketId = socket.id;
+
+      agenda.define("sendMessageToCustomer", async (data) => {
+        const message = data.attrs.data;
+        chatRoom.handleGetNewMessageForBot(message, io, socket, client, agenda);
+      });
+
+      // app.locals.agenda = agenda;
+
+      // Jalankan agenda
+      (async function () {
+        try {
+          await agenda.start();
+
+          console.log("🎯 Job scheduled, waiting for execution...");
+        } catch (error) {
+          console.error("❌ Agenda error:", error);
+        }
+      })();
 
       socket.on("disconnect", () => {
         console.log("A user disconnected", socket.id);
@@ -173,7 +199,7 @@ dbConnection()
       });
 
       socket.on("sendMessage", (message) => {
-        chatRoom.handleGetSendMessage(message, io, socket, client);
+        chatRoom.handleGetSendMessage(message, io, socket, client, agenda);
       });
 
       socket.on("markMessageAsRead", (message) => {

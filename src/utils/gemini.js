@@ -2,6 +2,7 @@ const chatRoomDB = require("../models/chatRoom");
 const genAI = require("../services/gemini");
 const availableTools = require("../tools/productTools");
 const { availableFunctions } = require("../services/product");
+const { generateRandomId } = require("../helpers/generateRandomId");
 
 const getConversationHistoryForGemini = async (message, io, socket, client) => {
   try {
@@ -97,7 +98,14 @@ const getConversationHistoryForGemini = async (message, io, socket, client) => {
   }
 };
 
-const processNewMessageWithAI = async (formattedHisory, textMessage) => {
+const processNewMessageWithAI = async (
+  formattedHisory,
+  message,
+  sendMessageCallback,
+  { io, socket, client, agenda }
+) => {
+  const latestMessageTimestamp = Date.now();
+  const newMessageId = generateRandomId(15);
   try {
     // return response.text;
     const chat = genAI.chats.create({
@@ -105,15 +113,18 @@ const processNewMessageWithAI = async (formattedHisory, textMessage) => {
       //   history: formattedHisory,
       config: {
         tools: availableTools,
-        temperature: 0.5,
-        maxOutputTokens: 500,
+        // temperature: 0.5,
       },
     });
-    const response = await chat.sendMessage({ message: textMessage });
+    const response = await chat.sendMessage({
+      message: message.latestMessage.textMessage,
+    });
     if (response.functionCalls && response.functionCalls.length > 0) {
       console.log("Gemini requested function call(s):", response.functionCalls);
 
       let functionCallResult;
+      let responseText = "";
+      let isMustUpdated = false;
       // Iterasi jika Gemini meminta lebih dari satu fungsi (jarang untuk kasus sederhana)
       for (const call of response.functionCalls) {
         const functionName = call.name;
@@ -140,13 +151,52 @@ const processNewMessageWithAI = async (formattedHisory, textMessage) => {
 
           // Ambil balasan AI yang sesungguhnya dari hasil toolResponse
           const finalAiResponseText = toolResponseResult.text;
-          return finalAiResponseText;
+          if (finalAiResponseText) {
+            responseText += finalAiResponseText;
+          }
+          console.log("RESPONSE GENERATED TEXT AI", responseText);
+          await sendMessageCallback(
+            responseText,
+            message,
+            latestMessageTimestamp,
+            { io, socket, client, agenda, newMessageId }
+          );
+          // await handleSendMessageFromAI(
+          //   isMustUpdated,
+          //   responseText,
+          //   message,
+          //   latestMessageTimestamp,
+          //   { io, socket, client, agenda }
+          // );
+          isMustUpdated = true;
         }
       }
+      return responseText;
+    } else {
+      await sendMessageCallback(
+        response.text,
+        message,
+        latestMessageTimestamp,
+        { io, socket, client, agenda, newMessageId }
+      );
+      // await handleSendMessageFromAI(
+      //   false,
+      //   response.text,
+      //   message,
+      //   latestMessageTimestamp,
+      //   { io, socket, client, agenda }
+      // );
+      return response.text;
     }
-    return response.text;
   } catch (error) {
     console.error("Error processing new message with AI:", error);
+    await sendMessageCallback(null, message, latestMessageTimestamp, {
+      io,
+      socket,
+      client,
+      agenda,
+      newMessageId,
+    });
     throw error; // Melempar error agar bisa ditangani di tempat lain
   }
 };

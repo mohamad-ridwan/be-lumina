@@ -12,6 +12,7 @@
   "description": "",
   "dependencies": {
     "@google/genai": "^1.6.0",
+    "@hokify/agenda": "^6.3.0",
     "axios": "^1.9.0",
     "cors": "^2.8.5",
     "dayjs": "^1.11.13",
