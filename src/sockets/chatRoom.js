@@ -380,7 +380,7 @@ const createScheduleBotMessage = async (
   }
 
   const schedule = await agenda.schedule(
-    "in 5 seconds",
+    "in 1 minutes",
     "sendMessageToCustomer",
     message
   );
