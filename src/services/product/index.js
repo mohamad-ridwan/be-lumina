@@ -1,143 +1,829 @@
 // productsService.js atau file tempat fungsi-fungsi tools AI Anda berada
-const shoesDB = require("../../models/shoes"); // Sesuaikan path jika berbeda
+const { pipeline } = require("@huggingface/transformers");
+const Brand = require("../../models/brand"); // Model Brand
+const Category = require("../../models/category"); // Model Category
+const Shoe = require("../../models/shoes"); // Sesuaikan path jika berbeda
+const mongoose = require("mongoose");
+// const genAI = require("../gemini");
 
-/**
- * Mendapatkan harga sebuah produk berdasarkan nama produk dari database.
- * @param {string} productName Nama lengkap produk yang ingin dicari harganya.
- * @returns {Promise<object>} Objek yang berisi status, nama produk, harga, dan mata uang.
- */
-async function getProductPrice({ productName, variant, size }) {
-  console.log(
-    `Executing getProductPrice for: ${productName}, Variant: ${variant}, Size: ${size}`
-  );
+let extractor = null;
 
-  try {
-    let query = {};
-    if (productName) {
-      query.name = { $regex: new RegExp(productName, "i") };
-    }
-    if (variant) {
-      query.variant = { $regex: new RegExp(variant, "i") };
-    }
-    if (size) {
-      query.size = size;
-    }
-
-    const product = await shoesDB.findOne(query);
-
-    if (product) {
-      let responseMessage = `Harga ${product.name}`;
-      if (product.variant) responseMessage += ` varian ${product.variant}`;
-      responseMessage += ` adalah Rp ${product.price.toLocaleString("id-ID")}.`;
-
-      return {
-        status: "success",
-        productName: product.name,
-        variant: product.variant,
-        size: product.size,
-        price: product.price,
-        currency: "IDR",
-        message: responseMessage,
-      };
-    } else {
-      return {
-        status: "error",
-        message: "Harga produk tidak ditemukan dengan kriteria tersebut.",
-      };
-    }
-  } catch (error) {
-    console.error("Error in getProductPrice:", error);
-    return {
-      status: "error",
-      message: "Terjadi kesalahan saat mencari harga produk. Mohon coba lagi.",
-    };
+async function initializeEmbeddingPipeline() {
+  if (!extractor) {
+    console.log(
+      "Menginisialisasi pipeline embedding dengan @huggingface/transformers..."
+    );
+    // Pilih model yang cocok untuk text embedding.
+    // 'Xenova/all-MiniLM-L6-v2' adalah salah satu model Sentence-Transformers yang sangat efektif
+    // dan relatif ringan. Anda bisa mencari model 'feature-extraction' lain di Hugging Face Hub.
+    extractor = await pipeline(
+      "feature-extraction",
+      "mixedbread-ai/mxbai-embed-large-v1"
+    );
+    console.log("Pipeline embedding siap digunakan.");
   }
 }
 
-/**
- * Mengecek ketersediaan stok produk berdasarkan nama produk dari database.
- * @param {string} productName Nama lengkap produk yang ingin dicek stoknya.
- * @returns {Promise<object>} Objek yang berisi status, nama produk, stok, dan kuantitas.
- */
-async function checkProductStock({ productName, variant, size, isLatest }) {
-  // Destructuring parameter
-  console.log(
-    `Executing checkProductStock for: ${productName}, Variant: ${variant}, Size: ${size}, Latest: ${isLatest}`
-  );
-
+async function getEmbedding(text) {
   try {
-    let query = {};
-
-    // Base query for productName (always required)
-    if (productName) {
-      query.name = { $regex: new RegExp(productName, "i") };
+    // Pastikan pipeline sudah diinisialisasi
+    if (!extractor) {
+      await initializeEmbeddingPipeline();
     }
 
-    // Add optional parameters to the query
-    if (variant) {
-      query.variant = { $regex: new RegExp(variant, "i") };
-    }
-    if (size) {
-      // Untuk array size, kita cek apakah array 'size' di dokumen mengandung 'size' yang dicari
-      query.size = size; // Mongoose akan mencari dokumen di mana array 'size' mengandung elemen ini
-    }
+    // Jalankan inferensi untuk mendapatkan embedding
+    // 'pooling: mean' umumnya digunakan untuk mendapatkan embedding kalimat/dokumen
+    // 'normalize: true' disarankan untuk perbandingan kemiripan menggunakan cosine similarity
+    const output = await extractor(text, { pooling: "mean", normalize: true });
 
-    let sortOption = {};
-    if (isLatest) {
-      // Jika 'isLatest' true, urutkan berdasarkan 'createdAt' descending untuk mendapatkan yang terbaru
-      sortOption.createdAt = -1;
-    }
-
-    // Eksekusi query ke database
-    // Gunakan find() jika mungkin ada beberapa hasil (misal: "sepatu lari" mungkin ada beberapa varian)
-    // dan urutkan jika isLatest true
-    const products = await shoesDB
-      .find(query)
-      .sort(sortOption)
-      .limit(isLatest ? 1 : undefined);
-
-    console.log("Database Query:", query);
-    console.log("Found Products:", products);
-
-    if (products && products.length > 0) {
-      // Jika isLatest, ambil produk pertama (terbaru)
-      const product = isLatest ? products[0] : products[0]; // Anda mungkin perlu logika lebih kompleks jika ada banyak hasil non-latest
-
-      const stockStatus = product.stock > 0 ? "Tersedia" : "Habis";
-      let responseMessage = `Stok untuk ${product.name}`;
-      if (product.variant) responseMessage += ` varian ${product.variant}`;
-      if (product.size && product.size.length > 0)
-        responseMessage += ` ukuran ${product.size.join(", ")}`;
-      responseMessage += `: ${stockStatus} (${product.stock} unit).`;
-
-      return {
-        status: "success",
-        productName: product.name,
-        variant: product.variant,
-        size: product.size,
-        stock: stockStatus,
-        quantity: product.stock,
-        message: responseMessage, // Tambahkan pesan deskriptif
-      };
-    } else {
-      return {
-        status: "error",
-        message: "Produk tidak ditemukan dengan kriteria tersebut.",
-      };
-    }
+    // Output dari pipeline adalah objek dengan properti 'data' yang berisi Float32Array.
+    // Ubah ke array JavaScript biasa agar lebih mudah diolah jika diperlukan.
+    return Array.from(output.data);
   } catch (error) {
-    console.error("Error in checkProductStock:", error);
-    return {
-      status: "error",
-      message: "Terjadi kesalahan saat mencari stok produk. Mohon coba lagi.",
-    };
+    console.error(
+      "Error generating embedding with @huggingface/transformers:",
+      error
+    );
+    return null;
   }
 }
+
+// async function getEmbedding(text) {
+//   try {
+//     // Ini adalah placeholder. Di produksi, panggil API Gemini.
+//     // Misalnya:
+//     // const model = genAI.get  GenerativeModel({ model: "text-embedding-004" });
+//     // const result = await model.embedContent(text);
+//     // return result.embedding;
+//     // const response = await genAI.models.embedContent({
+//     //   model: "gemini-embedding-exp-03-07",
+//     //   contents: text,
+//     // });
+//     // return response.embeddings;
+
+//     // Untuk demo, kembalikan array dummy atau gunakan pustaka lain
+//     // Jika Anda ingin mengintegrasikan embedding dengan Gemini, pastikan model 'text-embedding-004' tersedia
+//     // dan API key Anda memiliki izin yang benar.
+//     console.warn(
+//       "WARNING: getEmbedding is a placeholder. Implement actual Gemini embedding API call."
+//     );
+//     const crypto = require("crypto");
+//     const hash = crypto.createHash("sha256").update(text).digest("hex");
+//     // Simple hash to simulate unique embeddings
+//     return Array.from({ length: 1024 }, (_, i) =>
+//       parseFloat("0." + hash.slice(i % 60, (i % 60) + 1))
+//     ); // Dummy array
+//   } catch (error) {
+//     console.error("Error generating embedding:", error);
+//     return null;
+//   }
+// }
+
+function cosineSimilarity(vecA, vecB) {
+  if (!vecA || !vecB || vecA.length !== vecB.length) {
+    return 0;
+  }
+  let dotProduct = 0;
+  let magnitudeA = 0;
+  let magnitudeB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i] * vecB[i];
+    magnitudeA += vecA[i] * vecA[i];
+    magnitudeB += vecB[i] * vecB[i];
+  }
+  magnitudeA = Math.sqrt(magnitudeA);
+  magnitudeB = Math.sqrt(magnitudeB);
+  if (magnitudeA === 0 || magnitudeB === 0) {
+    return 0;
+  }
+  return dotProduct / (magnitudeA * magnitudeB);
+}
+
+// Fungsi helper untuk membersihkan dan menormalisasi teks
+function normalizeTextForSearch(text) {
+  if (text === null || text === undefined) return ""; // Handle null/undefined input
+  return String(text)
+    .toLowerCase()
+    .replace(/\s+/g, " ") // Ganti multiple spaces dengan single space
+    .trim(); // Hapus spasi di awal/akhir
+}
+
+function mapColorToEnglishAndIndonesian(colorName) {
+  const normalizedColor = normalizeTextForSearch(colorName);
+  const colorMap = {
+    hitam: ["black", "hitam"],
+    putih: ["white", "putih"],
+    merah: ["red", "merah"],
+    biru: ["blue", "biru"],
+    hijau: ["green", "hijau"],
+    kuning: ["yellow", "kuning"],
+    coklat: ["brown", "coklat"],
+    "abu-abu": ["grey", "gray", "abu-abu"],
+    ungu: ["purple", "ungu"],
+    pink: ["pink"],
+    orange: ["orange"],
+    emas: ["gold", "emas"],
+    perak: ["silver", "perak"],
+    // Tambahkan lebih banyak padanan jika diperlukan
+  };
+
+  // Jika warna ditemukan di map, kembalikan semua padanannya
+  if (colorMap[normalizedColor]) {
+    return colorMap[normalizedColor].map((c) => normalizeTextForSearch(c));
+  }
+  // Jika tidak ditemukan, kembalikan warna aslinya saja
+  return [normalizedColor];
+}
+
+// Pastikan Anda mengimpor mongoose di file yang sama jika Anda menggunakan mongoose.Types.ObjectId
+// const mongoose = require('mongoose');
+// Pastikan Anda mengimpor model Shoe, Brand, Category, dan fungsi getEmbedding
+// const Shoe = require('../models/Shoe'); // Contoh path
+// const Brand = require('../models/Brand'); // Contoh path
+// const Category = require('../models/Category'); // Contoh path
+// const getEmbedding = require('../utils/embeddingService'); // Contoh path
+
+const searchShoes = async ({
+  query,
+  minPrice,
+  maxPrice,
+  brand,
+  category,
+  variantFilters = {},
+  limit = 10,
+  excludeIds = [],
+}) => {
+  console.log("--- START searchShoes ---");
+  console.log("Calling searchShoes with parameters:", {
+    query,
+    minPrice,
+    maxPrice,
+    brand,
+    category,
+    variantFilters,
+    limit,
+    excludeIds,
+  });
+
+  const queryEmbedding = await getEmbedding(query);
+  if (!queryEmbedding) {
+    console.error("ERROR: Failed to generate embedding for query.");
+    return { error: "Failed to generate embedding for query." };
+  }
+
+  const allShoes = await Shoe.find({
+    _id: { $nin: excludeIds.map((id) => new mongoose.Types.ObjectId(id)) },
+  }).lean();
+
+  const brandMap = new Map(
+    (await Brand.find()).map((b) => [b._id.toString(), b.name])
+  );
+  const categoryMap = new Map(
+    (await Category.find()).map((c) => [c._id.toString(), c.name])
+  );
+
+  const shoesWithScores = [];
+  let variantAttributesText = ""; // Declare outside loop to avoid re-declaration warning
+  for (const shoe of allShoes) {
+    // Collect variant attribute names and options for embedding and searchable text
+    if (shoe.variantAttributes && shoe.variantAttributes.length > 0) {
+      variantAttributesText = shoe.variantAttributes
+        .map(
+          (attr) =>
+            `${normalizeTextForSearch(attr.name)} ${attr.options
+              .map((opt) => normalizeTextForSearch(opt))
+              .join(" ")}`
+        )
+        .join(" ");
+    } else {
+      variantAttributesText = ""; // Ensure it's reset if no variant attributes
+    }
+
+    // Generate embedding if it doesn't exist
+    if (!shoe.description_embedding) {
+      let variantDescriptionText = "";
+      if (shoe.variants && shoe.variants.length > 0) {
+        const allOptionValues = new Set();
+        for (const variant of shoe.variants) {
+          for (const key in variant.optionValues) {
+            allOptionValues.add(variant.optionValues[key]);
+          }
+        }
+        variantDescriptionText = Array.from(allOptionValues)
+          .map((v) => normalizeTextForSearch(v))
+          .join(", ");
+      }
+
+      const combinedTextForEmbedding = normalizeTextForSearch(
+        `Nama: ${shoe.name}. Deskripsi: ${
+          shoe.description
+        }. Brand: ${brandMap.get(
+          shoe.brand.toString()
+        )}. Kategori: ${shoe.category
+          .map((id) => categoryMap.get(id.toString()))
+          .join(
+            ", "
+          )}. Varian: ${variantDescriptionText}. Atribut Varian: ${variantAttributesText}`
+      );
+
+      shoe.description_embedding = await getEmbedding(combinedTextForEmbedding);
+    }
+
+    if (shoe.description_embedding) {
+      const similarity = cosineSimilarity(
+        queryEmbedding,
+        shoe.description_embedding
+      );
+      shoesWithScores.push({ shoe, similarity });
+    }
+  }
+
+  // Sort by semantic similarity (highest first)
+  shoesWithScores.sort((a, b) => b.similarity - a.similarity);
+
+  const filteredResults = [];
+  const rawProductsForFrontend = [];
+
+  let count = 0;
+  for (const item of shoesWithScores) {
+    if (count >= limit) break;
+
+    const shoe = item.shoe;
+    console.log(`\n--- Processing Shoe: ${shoe.name} (ID: ${shoe._id}) ---`);
+    console.log(`Semantic Similarity Score: ${item.similarity.toFixed(4)}`);
+
+    let productPassesAllFilters = true;
+
+    let finalMinPrice = Infinity;
+    let finalMaxPrice = 0;
+    let finalTotalStock = 0;
+    let finalAvailableVariants = [];
+
+    // --- FASE 1: Filter Brand dan Kategori Terstruktur ---
+    console.log("Phase 1: Brand and Category Filter");
+    if (
+      brand &&
+      normalizeTextForSearch(brandMap.get(shoe.brand.toString())) !==
+        normalizeTextForSearch(brand)
+    ) {
+      console.log(
+        `  FAIL: Brand mismatch. Expected "${brand}", got "${brandMap.get(
+          shoe.brand.toString()
+        )}".`
+      );
+      productPassesAllFilters = false;
+    }
+    if (
+      productPassesAllFilters &&
+      category &&
+      !shoe.category.some((catId) =>
+        normalizeTextForSearch(categoryMap.get(catId.toString())).includes(
+          normalizeTextForSearch(category)
+        )
+      )
+    ) {
+      console.log(
+        `  FAIL: Category mismatch. Expected "${category}", got "${shoe.category
+          .map((id) => categoryMap.get(id.toString()))
+          .join(", ")}".`
+      );
+      productPassesAllFilters = false;
+    }
+    if (!productPassesAllFilters) {
+      console.log(`  Shoe "${shoe.name}" failed Phase 1.`);
+      continue;
+    }
+    console.log(`  Shoe "${shoe.name}" PASSED Phase 1.`);
+
+    // --- FASE 2: APLIKASIKAN FILTER HARGA DAN STOK PADA VARIAN / PRODUK UTAMA ---
+    console.log("Phase 2: Price and Stock Filter");
+    if (shoe.variants && shoe.variants.length > 0) {
+      const variantsMeetingBaseCriteria = [];
+      for (const variant of shoe.variants) {
+        let variantMeetsPriceAndStock = true;
+        if (minPrice !== undefined && variant.price < minPrice) {
+          variantMeetsPriceAndStock = false;
+        }
+        if (maxPrice !== undefined && variant.price > maxPrice) {
+          variantMeetsPriceAndStock = false;
+        }
+        if (!variantMeetsPriceAndStock || variant.stock <= 0) {
+          continue;
+        }
+        variantsMeetingBaseCriteria.push(variant);
+      }
+
+      if (variantsMeetingBaseCriteria.length === 0) {
+        productPassesAllFilters = false;
+        console.log(`  FAIL: No variants meet base price/stock criteria.`);
+      } else {
+        for (const variant of variantsMeetingBaseCriteria) {
+          finalMinPrice = Math.min(finalMinPrice, variant.price);
+          finalMaxPrice = Math.max(finalMaxPrice, variant.price);
+          finalTotalStock += variant.stock;
+        }
+        finalAvailableVariants = variantsMeetingBaseCriteria;
+        console.log(
+          `  Passed. Initial total stock: ${finalTotalStock}, Min Price: ${finalMinPrice}, Max Price: ${finalMaxPrice}`
+        );
+      }
+    } else {
+      if (shoe.stock <= 0) {
+        productPassesAllFilters = false;
+        console.log(`  FAIL: Product stock is 0.`);
+      } else {
+        if (minPrice !== undefined && shoe.price < minPrice) {
+          productPassesAllFilters = false;
+          console.log(
+            `  FAIL: Product price (${shoe.price}) below minPrice (${minPrice}).`
+          );
+        }
+        if (
+          productPassesAllFilters &&
+          maxPrice !== undefined &&
+          shoe.price > maxPrice
+        ) {
+          productPassesAllFilters = false;
+          console.log(
+            `  FAIL: Product price (${shoe.price}) above maxPrice (${maxPrice}).`
+          );
+        }
+        if (productPassesAllFilters) {
+          finalMinPrice = shoe.price;
+          finalMaxPrice = shoe.price;
+          finalTotalStock = shoe.stock;
+          console.log(
+            `  Passed. Total stock: ${finalTotalStock}, Price: ${finalMinPrice}`
+          );
+        }
+      }
+    }
+
+    if (!productPassesAllFilters) {
+      console.log(`  Shoe "${shoe.name}" failed Phase 2.`);
+      continue;
+    }
+    console.log(`  Shoe "${shoe.name}" PASSED Phase 2.`);
+
+    // --- FASE 3: APLIKASIKAN `variantFilters` YANG BERSIFAT TERSTRUKTUR (misal: Ukuran, Warna) ---
+    console.log("Phase 3: Structured Variant Filters");
+    if (shoe.variants && shoe.variants.length > 0) {
+      const attributeFiltersToApply = {};
+      console.log(
+        `  Shoe's variantAttributes: ${JSON.stringify(shoe.variantAttributes)}`
+      );
+      console.log(
+        `  Incoming variantFilters: ${JSON.stringify(variantFilters)}`
+      );
+
+      for (const filterKey in variantFilters) {
+        const normalizedFilterKey = normalizeTextForSearch(filterKey);
+        const matchedAttributeDefinition = shoe.variantAttributes?.find(
+          (attr) => normalizeTextForSearch(attr.name) === normalizedFilterKey
+        );
+        if (matchedAttributeDefinition) {
+          attributeFiltersToApply[filterKey] = variantFilters[filterKey];
+          console.log(
+            `  Mapped incoming filterKey "${filterKey}" to structured attribute "${matchedAttributeDefinition.name}".`
+          );
+        } else {
+          console.log(
+            `  FilterKey "${filterKey}" from variantFilters does NOT match any structured variantAttributes for this shoe.`
+          );
+        }
+      }
+
+      if (Object.keys(attributeFiltersToApply).length > 0) {
+        console.log(
+          "  Applying structured attribute filters:",
+          attributeFiltersToApply
+        );
+        const initialVariantsCount = finalAvailableVariants.length;
+
+        for (const filterKey in attributeFiltersToApply) {
+          const filterValue = attributeFiltersToApply[filterKey];
+          let expectedValuesForFilter = Array.isArray(filterValue)
+            ? filterValue.map((val) => normalizeTextForSearch(val))
+            : [normalizeTextForSearch(filterValue)];
+
+          if (normalizeTextForSearch(filterKey) === "warna") {
+            const translatedValues = new Set();
+            expectedValuesForFilter.forEach((val) => {
+              mapColorToEnglishAndIndonesian(val).forEach((tVal) =>
+                translatedValues.add(tVal)
+              );
+            });
+            expectedValuesForFilter = Array.from(translatedValues);
+            console.log(
+              `  Color filter "${filterKey}" expanded to translated values: ${JSON.stringify(
+                expectedValuesForFilter
+              )}`
+            );
+          }
+
+          const matchedAttributeDefinition = shoe.variantAttributes.find(
+            (attr) =>
+              normalizeTextForSearch(attr.name) ===
+              normalizeTextForSearch(filterKey)
+          );
+
+          if (!matchedAttributeDefinition) {
+            console.warn(
+              `  WARNING: Matched attribute definition not found for filterKey "${filterKey}" during filtering loop.`
+            );
+            continue;
+          }
+
+          const variantsMatchingAttributeFilter = finalAvailableVariants.filter(
+            (variant) => {
+              const actualOptionValue =
+                variant.optionValues[matchedAttributeDefinition.name];
+              const normalizedActualOptionValue =
+                normalizeTextForSearch(actualOptionValue);
+
+              console.log(
+                `    Checking variant: ${JSON.stringify(variant.optionValues)}`
+              );
+              console.log(
+                `      Attribute name: "${matchedAttributeDefinition.name}", Actual value: "${actualOptionValue}" (normalized: "${normalizedActualOptionValue}")`
+              );
+              console.log(
+                `      Expected values for "${filterKey}" (including translations): ${JSON.stringify(
+                  expectedValuesForFilter
+                )}`
+              );
+
+              const valueMatches = expectedValuesForFilter.some((expected) =>
+                normalizedActualOptionValue.includes(expected)
+              );
+
+              if (valueMatches) {
+                console.log(
+                  `      SUCCESS: Value "${normalizedActualOptionValue}" matches one of "${expectedValuesForFilter.join(
+                    ", "
+                  )}".`
+                );
+              } else {
+                console.log(
+                  `      FAIL: Value "${normalizedActualOptionValue}" does NOT match any of "${expectedValuesForFilter.join(
+                    ", "
+                  )}".`
+                );
+              }
+              return valueMatches;
+            }
+          );
+
+          if (variantsMatchingAttributeFilter.length === 0) {
+            productPassesAllFilters = false;
+            console.log(
+              `  FAIL: No variants left after filtering by structured attribute "${filterKey}" with values "${filterValue}".`
+            );
+            break;
+          } else {
+            finalAvailableVariants = variantsMatchingAttributeFilter;
+            finalMinPrice = Infinity;
+            finalMaxPrice = 0;
+            finalTotalStock = 0;
+            for (const variant of finalAvailableVariants) {
+              finalMinPrice = Math.min(finalMinPrice, variant.price);
+              finalMaxPrice = Math.max(finalMaxPrice, variant.price);
+              finalTotalStock += variant.stock;
+            }
+            console.log(
+              `  SUCCESS: Matched structured attribute "${filterKey}". ${finalAvailableVariants.length} variants remaining. Current total stock: ${finalTotalStock}`
+            );
+          }
+        }
+        if (
+          productPassesAllFilters &&
+          finalAvailableVariants.length === 0 &&
+          initialVariantsCount > 0
+        ) {
+          productPassesAllFilters = false;
+          console.log(
+            `  FAIL: All variants filtered out despite initial variants.`
+          );
+        }
+      } else {
+        console.log(
+          "  No structured variant filters to apply for this product."
+        );
+      }
+    } else {
+      console.log(
+        "  Product has no variants, skipping structured variant filter phase."
+      );
+    }
+
+    if (!productPassesAllFilters) {
+      console.log(`  Shoe "${shoe.name}" failed Phase 3.`);
+      continue;
+    }
+    console.log(`  Shoe "${shoe.name}" PASSED Phase 3.`);
+
+    // --- FASE 4: APLIKASIKAN SEMUA PARAMETER SEBAGAI FILTER TEKSTUAL DI DESKRIPSI PRODUK ---
+    console.log("Phase 4: Comprehensive Textual Filter");
+
+    const strictKeywords = new Set(); // For brand, category, and variantFilters (must match)
+    let queryPhraseToMatch = ""; // For the normalized query string
+    const significantQueryWordsFromQuery = new Set(); // For significant words from the original query
+
+    // Populate strictKeywords from structured parameters
+    if (brand) {
+      strictKeywords.add(normalizeTextForSearch(brand));
+    }
+    if (category) {
+      strictKeywords.add(normalizeTextForSearch(category));
+    }
+
+    for (const filterKey in variantFilters) {
+      if (Object.hasOwnProperty.call(variantFilters, filterKey)) {
+        mapColorToEnglishAndIndonesian(filterKey).forEach((tKey) =>
+          strictKeywords.add(tKey)
+        );
+
+        const filterValue = variantFilters[filterKey];
+        if (Array.isArray(filterValue)) {
+          filterValue
+            .map((val) => normalizeTextForSearch(val))
+            .forEach((val) => {
+              mapColorToEnglishAndIndonesian(val).forEach((tVal) =>
+                strictKeywords.add(tVal)
+              );
+            });
+        } else {
+          mapColorToEnglishAndIndonesian(filterValue).forEach((tVal) =>
+            strictKeywords.add(tVal)
+          );
+        }
+      }
+    }
+
+    // Process original query:
+    if (query) {
+      queryPhraseToMatch = normalizeTextForSearch(query);
+      const commonStopWords = new Set([
+        "saya",
+        "mencari",
+        "sepatu",
+        "yang",
+        "untuk",
+        "di",
+        "kak",
+        "warna",
+        "ukuran",
+        "nike",
+        "adidas",
+        "new balance",
+        "converse",
+        "baju",
+        "celana",
+        "jaket",
+        "sport",
+        "olahraga",
+        "pria",
+        "wanita",
+        "anak",
+        "dan",
+        "atau",
+        "dengan",
+        "ini",
+        "itu",
+        "ada",
+        "mau",
+        "cocok",
+        "punya",
+      ]); // Added 'cocok', 'punya'
+
+      queryPhraseToMatch.split(" ").forEach((word) => {
+        const cleanedWord = word
+          .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "")
+          .trim();
+        if (
+          cleanedWord &&
+          cleanedWord.length > 2 &&
+          !commonStopWords.has(cleanedWord)
+        ) {
+          mapColorToEnglishAndIndonesian(cleanedWord).forEach((tWord) =>
+            significantQueryWordsFromQuery.add(tWord)
+          );
+        }
+      });
+    }
+
+    // Assemble the full searchable text for the current shoe
+    let variantOptionValuesText = "";
+    if (shoe.variants && shoe.variants.length > 0) {
+      variantOptionValuesText = shoe.variants
+        .map((v) =>
+          Object.values(v.optionValues)
+            .map((val) => normalizeTextForSearch(val))
+            .join(" ")
+        )
+        .join(" ");
+    }
+
+    const currentSearchableText = normalizeTextForSearch(
+      `${shoe.name || ""} ${shoe.description || ""} ${
+        brandMap.get(shoe.brand.toString()) || ""
+      } ${shoe.category
+        .map((id) => categoryMap.get(id.toString()) || "")
+        .join(" ")} ${variantOptionValuesText} ${variantAttributesText}`
+    );
+
+    console.log(
+      "  Strict Keywords (from brand, category, variantFilters):",
+      Array.from(strictKeywords)
+    );
+    console.log(
+      "  Significant Query Words (from original query):",
+      Array.from(significantQueryWordsFromQuery)
+    );
+    console.log("  Query Phrase to Match (normalized):", queryPhraseToMatch);
+    console.log("  FULL Searchable Text (normalized):");
+    console.log(`  >>>${currentSearchableText}<<<`);
+
+    let phase4Passed = true;
+
+    // 1. Check Strict Keywords (from brand, category, explicit variantFilters)
+    if (strictKeywords.size > 0) {
+      for (const keyword of Array.from(strictKeywords)) {
+        if (keyword === "warna cerah") {
+          // Still keep this specific bright color logic
+          const brightColors = [
+            "red",
+            "yellow",
+            "orange",
+            "lime",
+            "pink",
+            "biru",
+            "hijau",
+            "merah",
+          ].map(normalizeTextForSearch);
+          if (!brightColors.some((bc) => currentSearchableText.includes(bc))) {
+            console.log(
+              `  FAIL: Strict Keyword (warna cerah) NOT found via bright colors.`
+            );
+            phase4Passed = false;
+            break;
+          } else {
+            console.log(
+              `  SUCCESS: Strict Keyword (warna cerah) matched via bright colors.`
+            );
+          }
+        } else if (
+          !currentSearchableText.includes(keyword) &&
+          !currentSearchableText.includes(queryPhraseToMatch)
+        ) {
+          console.log(`  FAIL: Strict Keyword "${keyword}" NOT found in text.`);
+          phase4Passed = false;
+          break;
+        } else {
+          console.log(
+            `  SUCCESS: Strict Keyword "${
+              keyword || queryPhraseToMatch
+            }" found in text.`
+          );
+        }
+      }
+    } else {
+      console.log("  No strict keywords (from structured filters) to apply.");
+    }
+
+    // 2. If strict keywords passed, now check for significant words from the original query (more flexible)
+    // At least one of these significant words should be present.
+    if (phase4Passed && significantQueryWordsFromQuery.size > 0) {
+      let atLeastOneSignificantWordFound = false;
+      for (const word of Array.from(significantQueryWordsFromQuery)) {
+        if (currentSearchableText.includes(word)) {
+          atLeastOneSignificantWordFound = true;
+          console.log(`  SUCCESS: Significant Query Word "${word}" found.`);
+          break;
+        }
+      }
+      if (!atLeastOneSignificantWordFound) {
+        phase4Passed = false;
+        console.log(`  FAIL: No significant query word found in text.`);
+      }
+    } else if (significantQueryWordsFromQuery.size === 0) {
+      console.log("  No significant query words to check.");
+    }
+
+    // Optional: Add a check for the full query phrase (if it's crucial for specific cases)
+    // For "sepatu yang cocok untuk di perkotaan", this might be too strict, but for "nike air max 90", it's good.
+    // For now, let's rely on the semantic score for overall query meaning and significant words for textual match.
+    // If you uncomment this, ensure it doesn't cause over-filtering for natural language.
+    /*
+    if (phase4Passed && queryPhraseToMatch && !significantQueryWordsFromQuery.has(queryPhraseToMatch)) { // Avoid double check if queryPhrase itself became a significant word
+        if (!currentSearchableText.includes(queryPhraseToMatch)) {
+            console.log(`  FAIL: Full Query Phrase "${queryPhraseToMatch}" NOT found.`);
+            phase4Passed = false;
+        } else {
+            console.log(`  SUCCESS: Full Query Phrase "${queryPhraseToMatch}" found.`);
+        }
+    }
+    */
+
+    if (!phase4Passed) {
+      productPassesAllFilters = false;
+      console.log(`  Shoe "${shoe.name}" failed Phase 4 (Textual Filter).`);
+    } else {
+      console.log(`  Shoe "${shoe.name}" PASSED Phase 4.`);
+    }
+
+    if (!productPassesAllFilters) {
+      continue;
+    }
+
+    // --- FASE 5: VERIFIKASI AKHIR STOK (setelah semua filter diterapkan) ---
+    console.log("Phase 5: Final Stock Verification");
+    if (finalTotalStock === 0) {
+      productPassesAllFilters = false;
+      console.log(`  FAIL: Final total stock is 0 after all filters.`);
+    }
+
+    if (!productPassesAllFilters) {
+      console.log(`  Shoe "${shoe.name}" failed Phase 5.`);
+      continue;
+    }
+    console.log(`  Shoe "${shoe.name}" PASSED Phase 5.`);
+
+    // --- JIKA SEMUA FILTER LOLOS, TAMBAHKAN PRODUK KE HASIL ---
+    console.log(`Shoe "${shoe.name}" PASSED ALL FILTERS. Adding to results.`);
+    shoe.display_price =
+      finalMinPrice === finalMaxPrice
+        ? `Rp ${finalMinPrice.toLocaleString("id-ID")}`
+        : `Rp ${finalMinPrice.toLocaleString(
+            "id-ID"
+          )} - Rp ${finalMaxPrice.toLocaleString("id-ID")}`;
+    shoe.total_stock = finalTotalStock;
+    if (shoe.variants && shoe.variants.length > 0) {
+      shoe.available_variants = finalAvailableVariants;
+    } else {
+      if (finalMinPrice === Infinity) {
+        shoe.display_price = `Rp ${shoe.price.toLocaleString("id-ID")}`;
+        shoe.total_stock = shoe.stock;
+      }
+    }
+
+    rawProductsForFrontend.push(shoe);
+    filteredResults.push(shoe);
+    count++;
+  }
+
+  const finalResultsForGemini = filteredResults;
+  const rawProductsForFrontendFinal = rawProductsForFrontend;
+
+  const formattedOutputForGemini = finalResultsForGemini.map((shoe) => {
+    const item = {
+      name: shoe.name,
+      brand: brandMap.get(shoe.brand.toString()),
+      category: shoe.category.map((id) => categoryMap.get(id.toString())),
+      image: shoe.image,
+      description: shoe.description,
+      price_info: shoe.display_price,
+    };
+
+    if (shoe.variants && shoe.variants.length > 0) {
+      item.info_variants = JSON.stringify(shoe.variants);
+      item.variants = shoe.available_variants
+        ? shoe.available_variants.map((v) => ({
+            optionValues: v.optionValues,
+            price: v.price,
+            stock: v.stock,
+            sku: v.sku,
+            imageUrl: v.imageUrl,
+          }))
+        : [];
+      item.total_stock = shoe.total_stock;
+    } else {
+      item.total_stock = shoe.total_stock;
+    }
+    return item;
+  });
+
+  if (formattedOutputForGemini.length === 0) {
+    console.log("No shoes found matching all criteria.");
+    return {
+      message:
+        "Maaf, kami tidak menemukan sepatu yang sesuai dengan kriteria Anda. Coba kata kunci lain atau perlonggar kriteria pencarian.",
+      productsForFrontend: [],
+    };
+  }
+
+  console.log(
+    `--- END searchShoes. Found ${formattedOutputForGemini.length} results. ---`
+  );
+  return {
+    shoes: formattedOutputForGemini,
+    productsForFrontend: rawProductsForFrontendFinal,
+  };
+};
 
 // Map fungsi ke objek agar mudah dipanggil oleh AI
 const availableFunctions = {
-  getProductPrice,
-  checkProductStock,
+  searchShoes,
 };
 
 module.exports = { availableFunctions };

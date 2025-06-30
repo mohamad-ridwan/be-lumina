@@ -134,7 +134,7 @@ const handleSendMessageFromAI = async (
   generatedText,
   message,
   latestMessageTimestamp,
-  { io, socket, client, agenda, newMessageId }
+  { io, socket, client, agenda, newMessageId, productData }
 ) => {
   const { latestMessage, isNeedHeaderDate, recipientProfileId, role } = message;
 
@@ -155,8 +155,9 @@ const handleSendMessageFromAI = async (
       senderUserId,
       status: "UNREAD",
       textMessage:
-        generatedText ??
-        "Maaf kami tidak tersedia untuk saat ini. Mohon coba lagi nanti.",
+        generatedText?.length > 0
+          ? generatedText
+          : "Maaf kami tidak tersedia untuk saat ini. Mohon coba lagi nanti.",
     },
     recipientProfileId: newRecipientProfileId,
     role: "admin",
@@ -169,9 +170,17 @@ const handleSendMessageFromAI = async (
   });
 
   if (!isAvailableMessage?._id) {
-    await sendMessage(newMessageForUser, io, socket, client, agenda, false);
+    await sendMessage(newMessageForUser, io, socket, client, agenda, {
+      productData,
+    });
   } else {
-    isAvailableMessage.textMessage = generatedText;
+    isAvailableMessage.textMessage =
+      generatedText?.length > 0
+        ? generatedText
+        : "Maaf kami tidak tersedia untuk saat ini. Mohon coba lagi nanti.";
+    if (productData?.length > 0) {
+      isAvailableMessage.productData = productData;
+    }
     await isAvailableMessage.save();
     // await chatRoomDB.findOneAndUpdate(
     //   {
@@ -203,9 +212,11 @@ const handleSendMessageFromAI = async (
 
     if (existingIndexUserId1 !== -1) {
       updatedLatestMessages[existingIndexUserId1].textMessage = generatedText;
+      updatedLatestMessages[existingIndexUserId1].productData = productData;
     }
     if (existingIndexUserId2 !== -1) {
       updatedLatestMessages[existingIndexUserId2].textMessage = generatedText;
+      updatedLatestMessages[existingIndexUserId2].productData = productData;
     }
 
     updatedLatestMessages = updatedLatestMessages.filter(
@@ -230,7 +241,10 @@ const handleSendMessageFromAI = async (
       imgCropped: senderUserProfile?.imgCropped,
       thumbnail: senderUserProfile?.thumbnail,
       latestMessage: updatedLatestMessages,
-      messageUpdated: newMessageForUser.latestMessage,
+      messageUpdated: {
+        ...newMessageForUser.latestMessage,
+        productData,
+      },
     });
   }
   return;
@@ -286,13 +300,13 @@ const handleGetNewMessageForBot = async (
       responseText,
       message,
       latestMessageTimestamp,
-      { io, socket, client, agenda, newMessageId }
+      { io, socket, client, agenda, newMessageId, productData }
     ) => {
       const result = await handleSendMessageFromAI(
         responseText,
         message,
         latestMessageTimestamp,
-        { io, socket, client, agenda, newMessageId }
+        { io, socket, client, agenda, newMessageId, productData }
       );
       return result;
     },
@@ -390,7 +404,7 @@ const sendMessage = async (
   socket,
   client,
   agenda,
-  usingBot = true
+  productData
 ) => {
   const { latestMessage, isNeedHeaderDate, recipientProfileId } = message;
 
@@ -451,6 +465,9 @@ const sendMessage = async (
     //   }
     // }
   }
+  if (productData?.productData?.length > 0) {
+    chatRoomData.productData = productData.productData;
+  }
 
   const newChatRoom = new chatRoomDB(chatRoomData);
   await newChatRoom.save();
@@ -485,11 +502,13 @@ const sendMessage = async (
 
   const latestMessageWithUserId1 = {
     ...latestMessage,
+    productData: productData?.productData ?? null,
     userId: chatsCurrently.userIds[0],
     timeId,
   };
   const latestMessageWithUserId2 = {
     ...latestMessage,
+    productData: productData?.productData ?? null,
     userId: chatsCurrently.userIds[1],
     timeId,
   };

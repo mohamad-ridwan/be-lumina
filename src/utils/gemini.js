@@ -99,6 +99,93 @@ const getConversationHistoryForGemini = async (message, io, socket, client) => {
   }
 };
 
+const setProductDataForFrontend = (functionCallResult, functionName) => {
+  let productDataForFrontend = [];
+  if (
+    functionCallResult.status === "success" ||
+    functionCallResult.status === "multiple_results"
+  ) {
+    if (
+      functionName === "getProductPrice" ||
+      functionName === "checkProductStock"
+    ) {
+      const productsArray = functionCallResult.products
+        ? functionCallResult.products
+        : [functionCallResult];
+
+      productsArray.forEach((p) => {
+        productDataForFrontend.push({
+          type: "product_card", // Menandakan ini adalah data untuk kartu produk
+          data: {
+            name: p.productName,
+            brand: p.brand,
+            variant: p.variant,
+            size: p.size,
+            stock: p.stock,
+            quantity: p.quantity,
+            price: p.price,
+            currency: p.currency,
+            category: p.category,
+            image: p?.image ?? null,
+            // Anda bisa menambahkan URL gambar di sini jika ada di data DB
+            // imageUrl: p.imageUrl
+          },
+        });
+      });
+    } else if (functionName === "getAvailableBrands") {
+      // Untuk tool yang mengembalikan daftar merek
+      functionCallResult.brands.forEach((b) => {
+        productDataForFrontend.push({
+          type: "brand_image", // Menandakan ini adalah data untuk gambar brand
+          data: {
+            brandName: b,
+            // imageUrl: getBrandImageUrl(b) // Fungsi pembantu untuk mendapatkan URL gambar brand
+          },
+        });
+      });
+    }
+  }
+
+  return productDataForFrontend;
+};
+
+// const instructionPrompt = `
+// AI diwajibkan untuk menjawab pertanyaan yang singkat dan juga menyimpulkan pertanyaan yang jelas sesuai data yang di dapatkan.
+// AI juga diwajibkan untuk memberikan list jika ada data produk yang relevan dan tidak duplikasi.
+// Jika ada data variant diwajibkan memberikan semua variant yang sesuai ditanyakan di setiap product tersebut. Dan jika tidak ada pertanyaan mengenai variant, wajib memberikan semua variant di setiap product tersebut.
+// Format list produk harus menggunakan elemen HTML:
+// <ul style="padding-top:10px; display:flex; flex-direction:column; gap:10px;">
+//   <li style="list-style:none;">
+//     <b style="font-size:13px;">[Nama Produk]</b><br>
+//     <div style="display:flex; flex-wrap:wrap; gap:5px; margin-top:5px;">
+//       <span style="background-color:#000; color:#fff; padding:2px 6px; border-radius:500px; font-size:11px; display:flex; align-items:center; gap:3px;">
+//         <span style="font-weight:600;">[Nama Atribut Varian 1, misal: Warna]:</span>
+//         <span style="font-weight:normal;">[Nilai Varian 1, misal: Core Black]</span>
+//       </span>
+//       <span style="background-color:#000; color:#fff; padding:2px 6px; border-radius:500px; font-size:11px; display:flex; align-items:center; gap:3px;">
+//         <span style="font-weight:600;">[Nama Atribut Varian 2, misal: Ukuran]:</span>
+//         <span style="font-weight:normal;">[Nilai Varian 2, misal: 40]</span>
+//       </span>
+//       </div>
+//     <span style="font-size:11.9px; font-weight:normal; display:block; margin-top:5px;">[Deskripsi singkat produk, maksimal 2-3 kalimat yang relevan dengan pertanyaan awal]</span>
+//     <span style="font-weight:bold; font-size:11.9px;">Harga: [Informasi Rentang Harga Produk atau Harga Tunggal]</span>
+//   </li>
+//   </ul>
+//   Jangan berikan padding-top: 10px; di <ul> jika di atasnya tidak ada konten.
+// Jangan berikan gambar, jangan berikan logic bahasa pemrograman, dan jangan berikan card background. Jangan berikan harga per varian, cukup rentang harga keseluruhan produk di bagian bawah deskripsi. Jika product tidak ada variant, tolong jangan berikan variant.
+// Jangan berikan data yang duplikasi, jika ada data yang belum selesai untuk di generate text, wajib generate data sesuai yang baru.
+
+// Jika tidak ada produk, berikan respons maaf yang singkat.
+// `;
+
+const instructionPrompt = `
+AI diwajibkan untuk menjawab pertanyaan yang singkat dan juga menyimpulkan pertanyaan yang jelas sesuai dari data yang di berikan, seperti kecocokan antara pertanyaan dengan field value dari name, price, brand, category, description, price_info, total_stock.
+
+Berikan respons ketersediaan produk yang singkat, jangan menjelaskan nama, harga, variant produk yang ada.
+
+Jika tidak ada produk, berikan respons maaf yang singkat.
+`;
+
 const processNewMessageWithAI = async (
   formattedHisory,
   message,
@@ -107,97 +194,159 @@ const processNewMessageWithAI = async (
 ) => {
   const latestMessageTimestamp = Date.now();
   const newMessageId = generateRandomId(15);
+  let accumulatedProductsForFrontend = [];
+  let combinedResponseText = "";
+  // Set untuk melacak ID produk yang sudah dikumpulkan secara keseluruhan
+  const collectedProductIds = new Set();
+
   try {
     const tools = await toolsDB.find();
     const chat = genAI.chats.create({
       model: "gemini-2.5-flash",
-      //   history: formattedHisory,
       config: {
         tools: [{ functionDeclarations: tools }],
-        // temperature: 0.5,
+        thinkingConfig: {
+          thinkingBudget: 5024,
+        },
       },
+      history: [
+        {
+          parts: [
+            {
+              text: instructionPrompt,
+            },
+          ],
+          role: "model",
+        },
+      ],
     });
+
     const response = await chat.sendMessage({
       message: message.latestMessage.textMessage,
     });
-    if (response.functionCalls && response.functionCalls.length > 0) {
-      console.log("Gemini requested function call(s):", response.functionCalls);
 
-      let functionCallResult;
-      let responseText = "";
-      let isMustUpdated = false;
-      // Iterasi jika Gemini meminta lebih dari satu fungsi (jarang untuk kasus sederhana)
+    console.log("Gemini requested function call(s):", response.functionCalls);
+
+    let indexCount = 0;
+
+    if (response.functionCalls && response.functionCalls.length > 0) {
+      const functionCallResultsForGemini = [];
+
       for (const call of response.functionCalls) {
         const functionName = call.name;
-        const functionArgs = call.args;
+        const functionArgs = { ...call.args }; // Salin argumen
+
+        // <<< LOGIKA PENTING DI SINI >>>
+        // Tambahkan ID yang sudah dikumpulkan ke parameter excludeIds
+        if (functionName === "searchShoes") {
+          functionArgs.excludeIds = Array.from(collectedProductIds);
+        }
+        // <<< AKHIR LOGIKA PENTING >>>
 
         if (availableFunctions[functionName]) {
-          functionCallResult = await availableFunctions[functionName](
-            ...Object.values(functionArgs)
+          const resultFromTool = await availableFunctions[functionName](
+            functionArgs
           );
+          console.log("result database from tool:", resultFromTool.shoes);
           console.log(
-            `Function ${functionName} executed, result:`,
-            functionCallResult
+            "result category product from tool:",
+            resultFromTool.shoes?.[indexCount]?.category
           );
+          indexCount += 1;
 
-          // Kirim hasil eksekusi fungsi kembali ke Gemini
-          const toolResponseResult = await chat.sendMessage({
-            message: {
-              functionResponse: {
-                name: functionName,
-                response: functionCallResult,
-              },
-            },
-          });
+          if (resultFromTool && resultFromTool.productsForFrontend) {
+            resultFromTool.productsForFrontend.forEach((product) => {
+              const id = product._id?.toString();
+              if (id && !collectedProductIds.has(id)) {
+                accumulatedProductsForFrontend.push(product);
+                collectedProductIds.add(id); // Tambahkan ID ke set global
+              }
+            });
 
-          // Ambil balasan AI yang sesungguhnya dari hasil toolResponse
-          const finalAiResponseText = toolResponseResult.text;
-          if (finalAiResponseText) {
-            responseText += finalAiResponseText;
+            const geminiResult = { shoes: resultFromTool.shoes };
+            if (resultFromTool.message) {
+              geminiResult.message = resultFromTool.message;
+            }
+            functionCallResultsForGemini.push({
+              name: functionName,
+              response: geminiResult,
+            });
+          } else {
+            functionCallResultsForGemini.push({
+              name: functionName,
+              response: resultFromTool,
+            });
           }
-          console.log("RESPONSE GENERATED TEXT AI", responseText);
-          await sendMessageCallback(
-            responseText,
-            message,
-            latestMessageTimestamp,
-            { io, socket, client, agenda, newMessageId }
+        } else {
+          console.warn(
+            `Function ${functionName} is declared but not implemented in availableFunctions.`
           );
-          // await handleSendMessageFromAI(
-          //   isMustUpdated,
-          //   responseText,
-          //   message,
-          //   latestMessageTimestamp,
-          //   { io, socket, client, agenda }
-          // );
-          isMustUpdated = true;
+          combinedResponseText += `Maaf, ada masalah dalam memproses permintaan Anda (fungsi '${functionName}' tidak ditemukan). `;
         }
       }
-      return responseText;
+
+      const toolResponseParts = functionCallResultsForGemini.map((result) => ({
+        functionResponse: result,
+      }));
+
+      const toolResponseResult = await chat.sendMessage({
+        message: toolResponseParts,
+      });
+
+      const finalAiResponseText = toolResponseResult.text;
+      if (finalAiResponseText) {
+        combinedResponseText = finalAiResponseText;
+      }
+
+      console.log("FINAL GENERATED TEXT AI:", combinedResponseText);
+
+      await sendMessageCallback(
+        combinedResponseText,
+        message,
+        latestMessageTimestamp,
+        {
+          io,
+          socket,
+          client,
+          agenda,
+          newMessageId,
+          productData: accumulatedProductsForFrontend, // Kirimkan data produk unik
+        }
+      );
+
+      return combinedResponseText;
     } else {
+      console.log("single response without function calls:", response.text);
       await sendMessageCallback(
         response.text,
         message,
         latestMessageTimestamp,
-        { io, socket, client, agenda, newMessageId }
+        {
+          io,
+          socket,
+          client,
+          agenda,
+          newMessageId,
+          productData: [],
+        }
       );
-      // await handleSendMessageFromAI(
-      //   false,
-      //   response.text,
-      //   message,
-      //   latestMessageTimestamp,
-      //   { io, socket, client, agenda }
-      // );
       return response.text;
     }
   } catch (error) {
     console.error("Error processing new message with AI:", error);
-    await sendMessageCallback(null, message, latestMessageTimestamp, {
-      io,
-      socket,
-      client,
-      agenda,
-      newMessageId,
-    });
+    await sendMessageCallback(
+      "Maaf, terjadi kesalahan internal. Silakan coba lagi.",
+      message,
+      latestMessageTimestamp,
+      {
+        io,
+        socket,
+        client,
+        agenda,
+        newMessageId,
+        productData: [],
+      }
+    );
     return error;
   }
 };

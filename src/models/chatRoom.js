@@ -39,6 +39,9 @@ const chatRoom = new Schema(
     replyView: {
       type: Object,
     },
+    productData: {
+      type: Array,
+    },
     reactions: [
       {
         emoji: { type: String },
