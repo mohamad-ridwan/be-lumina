@@ -18,7 +18,7 @@ async function initializeEmbeddingPipeline() {
     // dan relatif ringan. Anda bisa mencari model 'feature-extraction' lain di Hugging Face Hub.
     extractor = await pipeline(
       "feature-extraction",
-      "mixedbread-ai/mxbai-embed-large-v1"
+      "Xenova/multilingual-e5-large"
     );
     console.log("Pipeline embedding siap digunakan.");
   }
@@ -99,7 +99,37 @@ function cosineSimilarity(vecA, vecB) {
   return dotProduct / (magnitudeA * magnitudeB);
 }
 
-// Fungsi helper untuk membersihkan dan menormalisasi teks
+async function checkSemanticMatch(
+  textOrEmbedding1,
+  textOrEmbedding2,
+  threshold = 0.6
+) {
+  let embedding1;
+  let embedding2;
+
+  // Determine if input is text or embedding
+  if (Array.isArray(textOrEmbedding1)) {
+    embedding1 = textOrEmbedding1;
+  } else {
+    embedding1 = await getEmbedding(textOrEmbedding1);
+  }
+
+  if (Array.isArray(textOrEmbedding2)) {
+    embedding2 = textOrEmbedding2;
+  } else {
+    embedding2 = await getEmbedding(textOrEmbedding2);
+  }
+
+  if (!embedding1 || !embedding2) {
+    // console.warn("WARNING: Could not generate embeddings for semantic match check.");
+    return false; // Cannot perform semantic match without embeddings
+  }
+
+  const similarity = cosineSimilarity(embedding1, embedding2);
+  // console.log(`  Semantic Match Check: "${textOrEmbedding1}" vs "${textOrEmbedding2}" -> Similarity: ${similarity.toFixed(4)} (Threshold: ${threshold})`);
+  return similarity >= threshold;
+}
+
 function normalizeTextForSearch(text) {
   if (text === null || text === undefined) return ""; // Handle null/undefined input
   return String(text)
@@ -134,14 +164,6 @@ function mapColorToEnglishAndIndonesian(colorName) {
   // Jika tidak ditemukan, kembalikan warna aslinya saja
   return [normalizedColor];
 }
-
-// Pastikan Anda mengimpor mongoose di file yang sama jika Anda menggunakan mongoose.Types.ObjectId
-// const mongoose = require('mongoose');
-// Pastikan Anda mengimpor model Shoe, Brand, Category, dan fungsi getEmbedding
-// const Shoe = require('../models/Shoe'); // Contoh path
-// const Brand = require('../models/Brand'); // Contoh path
-// const Category = require('../models/Category'); // Contoh path
-// const getEmbedding = require('../utils/embeddingService'); // Contoh path
 
 const searchShoes = async ({
   query,
@@ -183,11 +205,13 @@ const searchShoes = async ({
   );
 
   const shoesWithScores = [];
-  let variantAttributesText = ""; // Declare outside loop to avoid re-declaration warning
+  // `variantAttributesText` declaration moved outside the loop for clarity
+  // Its value is generated inside the loop for each shoe.
+
   for (const shoe of allShoes) {
-    // Collect variant attribute names and options for embedding and searchable text
+    let currentVariantAttributesText = ""; // Moved inside loop to be specific to each shoe
     if (shoe.variantAttributes && shoe.variantAttributes.length > 0) {
-      variantAttributesText = shoe.variantAttributes
+      currentVariantAttributesText = shoe.variantAttributes
         .map(
           (attr) =>
             `${normalizeTextForSearch(attr.name)} ${attr.options
@@ -195,8 +219,6 @@ const searchShoes = async ({
               .join(" ")}`
         )
         .join(" ");
-    } else {
-      variantAttributesText = ""; // Ensure it's reset if no variant attributes
     }
 
     // Generate embedding if it doesn't exist
@@ -223,8 +245,8 @@ const searchShoes = async ({
           .map((id) => categoryMap.get(id.toString()))
           .join(
             ", "
-          )}. Varian: ${variantDescriptionText}. Atribut Varian: ${variantAttributesText}`
-      );
+          )}. Varian: ${variantDescriptionText}. Atribut Varian: ${currentVariantAttributesText}`
+      ); // Use currentVariantAttributesText
 
       shoe.description_embedding = await getEmbedding(combinedTextForEmbedding);
     }
@@ -260,6 +282,8 @@ const searchShoes = async ({
     let finalAvailableVariants = [];
 
     // --- FASE 1: Filter Brand dan Kategori Terstruktur ---
+    // This phase can still use direct string matching for exact brand/category names if desired,
+    // or be updated to use semantic matching for more flexibility (e.g., "Nike" matches "Nike Sportswear")
     console.log("Phase 1: Brand and Category Filter");
     if (
       brand &&
@@ -453,8 +477,15 @@ const searchShoes = async ({
                 )}`
               );
 
-              const valueMatches = expectedValuesForFilter.some((expected) =>
-                normalizedActualOptionValue.includes(expected)
+              // Use semantic check for variant option values
+              const valueMatches = expectedValuesForFilter.some(
+                async (expected) => {
+                  return await checkSemanticMatch(
+                    normalizedActualOptionValue,
+                    expected,
+                    0.75
+                  ); // Higher threshold for specific values
+                }
               );
 
               if (valueMatches) {
@@ -474,14 +505,19 @@ const searchShoes = async ({
             }
           );
 
-          if (variantsMatchingAttributeFilter.length === 0) {
+          // Await all promises from the filter
+          const resolvedVariants = await Promise.all(
+            variantsMatchingAttributeFilter
+          );
+          finalAvailableVariants = resolvedVariants.filter(Boolean); // Filter out false results from the async filter
+
+          if (finalAvailableVariants.length === 0) {
             productPassesAllFilters = false;
             console.log(
               `  FAIL: No variants left after filtering by structured attribute "${filterKey}" with values "${filterValue}".`
             );
             break;
           } else {
-            finalAvailableVariants = variantsMatchingAttributeFilter;
             finalMinPrice = Infinity;
             finalMaxPrice = 0;
             finalTotalStock = 0;
@@ -523,96 +559,20 @@ const searchShoes = async ({
     console.log(`  Shoe "${shoe.name}" PASSED Phase 3.`);
 
     // --- FASE 4: APLIKASIKAN SEMUA PARAMETER SEBAGAI FILTER TEKSTUAL DI DESKRIPSI PRODUK ---
-    console.log("Phase 4: Comprehensive Textual Filter");
+    console.log("Phase 4: Comprehensive Textual Filter (Semantic Approach)");
 
-    const strictKeywords = new Set(); // For brand, category, and variantFilters (must match)
-    let queryPhraseToMatch = ""; // For the normalized query string
-    const significantQueryWordsFromQuery = new Set(); // For significant words from the original query
-
-    // Populate strictKeywords from structured parameters
-    if (brand) {
-      strictKeywords.add(normalizeTextForSearch(brand));
+    // Assemble the full searchable text for the current shoe (already available from embedding creation)
+    let currentVariantAttributesText = "";
+    if (shoe.variantAttributes && shoe.variantAttributes.length > 0) {
+      currentVariantAttributesText = shoe.variantAttributes
+        .map(
+          (attr) =>
+            `${normalizeTextForSearch(attr.name)} ${attr.options
+              .map((opt) => normalizeTextForSearch(opt))
+              .join(" ")}`
+        )
+        .join(" ");
     }
-    if (category) {
-      strictKeywords.add(normalizeTextForSearch(category));
-    }
-
-    for (const filterKey in variantFilters) {
-      if (Object.hasOwnProperty.call(variantFilters, filterKey)) {
-        mapColorToEnglishAndIndonesian(filterKey).forEach((tKey) =>
-          strictKeywords.add(tKey)
-        );
-
-        const filterValue = variantFilters[filterKey];
-        if (Array.isArray(filterValue)) {
-          filterValue
-            .map((val) => normalizeTextForSearch(val))
-            .forEach((val) => {
-              mapColorToEnglishAndIndonesian(val).forEach((tVal) =>
-                strictKeywords.add(tVal)
-              );
-            });
-        } else {
-          mapColorToEnglishAndIndonesian(filterValue).forEach((tVal) =>
-            strictKeywords.add(tVal)
-          );
-        }
-      }
-    }
-
-    // Process original query:
-    if (query) {
-      queryPhraseToMatch = normalizeTextForSearch(query);
-      const commonStopWords = new Set([
-        "saya",
-        "mencari",
-        "sepatu",
-        "yang",
-        "untuk",
-        "di",
-        "kak",
-        "warna",
-        "ukuran",
-        "nike",
-        "adidas",
-        "new balance",
-        "converse",
-        "baju",
-        "celana",
-        "jaket",
-        "sport",
-        "olahraga",
-        "pria",
-        "wanita",
-        "anak",
-        "dan",
-        "atau",
-        "dengan",
-        "ini",
-        "itu",
-        "ada",
-        "mau",
-        "cocok",
-        "punya",
-      ]); // Added 'cocok', 'punya'
-
-      queryPhraseToMatch.split(" ").forEach((word) => {
-        const cleanedWord = word
-          .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "")
-          .trim();
-        if (
-          cleanedWord &&
-          cleanedWord.length > 2 &&
-          !commonStopWords.has(cleanedWord)
-        ) {
-          mapColorToEnglishAndIndonesian(cleanedWord).forEach((tWord) =>
-            significantQueryWordsFromQuery.add(tWord)
-          );
-        }
-      });
-    }
-
-    // Assemble the full searchable text for the current shoe
     let variantOptionValuesText = "";
     if (shoe.variants && shoe.variants.length > 0) {
       variantOptionValuesText = shoe.variants
@@ -623,110 +583,168 @@ const searchShoes = async ({
         )
         .join(" ");
     }
-
     const currentSearchableText = normalizeTextForSearch(
       `${shoe.name || ""} ${shoe.description || ""} ${
         brandMap.get(shoe.brand.toString()) || ""
       } ${shoe.category
         .map((id) => categoryMap.get(id.toString()) || "")
-        .join(" ")} ${variantOptionValuesText} ${variantAttributesText}`
+        .join(" ")} ${variantOptionValuesText} ${currentVariantAttributesText}`
     );
 
-    console.log(
-      "  Strict Keywords (from brand, category, variantFilters):",
-      Array.from(strictKeywords)
+    // This is the embedding of the current shoe's full searchable text
+    const shoeSearchableTextEmbedding = await getEmbedding(
+      currentSearchableText
     );
-    console.log(
-      "  Significant Query Words (from original query):",
-      Array.from(significantQueryWordsFromQuery)
-    );
-    console.log("  Query Phrase to Match (normalized):", queryPhraseToMatch);
-    console.log("  FULL Searchable Text (normalized):");
-    console.log(`  >>>${currentSearchableText}<<<`);
+    if (!shoeSearchableTextEmbedding) {
+      console.warn(
+        `  WARNING: Could not generate embedding for searchable text of shoe "${shoe.name}". Skipping semantic filter.`
+      );
+      productPassesAllFilters = false; // Or handle as an error
+    }
 
-    let phase4Passed = true;
+    // Semantic matching for brand (if provided)
+    if (productPassesAllFilters && brand) {
+      const brandName = brandMap.get(shoe.brand.toString());
+      const isBrandMatch = await checkSemanticMatch(brand, brandName, 0.75); // Higher threshold for specific match
+      if (!isBrandMatch) {
+        console.log(
+          `  FAIL: Brand "${brandName}" does not semantically match query brand "${brand}".`
+        );
+        productPassesAllFilters = false;
+      } else {
+        console.log(
+          `  SUCCESS: Brand "${brandName}" semantically matches query brand "${brand}".`
+        );
+      }
+    }
 
-    // 1. Check Strict Keywords (from brand, category, explicit variantFilters)
-    if (strictKeywords.size > 0) {
-      for (const keyword of Array.from(strictKeywords)) {
-        if (keyword === "warna cerah") {
-          // Still keep this specific bright color logic
-          const brightColors = [
-            "red",
-            "yellow",
-            "orange",
-            "lime",
-            "pink",
-            "biru",
-            "hijau",
-            "merah",
-          ].map(normalizeTextForSearch);
-          if (!brightColors.some((bc) => currentSearchableText.includes(bc))) {
-            console.log(
-              `  FAIL: Strict Keyword (warna cerah) NOT found via bright colors.`
+    // Semantic matching for category (if provided)
+    if (productPassesAllFilters && category) {
+      const categoryNames = shoe.category.map((id) =>
+        categoryMap.get(id.toString())
+      );
+      let isCategoryMatch = false;
+      for (const catName of categoryNames) {
+        if (await checkSemanticMatch(category, catName, 0.7)) {
+          // Slightly lower threshold for categories
+          isCategoryMatch = true;
+          break;
+        }
+      }
+      if (!isCategoryMatch) {
+        console.log(
+          `  FAIL: Categories "${categoryNames.join(
+            ", "
+          )}" do not semantically match query category "${category}".`
+        );
+        productPassesAllFilters = false;
+      } else {
+        console.log(
+          `  SUCCESS: Categories "${categoryNames.join(
+            ", "
+          )}" semantically match query category "${category}".`
+        );
+      }
+    }
+
+    // Semantic matching for variantFilters (if provided)
+    if (productPassesAllFilters && Object.keys(variantFilters).length > 0) {
+      for (const filterKey in variantFilters) {
+        const filterValue = variantFilters[filterKey];
+        let expectedValues = Array.isArray(filterValue)
+          ? filterValue
+          : [filterValue];
+
+        if (normalizeTextForSearch(filterKey) === "warna") {
+          const translatedValues = new Set();
+          expectedValues.forEach((val) => {
+            mapColorToEnglishAndIndonesian(val).forEach((tVal) =>
+              translatedValues.add(tVal)
             );
-            phase4Passed = false;
-            break;
-          } else {
-            console.log(
-              `  SUCCESS: Strict Keyword (warna cerah) matched via bright colors.`
-            );
+          });
+          expectedValues = Array.from(translatedValues);
+          console.log(
+            `  Semantic color filter "${filterKey}" expanded to translated values: ${JSON.stringify(
+              expectedValues
+            )}`
+          );
+        }
+
+        let isVariantFilterMatch = false;
+        // Check if any of the product's actual variant options semantically match the filter values
+        if (shoe.variants && shoe.variants.length > 0) {
+          for (const variant of shoe.variants) {
+            const actualOptionValue = variant.optionValues[filterKey]; // Direct lookup by original filterKey
+            if (actualOptionValue) {
+              for (const expectedVal of expectedValues) {
+                if (
+                  await checkSemanticMatch(actualOptionValue, expectedVal, 0.75)
+                ) {
+                  // High threshold for variant options
+                  isVariantFilterMatch = true;
+                  break;
+                }
+              }
+            }
+            if (isVariantFilterMatch) break;
           }
-        } else if (
-          !currentSearchableText.includes(keyword) &&
-          !currentSearchableText.includes(queryPhraseToMatch)
-        ) {
-          console.log(`  FAIL: Strict Keyword "${keyword}" NOT found in text.`);
-          phase4Passed = false;
+        }
+
+        // Also check against variantAttributesText for more general attribute mentions
+        if (!isVariantFilterMatch && currentVariantAttributesText) {
+          for (const expectedVal of expectedValues) {
+            if (
+              await checkSemanticMatch(
+                currentVariantAttributesText,
+                expectedVal,
+                0.65
+              )
+            ) {
+              // Slightly lower threshold for general attribute text
+              isVariantFilterMatch = true;
+              break;
+            }
+          }
+        }
+
+        if (!isVariantFilterMatch) {
+          console.log(
+            `  FAIL: Variant filter "${filterKey}: ${filterValue}" does not semantically match any product variants or attributes.`
+          );
+          productPassesAllFilters = false;
           break;
         } else {
           console.log(
-            `  SUCCESS: Strict Keyword "${
-              keyword || queryPhraseToMatch
-            }" found in text.`
+            `  SUCCESS: Variant filter "${filterKey}: ${filterValue}" semantically matched.`
           );
         }
       }
-    } else {
-      console.log("  No strict keywords (from structured filters) to apply.");
     }
 
-    // 2. If strict keywords passed, now check for significant words from the original query (more flexible)
-    // At least one of these significant words should be present.
-    if (phase4Passed && significantQueryWordsFromQuery.size > 0) {
-      let atLeastOneSignificantWordFound = false;
-      for (const word of Array.from(significantQueryWordsFromQuery)) {
-        if (currentSearchableText.includes(word)) {
-          atLeastOneSignificantWordFound = true;
-          console.log(`  SUCCESS: Significant Query Word "${word}" found.`);
-          break;
-        }
+    // Semantic matching for the general query (if provided)
+    // This is the most crucial part for "cocok untuk perkotaan"
+    if (productPassesAllFilters && query) {
+      // Here, we re-evaluate the overall query against the shoe's full searchable text.
+      // The initial semantic similarity sorting already gives a strong signal,
+      // but this acts as a final, stricter gate for general query relevance.
+      const isQueryTextMatch = await checkSemanticMatch(
+        queryEmbedding,
+        shoeSearchableTextEmbedding,
+        0.5
+      ); // Lower threshold for general query to allow more flexibility
+      if (!isQueryTextMatch) {
+        console.log(
+          `  FAIL: Overall query "${query}" does not semantically match shoe's searchable text.`
+        );
+        productPassesAllFilters = false;
+      } else {
+        console.log(
+          `  SUCCESS: Overall query "${query}" semantically matches shoe's searchable text.`
+        );
       }
-      if (!atLeastOneSignificantWordFound) {
-        phase4Passed = false;
-        console.log(`  FAIL: No significant query word found in text.`);
-      }
-    } else if (significantQueryWordsFromQuery.size === 0) {
-      console.log("  No significant query words to check.");
     }
 
-    // Optional: Add a check for the full query phrase (if it's crucial for specific cases)
-    // For "sepatu yang cocok untuk di perkotaan", this might be too strict, but for "nike air max 90", it's good.
-    // For now, let's rely on the semantic score for overall query meaning and significant words for textual match.
-    // If you uncomment this, ensure it doesn't cause over-filtering for natural language.
-    /*
-    if (phase4Passed && queryPhraseToMatch && !significantQueryWordsFromQuery.has(queryPhraseToMatch)) { // Avoid double check if queryPhrase itself became a significant word
-        if (!currentSearchableText.includes(queryPhraseToMatch)) {
-            console.log(`  FAIL: Full Query Phrase "${queryPhraseToMatch}" NOT found.`);
-            phase4Passed = false;
-        } else {
-            console.log(`  SUCCESS: Full Query Phrase "${queryPhraseToMatch}" found.`);
-        }
-    }
-    */
-
-    if (!phase4Passed) {
-      productPassesAllFilters = false;
+    if (!productPassesAllFilters) {
       console.log(`  Shoe "${shoe.name}" failed Phase 4 (Textual Filter).`);
     } else {
       console.log(`  Shoe "${shoe.name}" PASSED Phase 4.`);

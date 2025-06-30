@@ -181,6 +181,8 @@ const setProductDataForFrontend = (functionCallResult, functionName) => {
 const instructionPrompt = `
 AI diwajibkan untuk menjawab pertanyaan yang singkat dan juga menyimpulkan pertanyaan yang jelas sesuai dari data yang di berikan, seperti kecocokan antara pertanyaan dengan field value dari name, price, brand, category, description, price_info, total_stock.
 
+AI diwajibkan memberikan solusi yang akurat dan nyambung jika data produk yang dicari tidak ada atau tidak sesuai dengan kriteria pengguna.
+
 Berikan respons ketersediaan produk yang singkat, jangan menjelaskan nama, harga, variant produk yang ada.
 
 Jika tidak ada produk, berikan respons maaf yang singkat.
