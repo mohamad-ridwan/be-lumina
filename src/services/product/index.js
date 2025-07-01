@@ -193,15 +193,13 @@ const searchShoes = async ({
     return { error: "Failed to generate embedding for query." };
   }
 
-  // --- START Perbaikan: Membangun Query Database Awal ---
+  // --- Membangun Query Database Awal ---
   const initialDbQuery = {
     _id: { $nin: excludeIds.map((id) => new mongoose.Types.ObjectId(id)) },
   };
 
   // Menambahkan filter brand jika tersedia
   if (brand) {
-    // Karena brand di DB adalah ObjectId, kita perlu mencari ID brand berdasarkan nama.
-    // Ini akan menjadi pencarian non-semantik yang kuat di awal.
     try {
       const brandDoc = await Brand.findOne({
         name: { $regex: new RegExp(brand, "i") },
@@ -213,8 +211,6 @@ const searchShoes = async ({
         console.log(
           `No exact brand found for "${brand}". Will rely on semantic search later.`
         );
-        // Jika brand tidak ditemukan secara eksak, jangan tambahkan ke initialDbQuery.
-        // Biarkan semantic search di Fase 1 menanganinya.
       }
     } catch (error) {
       console.error(`Error finding brand "${brand}":`, error);
@@ -223,7 +219,6 @@ const searchShoes = async ({
 
   // Menambahkan filter category jika tersedia
   if (category) {
-    // Sama seperti brand, kita perlu mencari ID kategori berdasarkan nama.
     try {
       const categoryDoc = await Category.findOne({
         name: { $regex: new RegExp(category, "i") },
@@ -235,24 +230,19 @@ const searchShoes = async ({
         console.log(
           `No exact category found for "${category}". Will rely on semantic search later.`
         );
-        // Jika kategori tidak ditemukan secara eksak, biarkan semantic search di Fase 1 menanganinya.
       }
     } catch (error) {
       console.error(`Error finding category "${category}":`, error);
     }
   }
 
-  // Menambahkan filter harga ke query awal jika minPrice atau maxPrice ada
-  // Ini hanya akan bekerja jika harga disimpan langsung di model Shoe (bukan di varian)
-  // Jika harga hanya ada di varian, filter ini perlu diterapkan pada level varian
-  // seperti yang sudah Anda lakukan di Fase 2.
-  // Untuk tujuan ini, saya asumsikan ada 'price' langsung di model Shoe sebagai fallback/single product price.
+  // Menambahkan filter harga ke query awal
   if (minPrice !== undefined || maxPrice !== undefined) {
     initialDbQuery.$or = [
       {
         // Untuk produk tanpa varian (harga di level shoe)
         $and: [
-          { variants: { $exists: false } }, // Atau variants: { $size: 0 }
+          { variants: { $exists: false } },
           minPrice !== undefined ? { price: { $gte: minPrice } } : {},
           maxPrice !== undefined ? { price: { $lte: maxPrice } } : {},
         ],
@@ -274,7 +264,6 @@ const searchShoes = async ({
 
   console.log("Mongoose initial query:", JSON.stringify(initialDbQuery));
   const allShoes = await Shoe.find(initialDbQuery).lean();
-  // --- END Perbaikan: Membangun Query Database Awal ---
 
   const brandMap = new Map(
     (await Brand.find()).map((b) => [b._id.toString(), b.name])
@@ -298,7 +287,7 @@ const searchShoes = async ({
         .join(" ");
     }
 
-    // Generate embedding if it doesn't exist
+    // Generate embedding jika belum ada
     if (!shoe.description_embedding) {
       let variantDescriptionText = "";
       if (shoe.variants && shoe.variants.length > 0) {
@@ -337,7 +326,7 @@ const searchShoes = async ({
     }
   }
 
-  // Sort by semantic similarity (highest first)
+  // Urutkan berdasarkan kemiripan semantik (tertinggi terlebih dahulu)
   shoesWithScores.sort((a, b) => b.similarity - a.similarity);
 
   const filteredResults = [];
@@ -359,8 +348,6 @@ const searchShoes = async ({
     let finalAvailableVariants = [];
 
     // --- FASE 1: Filter Brand dan Kategori Terstruktur (Diperkuat dengan Semantic Matching) ---
-    // Brand dan Category kini sebagian besar sudah difilter di query awal.
-    // Bagian ini sekarang berfungsi sebagai semantic refinement.
     console.log("Phase 1: Brand and Category Filter (Semantic Refinement)");
     if (brand) {
       const brandName = brandMap.get(shoe.brand.toString());
@@ -411,8 +398,6 @@ const searchShoes = async ({
     console.log(`  Shoe "${shoe.name}" PASSED Phase 1.`);
 
     // --- FASE 2: APLIKASIKAN FILTER HARGA DAN STOK PADA VARIAN / PRODUK UTAMA ---
-    // Filter harga di sini akan tetap ada karena initialDbQuery.$or mungkin tidak selalu optimal
-    // dan kita butuh memfilter varian secara spesifik.
     console.log("Phase 2: Price and Stock Filter");
     if (shoe.variants && shoe.variants.length > 0) {
       const variantsMeetingBaseCriteria = [];
@@ -485,7 +470,6 @@ const searchShoes = async ({
     // --- FASE 3: APLIKASIKAN `variantFilters` YANG BERSIFAT TERSTRUKTUR (misal: Ukuran, Warna) ---
     console.log("Phase 3: Structured Variant Filters");
 
-    // NEW LOGIC: If variantFilters are provided, and the shoe has no variants, it fails this phase.
     if (
       Object.keys(variantFilters).length > 0 &&
       (!shoe.variants || shoe.variants.length === 0)
@@ -494,7 +478,7 @@ const searchShoes = async ({
       console.log(
         `  FAIL: Shoe "${shoe.name}" has no variants but variantFilters were provided. Skipping.`
       );
-      continue; // Skip to next shoe if it fails here
+      continue;
     }
 
     if (shoe.variants && shoe.variants.length > 0) {
@@ -520,12 +504,6 @@ const searchShoes = async ({
           console.log(
             `  FilterKey "${filterKey}" from variantFilters does NOT match any structured variantAttributes for this shoe.`
           );
-          // If a filterKey from variantFilters doesn't match any of the shoe's
-          // defined variantAttributes, this shoe should typically fail this filter.
-          // Unless you want to treat it as a soft filter (semantic only in Phase 4).
-          // For strict filtering, uncomment the line below:
-          // productPassesAllFilters = false;
-          // break; // Exit this loop as product already failed
         }
       }
 
@@ -567,13 +545,10 @@ const searchShoes = async ({
             console.warn(
               `  WARNING: Matched attribute definition not found for filterKey "${filterKey}" during filtering loop.`
             );
-            // If the filter key from query (e.g., "ukuran") doesn't exist in shoe's variantAttributes,
-            // it means this shoe cannot fulfill that structured filter.
             productPassesAllFilters = false;
-            break; // Break from this loop as product failed
+            break;
           }
 
-          // --- BUG FIX: Handle async predicate in filter/some correctly ---
           const variantMatchesPromises = finalAvailableVariants.map(
             async (variant) => {
               const actualOptionValue =
@@ -593,18 +568,16 @@ const searchShoes = async ({
                 )}`
               );
 
-              // Create an array of promises for each expected value match check
               const individualValueMatchPromises = expectedValuesForFilter.map(
                 async (expected) => {
                   return await checkSemanticMatch(
                     normalizedActualOptionValue,
                     expected,
-                    0.8 // Increased threshold for specific variant values
+                    0.8
                   );
                 }
               );
 
-              // Await all individual match checks and then use .some()
               const resolvedIndividualMatches = await Promise.all(
                 individualValueMatchPromises
               );
@@ -625,11 +598,10 @@ const searchShoes = async ({
                   )}".`
                 );
               }
-              return valueMatches ? variant : null; // Return the variant if it matches, otherwise null
+              return valueMatches ? variant : null;
             }
           );
 
-          // Filter out nulls after all promises are resolved
           finalAvailableVariants = (
             await Promise.all(variantMatchesPromises)
           ).filter(Boolean);
@@ -670,9 +642,6 @@ const searchShoes = async ({
         );
       }
     } else {
-      // This else block handles shoes with no `variants` array or an empty `variants` array
-      // This section is now technically redundant due to the new check at the start of Phase 3,
-      // but keeping the log for clarity if that check is removed later.
       if (Object.keys(variantFilters).length > 0) {
         console.log(
           `  FAIL: Product "${shoe.name}" has no variants but variantFilters were provided.`
@@ -792,8 +761,12 @@ const searchShoes = async ({
       }
     }
 
-    rawProductsForFrontend.push(shoe);
-    filteredResults.push(shoe);
+    // Hapus description_embedding sebelum menambahkan ke hasil akhir
+    const { description_embedding, ...shoeWithoutEmbedding } = shoe;
+
+    rawProductsForFrontend.push(shoeWithoutEmbedding);
+    filteredResults.push(shoeWithoutEmbedding);
+
     count++;
   }
 
