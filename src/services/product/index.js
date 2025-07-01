@@ -18,7 +18,7 @@ async function initializeEmbeddingPipeline() {
     // dan relatif ringan. Anda bisa mencari model 'feature-extraction' lain di Hugging Face Hub.
     extractor = await pipeline(
       "feature-extraction",
-      "Xenova/multilingual-e5-large"
+      "mixedbread-ai/mxbai-embed-large-v1"
     );
     console.log("Pipeline embedding siap digunakan.");
   }
@@ -205,11 +205,9 @@ const searchShoes = async ({
   );
 
   const shoesWithScores = [];
-  // `variantAttributesText` declaration moved outside the loop for clarity
-  // Its value is generated inside the loop for each shoe.
 
   for (const shoe of allShoes) {
-    let currentVariantAttributesText = ""; // Moved inside loop to be specific to each shoe
+    let currentVariantAttributesText = "";
     if (shoe.variantAttributes && shoe.variantAttributes.length > 0) {
       currentVariantAttributesText = shoe.variantAttributes
         .map(
@@ -246,7 +244,7 @@ const searchShoes = async ({
           .join(
             ", "
           )}. Varian: ${variantDescriptionText}. Atribut Varian: ${currentVariantAttributesText}`
-      ); // Use currentVariantAttributesText
+      );
 
       shoe.description_embedding = await getEmbedding(combinedTextForEmbedding);
     }
@@ -281,38 +279,50 @@ const searchShoes = async ({
     let finalTotalStock = 0;
     let finalAvailableVariants = [];
 
-    // --- FASE 1: Filter Brand dan Kategori Terstruktur ---
-    // This phase can still use direct string matching for exact brand/category names if desired,
-    // or be updated to use semantic matching for more flexibility (e.g., "Nike" matches "Nike Sportswear")
-    console.log("Phase 1: Brand and Category Filter");
-    if (
-      brand &&
-      normalizeTextForSearch(brandMap.get(shoe.brand.toString())) !==
-        normalizeTextForSearch(brand)
-    ) {
-      console.log(
-        `  FAIL: Brand mismatch. Expected "${brand}", got "${brandMap.get(
-          shoe.brand.toString()
-        )}".`
-      );
-      productPassesAllFilters = false;
+    // --- FASE 1: Filter Brand dan Kategori Terstruktur (Diperkuat dengan Semantic Matching) ---
+    console.log("Phase 1: Brand and Category Filter (Semantic)");
+    if (brand) {
+      const brandName = brandMap.get(shoe.brand.toString());
+      const isBrandMatch = await checkSemanticMatch(brand, brandName, 0.85);
+      if (!isBrandMatch) {
+        console.log(
+          `  FAIL: Brand "${brandName}" does not semantically match query brand "${brand}" (threshold 0.85).`
+        );
+        productPassesAllFilters = false;
+      } else {
+        console.log(
+          `  SUCCESS: Brand "${brandName}" semantically matches query brand "${brand}" (threshold 0.85).`
+        );
+      }
     }
-    if (
-      productPassesAllFilters &&
-      category &&
-      !shoe.category.some((catId) =>
-        normalizeTextForSearch(categoryMap.get(catId.toString())).includes(
-          normalizeTextForSearch(category)
-        )
-      )
-    ) {
-      console.log(
-        `  FAIL: Category mismatch. Expected "${category}", got "${shoe.category
-          .map((id) => categoryMap.get(id.toString()))
-          .join(", ")}".`
+
+    if (productPassesAllFilters && category) {
+      const categoryNames = shoe.category.map((id) =>
+        categoryMap.get(id.toString())
       );
-      productPassesAllFilters = false;
+      let isCategoryMatch = false;
+      for (const catName of categoryNames) {
+        if (await checkSemanticMatch(category, catName, 0.75)) {
+          isCategoryMatch = true;
+          break;
+        }
+      }
+      if (!isCategoryMatch) {
+        console.log(
+          `  FAIL: Categories "${categoryNames.join(
+            ", "
+          )}" do not semantically match query category "${category}" (threshold 0.75).`
+        );
+        productPassesAllFilters = false;
+      } else {
+        console.log(
+          `  SUCCESS: Categories "${categoryNames.join(
+            ", "
+          )}" semantically match query category "${category}" (threshold 0.75).`
+        );
+      }
     }
+
     if (!productPassesAllFilters) {
       console.log(`  Shoe "${shoe.name}" failed Phase 1.`);
       continue;
@@ -391,6 +401,19 @@ const searchShoes = async ({
 
     // --- FASE 3: APLIKASIKAN `variantFilters` YANG BERSIFAT TERSTRUKTUR (misal: Ukuran, Warna) ---
     console.log("Phase 3: Structured Variant Filters");
+
+    // NEW LOGIC: If variantFilters are provided, and the shoe has no variants, it fails this phase.
+    if (
+      Object.keys(variantFilters).length > 0 &&
+      (!shoe.variants || shoe.variants.length === 0)
+    ) {
+      productPassesAllFilters = false;
+      console.log(
+        `  FAIL: Shoe "${shoe.name}" has no variants but variantFilters were provided. Skipping.`
+      );
+      continue; // Skip to next shoe if it fails here
+    }
+
     if (shoe.variants && shoe.variants.length > 0) {
       const attributeFiltersToApply = {};
       console.log(
@@ -414,6 +437,12 @@ const searchShoes = async ({
           console.log(
             `  FilterKey "${filterKey}" from variantFilters does NOT match any structured variantAttributes for this shoe.`
           );
+          // If a filterKey from variantFilters doesn't match any of the shoe's
+          // defined variantAttributes, this shoe should typically fail this filter.
+          // Unless you want to treat it as a soft filter (semantic only in Phase 4).
+          // For strict filtering, uncomment the line below:
+          // productPassesAllFilters = false;
+          // break; // Exit this loop as product already failed
         }
       }
 
@@ -455,11 +484,15 @@ const searchShoes = async ({
             console.warn(
               `  WARNING: Matched attribute definition not found for filterKey "${filterKey}" during filtering loop.`
             );
-            continue;
+            // If the filter key from query (e.g., "ukuran") doesn't exist in shoe's variantAttributes,
+            // it means this shoe cannot fulfill that structured filter.
+            productPassesAllFilters = false;
+            break; // Break from this loop as product failed
           }
 
-          const variantsMatchingAttributeFilter = finalAvailableVariants.filter(
-            (variant) => {
+          // --- BUG FIX: Handle async predicate in filter/some correctly ---
+          const variantMatchesPromises = finalAvailableVariants.map(
+            async (variant) => {
               const actualOptionValue =
                 variant.optionValues[matchedAttributeDefinition.name];
               const normalizedActualOptionValue =
@@ -477,15 +510,23 @@ const searchShoes = async ({
                 )}`
               );
 
-              // Use semantic check for variant option values
-              const valueMatches = expectedValuesForFilter.some(
+              // Create an array of promises for each expected value match check
+              const individualValueMatchPromises = expectedValuesForFilter.map(
                 async (expected) => {
                   return await checkSemanticMatch(
                     normalizedActualOptionValue,
                     expected,
-                    0.75
-                  ); // Higher threshold for specific values
+                    0.8 // Increased threshold for specific variant values
+                  );
                 }
+              );
+
+              // Await all individual match checks and then use .some()
+              const resolvedIndividualMatches = await Promise.all(
+                individualValueMatchPromises
+              );
+              const valueMatches = resolvedIndividualMatches.some(
+                (result) => result === true
               );
 
               if (valueMatches) {
@@ -501,15 +542,14 @@ const searchShoes = async ({
                   )}".`
                 );
               }
-              return valueMatches;
+              return valueMatches ? variant : null; // Return the variant if it matches, otherwise null
             }
           );
 
-          // Await all promises from the filter
-          const resolvedVariants = await Promise.all(
-            variantsMatchingAttributeFilter
-          );
-          finalAvailableVariants = resolvedVariants.filter(Boolean); // Filter out false results from the async filter
+          // Filter out nulls after all promises are resolved
+          finalAvailableVariants = (
+            await Promise.all(variantMatchesPromises)
+          ).filter(Boolean);
 
           if (finalAvailableVariants.length === 0) {
             productPassesAllFilters = false;
@@ -547,9 +587,19 @@ const searchShoes = async ({
         );
       }
     } else {
-      console.log(
-        "  Product has no variants, skipping structured variant filter phase."
-      );
+      // This else block handles shoes with no `variants` array or an empty `variants` array
+      // This section is now technically redundant due to the new check at the start of Phase 3,
+      // but keeping the log for clarity if that check is removed later.
+      if (Object.keys(variantFilters).length > 0) {
+        console.log(
+          `  FAIL: Product "${shoe.name}" has no variants but variantFilters were provided.`
+        );
+        productPassesAllFilters = false;
+      } else {
+        console.log(
+          "  Product has no variants, and no variantFilters were provided. Skipping structured variant filter phase."
+        );
+      }
     }
 
     if (!productPassesAllFilters) {
@@ -561,7 +611,6 @@ const searchShoes = async ({
     // --- FASE 4: APLIKASIKAN SEMUA PARAMETER SEBAGAI FILTER TEKSTUAL DI DESKRIPSI PRODUK ---
     console.log("Phase 4: Comprehensive Textual Filter (Semantic Approach)");
 
-    // Assemble the full searchable text for the current shoe (already available from embedding creation)
     let currentVariantAttributesText = "";
     if (shoe.variantAttributes && shoe.variantAttributes.length > 0) {
       currentVariantAttributesText = shoe.variantAttributes
@@ -591,7 +640,6 @@ const searchShoes = async ({
         .join(" ")} ${variantOptionValuesText} ${currentVariantAttributesText}`
     );
 
-    // This is the embedding of the current shoe's full searchable text
     const shoeSearchableTextEmbedding = await getEmbedding(
       currentSearchableText
     );
@@ -599,147 +647,23 @@ const searchShoes = async ({
       console.warn(
         `  WARNING: Could not generate embedding for searchable text of shoe "${shoe.name}". Skipping semantic filter.`
       );
-      productPassesAllFilters = false; // Or handle as an error
+      productPassesAllFilters = false;
     }
 
-    // Semantic matching for brand (if provided)
-    if (productPassesAllFilters && brand) {
-      const brandName = brandMap.get(shoe.brand.toString());
-      const isBrandMatch = await checkSemanticMatch(brand, brandName, 0.75); // Higher threshold for specific match
-      if (!isBrandMatch) {
-        console.log(
-          `  FAIL: Brand "${brandName}" does not semantically match query brand "${brand}".`
-        );
-        productPassesAllFilters = false;
-      } else {
-        console.log(
-          `  SUCCESS: Brand "${brandName}" semantically matches query brand "${brand}".`
-        );
-      }
-    }
-
-    // Semantic matching for category (if provided)
-    if (productPassesAllFilters && category) {
-      const categoryNames = shoe.category.map((id) =>
-        categoryMap.get(id.toString())
-      );
-      let isCategoryMatch = false;
-      for (const catName of categoryNames) {
-        if (await checkSemanticMatch(category, catName, 0.7)) {
-          // Slightly lower threshold for categories
-          isCategoryMatch = true;
-          break;
-        }
-      }
-      if (!isCategoryMatch) {
-        console.log(
-          `  FAIL: Categories "${categoryNames.join(
-            ", "
-          )}" do not semantically match query category "${category}".`
-        );
-        productPassesAllFilters = false;
-      } else {
-        console.log(
-          `  SUCCESS: Categories "${categoryNames.join(
-            ", "
-          )}" semantically match query category "${category}".`
-        );
-      }
-    }
-
-    // Semantic matching for variantFilters (if provided)
-    if (productPassesAllFilters && Object.keys(variantFilters).length > 0) {
-      for (const filterKey in variantFilters) {
-        const filterValue = variantFilters[filterKey];
-        let expectedValues = Array.isArray(filterValue)
-          ? filterValue
-          : [filterValue];
-
-        if (normalizeTextForSearch(filterKey) === "warna") {
-          const translatedValues = new Set();
-          expectedValues.forEach((val) => {
-            mapColorToEnglishAndIndonesian(val).forEach((tVal) =>
-              translatedValues.add(tVal)
-            );
-          });
-          expectedValues = Array.from(translatedValues);
-          console.log(
-            `  Semantic color filter "${filterKey}" expanded to translated values: ${JSON.stringify(
-              expectedValues
-            )}`
-          );
-        }
-
-        let isVariantFilterMatch = false;
-        // Check if any of the product's actual variant options semantically match the filter values
-        if (shoe.variants && shoe.variants.length > 0) {
-          for (const variant of shoe.variants) {
-            const actualOptionValue = variant.optionValues[filterKey]; // Direct lookup by original filterKey
-            if (actualOptionValue) {
-              for (const expectedVal of expectedValues) {
-                if (
-                  await checkSemanticMatch(actualOptionValue, expectedVal, 0.75)
-                ) {
-                  // High threshold for variant options
-                  isVariantFilterMatch = true;
-                  break;
-                }
-              }
-            }
-            if (isVariantFilterMatch) break;
-          }
-        }
-
-        // Also check against variantAttributesText for more general attribute mentions
-        if (!isVariantFilterMatch && currentVariantAttributesText) {
-          for (const expectedVal of expectedValues) {
-            if (
-              await checkSemanticMatch(
-                currentVariantAttributesText,
-                expectedVal,
-                0.65
-              )
-            ) {
-              // Slightly lower threshold for general attribute text
-              isVariantFilterMatch = true;
-              break;
-            }
-          }
-        }
-
-        if (!isVariantFilterMatch) {
-          console.log(
-            `  FAIL: Variant filter "${filterKey}: ${filterValue}" does not semantically match any product variants or attributes.`
-          );
-          productPassesAllFilters = false;
-          break;
-        } else {
-          console.log(
-            `  SUCCESS: Variant filter "${filterKey}: ${filterValue}" semantically matched.`
-          );
-        }
-      }
-    }
-
-    // Semantic matching for the general query (if provided)
-    // This is the most crucial part for "cocok untuk perkotaan"
     if (productPassesAllFilters && query) {
-      // Here, we re-evaluate the overall query against the shoe's full searchable text.
-      // The initial semantic similarity sorting already gives a strong signal,
-      // but this acts as a final, stricter gate for general query relevance.
       const isQueryTextMatch = await checkSemanticMatch(
         queryEmbedding,
         shoeSearchableTextEmbedding,
-        0.5
-      ); // Lower threshold for general query to allow more flexibility
+        0.6
+      );
       if (!isQueryTextMatch) {
         console.log(
-          `  FAIL: Overall query "${query}" does not semantically match shoe's searchable text.`
+          `  FAIL: Overall query "${query}" does not semantically match shoe's searchable text (threshold 0.6).`
         );
         productPassesAllFilters = false;
       } else {
         console.log(
-          `  SUCCESS: Overall query "${query}" semantically matches shoe's searchable text.`
+          `  SUCCESS: Overall query "${query}" semantically matches shoe's searchable text (threshold 0.6).`
         );
       }
     }
