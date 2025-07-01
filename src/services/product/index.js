@@ -193,9 +193,88 @@ const searchShoes = async ({
     return { error: "Failed to generate embedding for query." };
   }
 
-  const allShoes = await Shoe.find({
+  // --- START Perbaikan: Membangun Query Database Awal ---
+  const initialDbQuery = {
     _id: { $nin: excludeIds.map((id) => new mongoose.Types.ObjectId(id)) },
-  }).lean();
+  };
+
+  // Menambahkan filter brand jika tersedia
+  if (brand) {
+    // Karena brand di DB adalah ObjectId, kita perlu mencari ID brand berdasarkan nama.
+    // Ini akan menjadi pencarian non-semantik yang kuat di awal.
+    try {
+      const brandDoc = await Brand.findOne({
+        name: { $regex: new RegExp(brand, "i") },
+      });
+      if (brandDoc) {
+        initialDbQuery.brand = brandDoc._id;
+        console.log(`Initial DB query - Brand ID added: ${brandDoc._id}`);
+      } else {
+        console.log(
+          `No exact brand found for "${brand}". Will rely on semantic search later.`
+        );
+        // Jika brand tidak ditemukan secara eksak, jangan tambahkan ke initialDbQuery.
+        // Biarkan semantic search di Fase 1 menanganinya.
+      }
+    } catch (error) {
+      console.error(`Error finding brand "${brand}":`, error);
+    }
+  }
+
+  // Menambahkan filter category jika tersedia
+  if (category) {
+    // Sama seperti brand, kita perlu mencari ID kategori berdasarkan nama.
+    try {
+      const categoryDoc = await Category.findOne({
+        name: { $regex: new RegExp(category, "i") },
+      });
+      if (categoryDoc) {
+        initialDbQuery.category = categoryDoc._id;
+        console.log(`Initial DB query - Category ID added: ${categoryDoc._id}`);
+      } else {
+        console.log(
+          `No exact category found for "${category}". Will rely on semantic search later.`
+        );
+        // Jika kategori tidak ditemukan secara eksak, biarkan semantic search di Fase 1 menanganinya.
+      }
+    } catch (error) {
+      console.error(`Error finding category "${category}":`, error);
+    }
+  }
+
+  // Menambahkan filter harga ke query awal jika minPrice atau maxPrice ada
+  // Ini hanya akan bekerja jika harga disimpan langsung di model Shoe (bukan di varian)
+  // Jika harga hanya ada di varian, filter ini perlu diterapkan pada level varian
+  // seperti yang sudah Anda lakukan di Fase 2.
+  // Untuk tujuan ini, saya asumsikan ada 'price' langsung di model Shoe sebagai fallback/single product price.
+  if (minPrice !== undefined || maxPrice !== undefined) {
+    initialDbQuery.$or = [
+      {
+        // Untuk produk tanpa varian (harga di level shoe)
+        $and: [
+          { variants: { $exists: false } }, // Atau variants: { $size: 0 }
+          minPrice !== undefined ? { price: { $gte: minPrice } } : {},
+          maxPrice !== undefined ? { price: { $lte: maxPrice } } : {},
+        ],
+      },
+      {
+        // Untuk produk dengan varian (cek harga di sub-dokumen varian)
+        $and: [
+          { "variants.price": { $exists: true } },
+          minPrice !== undefined
+            ? { "variants.price": { $gte: minPrice } }
+            : {},
+          maxPrice !== undefined
+            ? { "variants.price": { $lte: maxPrice } }
+            : {},
+        ],
+      },
+    ];
+  }
+
+  console.log("Mongoose initial query:", JSON.stringify(initialDbQuery));
+  const allShoes = await Shoe.find(initialDbQuery).lean();
+  // --- END Perbaikan: Membangun Query Database Awal ---
 
   const brandMap = new Map(
     (await Brand.find()).map((b) => [b._id.toString(), b.name])
@@ -280,7 +359,9 @@ const searchShoes = async ({
     let finalAvailableVariants = [];
 
     // --- FASE 1: Filter Brand dan Kategori Terstruktur (Diperkuat dengan Semantic Matching) ---
-    console.log("Phase 1: Brand and Category Filter (Semantic)");
+    // Brand dan Category kini sebagian besar sudah difilter di query awal.
+    // Bagian ini sekarang berfungsi sebagai semantic refinement.
+    console.log("Phase 1: Brand and Category Filter (Semantic Refinement)");
     if (brand) {
       const brandName = brandMap.get(shoe.brand.toString());
       const isBrandMatch = await checkSemanticMatch(brand, brandName, 0.85);
@@ -330,6 +411,8 @@ const searchShoes = async ({
     console.log(`  Shoe "${shoe.name}" PASSED Phase 1.`);
 
     // --- FASE 2: APLIKASIKAN FILTER HARGA DAN STOK PADA VARIAN / PRODUK UTAMA ---
+    // Filter harga di sini akan tetap ada karena initialDbQuery.$or mungkin tidak selalu optimal
+    // dan kita butuh memfilter varian secara spesifik.
     console.log("Phase 2: Price and Stock Filter");
     if (shoe.variants && shoe.variants.length > 0) {
       const variantsMeetingBaseCriteria = [];
