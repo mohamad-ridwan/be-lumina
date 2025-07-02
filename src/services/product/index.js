@@ -1,5 +1,8 @@
 // productsService.js atau file tempat fungsi-fungsi tools AI Anda berada
-const { pipeline } = require("@huggingface/transformers");
+const {
+  pipeline,
+  cos_sim: cosineSimilarity,
+} = require("@huggingface/transformers");
 const Brand = require("../../models/brand"); // Model Brand
 const Category = require("../../models/category"); // Model Category
 const Shoe = require("../../models/shoes"); // Sesuaikan path jika berbeda
@@ -79,25 +82,25 @@ async function getEmbedding(text) {
 //   }
 // }
 
-function cosineSimilarity(vecA, vecB) {
-  if (!vecA || !vecB || vecA.length !== vecB.length) {
-    return 0;
-  }
-  let dotProduct = 0;
-  let magnitudeA = 0;
-  let magnitudeB = 0;
-  for (let i = 0; i < vecA.length; i++) {
-    dotProduct += vecA[i] * vecB[i];
-    magnitudeA += vecA[i] * vecA[i];
-    magnitudeB += vecB[i] * vecB[i];
-  }
-  magnitudeA = Math.sqrt(magnitudeA);
-  magnitudeB = Math.sqrt(magnitudeB);
-  if (magnitudeA === 0 || magnitudeB === 0) {
-    return 0;
-  }
-  return dotProduct / (magnitudeA * magnitudeB);
-}
+// function cosineSimilarity(vecA, vecB) {
+//   if (!vecA || !vecB || vecA.length !== vecB.length) {
+//     return 0;
+//   }
+//   let dotProduct = 0;
+//   let magnitudeA = 0;
+//   let magnitudeB = 0;
+//   for (let i = 0; i < vecA.length; i++) {
+//     dotProduct += vecA[i] * vecB[i];
+//     magnitudeA += vecA[i] * vecA[i];
+//     magnitudeB += vecB[i] * vecB[i];
+//   }
+//   magnitudeA = Math.sqrt(magnitudeA);
+//   magnitudeB = Math.sqrt(magnitudeB);
+//   if (magnitudeA === 0 || magnitudeB === 0) {
+//     return 0;
+//   }
+//   return dotProduct / (magnitudeA * magnitudeB);
+// }
 
 async function checkSemanticMatch(
   textOrEmbedding1,
