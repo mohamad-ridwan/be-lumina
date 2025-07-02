@@ -14,6 +14,12 @@ const shoesSchema = new Schema(
       ref: "brand",
       required: true,
     },
+    label: {
+      type: String,
+    },
+    newArrival: {
+      type: Boolean,
+    },
     description: {
       type: String,
       required: true, // Deskripsi sangat penting untuk AI

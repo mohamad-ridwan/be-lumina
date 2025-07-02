@@ -18,6 +18,8 @@ exports.addShoe = async (req, res, next) => {
       variantAttributes,
       description,
       variants,
+      label,
+      newArrival,
     } = req.body;
 
     // --- Validasi Dasar (Selalu Wajib) ---
@@ -25,6 +27,18 @@ exports.addShoe = async (req, res, next) => {
       return res.status(400).json({
         message:
           "Validation Error: 'name' is required and must be a non-empty string.",
+      });
+    }
+
+    if ((label && typeof label !== "string") || label.trim() === "") {
+      return res.status(400).json({
+        message: "Validation Error: 'label' is must be a non-empty string.",
+      });
+    }
+
+    if (typeof newArrival !== "undefined" && typeof newArrival !== "boolean") {
+      return res.status(400).json({
+        message: "Validation Error: 'newArrival' is must be a boolean type.",
       });
     }
 
@@ -117,6 +131,8 @@ exports.addShoe = async (req, res, next) => {
       slug: finalSlug, // <-- SLUG DITAMBAHKAN DI SINI
       image: image ? image.trim() : undefined,
       price: price, // <<< Harga selalu disertakan
+      label: label,
+      newArrival: newArrival,
     };
 
     // --- Logika Validasi Kondisional Berdasarkan Keberadaan Varian ---
