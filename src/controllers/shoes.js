@@ -6,6 +6,141 @@ const Category = require("../models/category");
 const shoesDB = require("../models/shoes"); // Model Shoes Anda
 const mongoose = require("mongoose"); // Diperlukan untuk ObjectId.isValid
 
+exports.getShoe = async (req, res, next) => {
+  try {
+    const { id, slug } = req.params; // Ambil ID atau slug dari parameter URL
+
+    let query = {};
+
+    // Validasi dan tentukan query berdasarkan ID atau slug
+    if (id) {
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid Shoe ID format.",
+        });
+      }
+      query._id = id;
+    } else if (slug) {
+      query.slug = slug;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide either a Shoe ID or a slug.",
+      });
+    }
+
+    // Cari sepatu dengan populate brand dan category
+    // Gunakan .lean() untuk performa lebih baik karena ini untuk tampilan client
+    const shoe = await shoesDB
+      .findOne(query)
+      .populate("brand", "name") // Hanya ambil field 'name' dari brand
+      .populate("category", "name slug parentCategory level") // Ambil field relevan dari category
+      .lean(); // Mengembalikan objek JavaScript polos
+
+    if (!shoe) {
+      return res.status(404).json({
+        success: false,
+        message: "Shoe not found.",
+      });
+    }
+
+    // Format ulang data kategori untuk client (jika diperlukan)
+    // Misalnya, ingin kategori induk dan anak ditampilkan secara terpisah atau hirarkis
+    let formattedCategories = [];
+    let mainCategories = [];
+    let subCategories = [];
+
+    if (shoe.category && Array.isArray(shoe.category)) {
+      shoe.category.forEach((cat) => {
+        if (cat.level === 0) {
+          mainCategories.push(cat);
+        } else if (cat.level === 1) {
+          subCategories.push(cat);
+        }
+      });
+
+      // Anda bisa menggabungkan atau menyajikannya sesuai kebutuhan frontend
+      // Contoh: Kategorikan berdasarkan level atau kelompokkan subkategori di bawah induknya
+      formattedCategories = mainCategories.map((mainCat) => {
+        const children = subCategories.filter(
+          (subCat) =>
+            subCat.parentCategory &&
+            subCat.parentCategory.toString() === mainCat._id.toString()
+        );
+        return {
+          _id: mainCat._id,
+          name: mainCat.name,
+          slug: mainCat.slug,
+          subCategories: children.map((child) => ({
+            _id: child._id,
+            name: child.name,
+            slug: child.slug,
+          })),
+        };
+      });
+      // Jika ada kategori anak yang tidak memiliki parent (misal, tidak level 0), masukkan saja
+      // Ini mungkin terjadi jika kategori anak tidak sengaja terdaftar tanpa parent yang valid
+      subCategories.forEach((subCat) => {
+        if (
+          !mainCategories.some(
+            (mainCat) =>
+              mainCat._id.toString() === subCat.parentCategory?.toString()
+          )
+        ) {
+          formattedCategories.push({
+            _id: subCat._id,
+            name: subCat.name,
+            slug: subCat.slug,
+          });
+        }
+      });
+    }
+
+    // Pastikan variants Map diubah menjadi objek biasa jika diperlukan oleh frontend
+    if (shoe.variants && Array.isArray(shoe.variants)) {
+      shoe.variants = shoe.variants.map((variant) => {
+        if (variant.optionValues instanceof Map) {
+          return {
+            ...variant,
+            optionValues: Object.fromEntries(variant.optionValues),
+          };
+        }
+        return variant;
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Shoe fetched successfully.",
+      shoe: {
+        _id: shoe._id,
+        name: shoe.name,
+        brand: shoe.brand ? shoe.brand.name : "Unknown Brand", // Ambil nama brand
+        label: shoe.label,
+        newArrival: shoe.newArrival,
+        description: shoe.description,
+        category: formattedCategories, // Gunakan kategori yang sudah diformat
+        slug: shoe.slug,
+        image: shoe.image,
+        price: shoe.price,
+        stock: shoe.stock,
+        variantAttributes: shoe.variantAttributes,
+        variants: shoe.variants,
+        createdAt: shoe.createdAt,
+        updatedAt: shoe.updatedAt,
+      },
+    });
+  } catch (error) {
+    console.error("Error in getShoe:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch shoe.",
+      error: error.message,
+    });
+  }
+};
+
 exports.addShoe = async (req, res, next) => {
   try {
     const {
