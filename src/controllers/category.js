@@ -2,80 +2,205 @@ const Category = require("../models/category"); // Pastikan path ini benar ke fi
 
 exports.getCategories = async (req, res, next) => {
   try {
-    // Ambil parameter limit dari query string
-    const { limit } = req.query;
-    const fetchLimit = parseInt(limit) || null; // Jika limit tidak valid atau tidak ada, set ke null agar tidak membatasi
+    const { limit, slug, level } = req.query; // Ambil limit, slug, DAN level dari query string
 
-    // Hitung total kategori utama (level 0) untuk paginasi yang akurat
-    // Penting: Kita hitung total sebelum menerapkan limit pada pengambilan data
-    const totalMainCategories = await Category.countDocuments({ level: 0 });
-
-    // Ambil kategori utama dengan atau tanpa limit
-    let mainCategoriesQuery = Category.find({ level: 0 });
-    if (fetchLimit) {
-      mainCategoriesQuery = mainCategoriesQuery.limit(fetchLimit);
+    let categoryLevel = null;
+    if (slug) {
+      const parsedLevel = parseInt(level, 10);
+      if (parsedLevel === 0 || parsedLevel === 1) {
+        categoryLevel = parsedLevel;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid 'level' query parameter. Must be 0 or 1.",
+        });
+      }
     }
-    const mainCategories = await mainCategoriesQuery.lean();
 
-    // Ambil semua subkategori (level 1) tanpa limit, karena kita perlu semua untuk mengaitkan
-    const subCategories = await Category.find({ level: 1 }).lean();
+    // --- LOGIC UTAMA: FILTER BERDASARKAN SLUG ATAU AMBIL SEMUA DENGAN LIMIT ---
+    if (slug) {
+      // --- Case: Mengambil Kategori Spesifik berdasarkan SLUG ---
+      const queryConditions = { slug: slug };
+      // Jika level disediakan di query, tambahkan ke kondisi pencarian
+      if (categoryLevel !== null) {
+        queryConditions.level = categoryLevel;
+      }
 
-    // Peta untuk menyimpan kategori utama dan subkategorinya (struktur yang sudah diformat)
-    const formattedCategoryMap = new Map();
+      const foundCategory = await Category.findOne(queryConditions).lean();
 
-    // Tahap 1: Inisialisasi kategori utama yang diambil dengan array subCategories kosong
-    mainCategories.forEach((cat) => {
-      formattedCategoryMap.set(cat._id.toString(), {
-        _id: cat._id,
-        name: cat.name,
-        slug: cat.slug,
-        description: cat.description,
-        imageUrl: cat.imageUrl,
-        subCategories: [], // Inisialisasi array untuk subkategori
-      });
-    });
+      if (!foundCategory) {
+        // Pesan error lebih spesifik jika level tidak cocok
+        let message = `Category with slug '${slug}' not found.`;
+        if (categoryLevel !== null) {
+          message = `Category with slug '${slug}' and level ${categoryLevel} not found.`;
+        }
+        return res.status(404).json({
+          success: false,
+          message: message,
+          data: null,
+        });
+      }
 
-    // Tahap 2: Masukkan subkategori ke dalam kategori induknya
-    subCategories.forEach((subCat) => {
-      // Pastikan parentCategory diubah menjadi string jika itu ObjectId
-      const parentId = subCat.parentCategory
-        ? subCat.parentCategory.toString()
-        : null;
-      if (parentId) {
-        // Jika ini adalah subkategori dan memiliki parentId
-        const parentCategory = formattedCategoryMap.get(parentId);
-        if (parentCategory && parentCategory.subCategories) {
-          // Buat objek subkategori yang hanya berisi field yang diinginkan
-          const subCategoryData = {
-            _id: subCat._id,
-            name: subCat.name,
-            slug: subCat.slug,
-            description: subCat.description,
-            imageUrl: subCat.imageUrl,
+      // Jika level disediakan di query dan tidak cocok dengan level kategori yang ditemukan
+      if (categoryLevel !== null && foundCategory.level !== categoryLevel) {
+        return res.status(400).json({
+          success: false,
+          message: `Category with slug '${slug}' found, but its level (${foundCategory.level}) does not match the requested level (${categoryLevel}).`,
+        });
+      }
+
+      // Inisialisasi objek respons untuk kategori tunggal
+      let singleCategoryResponse = {
+        _id: foundCategory._id,
+        name: foundCategory.name,
+        slug: foundCategory.slug,
+        description: foundCategory.description,
+        imageUrl: foundCategory.imageUrl,
+        level: foundCategory.level,
+        createdAt: foundCategory.createdAt,
+        updatedAt: foundCategory.updatedAt,
+      };
+
+      if (foundCategory.level === 0) {
+        // Jika ini adalah Kategori Utama (Level 0)
+        const collections = await Category.find({
+          parentCategory: foundCategory._id,
+          level: 1,
+        }).lean();
+
+        singleCategoryResponse.collections = collections.map((col) => ({
+          _id: col._id,
+          name: col.name,
+          slug: col.slug,
+          description: col.description,
+          imageUrl: col.imageUrl,
+        }));
+      } else if (foundCategory.level === 1) {
+        // Jika ini adalah Subkategori (Level 1)
+        const parentCategoryData = await Category.findById(
+          foundCategory.parentCategory
+        ).lean();
+
+        if (parentCategoryData) {
+          singleCategoryResponse.parentCategory = {
+            _id: parentCategoryData._id,
+            name: parentCategoryData.name,
+            slug: parentCategoryData.slug,
           };
-          parentCategory.subCategories.push(subCategoryData);
         } else {
-          // Ini bisa terjadi jika subkategori memiliki parent yang tidak termasuk dalam batch mainCategories yang diambil (karena limit)
-          // Atau jika parentId mengarah ke non-main category (seharusnya tidak terjadi dengan level:0 filter di atas)
           console.warn(
-            `Parent category with ID ${parentId} not found or not a main category for subcategory ${subCat.name}`
+            `Parent category for subcategory ${foundCategory.name} (ID: ${foundCategory._id}) not found.`
           );
+          singleCategoryResponse.parentCategory = null;
         }
       }
-    });
 
-    // Tahap 3: Ambil kategori utama yang sudah diformat dari map
-    const finalCategories = Array.from(formattedCategoryMap.values());
+      // Kirim respons untuk kategori tunggal
+      return res.status(200).json({
+        success: true,
+        message: "Category fetched successfully.",
+        category: singleCategoryResponse,
+      });
+    } else {
+      // --- Case: Mengambil Daftar Kategori (tanpa slug, dengan limit & level opsional) ---
+      const fetchLimit = parseInt(limit) || null;
 
-    res.status(200).json({
-      success: true,
-      message: "Categories fetched successfully",
-      total: totalMainCategories, // Total kategori utama yang tersedia
-      limit: fetchLimit, // Limit yang diterapkan (atau null jika tidak ada)
-      categories: finalCategories, // Mengembalikan array kategori utama dengan subkategori
-    });
+      const listQueryConditions = {};
+      // Jika level disediakan di query, terapkan sebagai filter utama
+      if (categoryLevel !== null) {
+        listQueryConditions.level = categoryLevel;
+      } else {
+        // Jika level tidak disediakan, default ke level 0 seperti sebelumnya
+        listQueryConditions.level = 0;
+      }
+
+      const totalCategories = await Category.countDocuments(
+        listQueryConditions
+      );
+
+      let categoriesQuery = Category.find(listQueryConditions);
+      if (fetchLimit) {
+        categoriesQuery = categoriesQuery.limit(fetchLimit);
+      }
+      const foundCategories = await categoriesQuery.lean();
+
+      let formattedCategories = [];
+
+      if (categoryLevel === 0 || categoryLevel === null) {
+        // Jika yang diminta level 0 (atau tidak ditentukan, default ke 0)
+        // Ambil semua subkategori (level 1) untuk dihubungkan
+        const subCategories = await Category.find({ level: 1 }).lean();
+
+        formattedCategories = foundCategories.map((mainCat) => {
+          const collections = subCategories.filter(
+            (subCat) =>
+              subCat.parentCategory &&
+              subCat.parentCategory.toString() === mainCat._id.toString()
+          );
+
+          return {
+            _id: mainCat._id,
+            name: mainCat.name,
+            slug: mainCat.slug,
+            description: mainCat.description,
+            imageUrl: mainCat.imageUrl,
+            level: mainCat.level, // Tambahkan level ke respons
+            collections: collections.map((col) => ({
+              _id: col._id,
+              name: col.name,
+              slug: col.slug,
+              description: col.description,
+              imageUrl: col.imageUrl,
+              level: col.level, // Tambahkan level ke subkategori
+            })),
+          };
+        });
+      } else if (categoryLevel === 1) {
+        // Jika yang diminta level 1
+        formattedCategories = await Promise.all(
+          foundCategories.map(async (subCat) => {
+            let parentCategoryData = null;
+            if (subCat.parentCategory) {
+              parentCategoryData = await Category.findById(
+                subCat.parentCategory
+              ).lean();
+            }
+            return {
+              _id: subCat._id,
+              name: subCat.name,
+              slug: subCat.slug,
+              description: subCat.description,
+              imageUrl: subCat.imageUrl,
+              level: subCat.level, // Tambahkan level ke respons
+              parentCategory: parentCategoryData
+                ? {
+                    _id: parentCategoryData._id,
+                    name: parentCategoryData.name,
+                    slug: parentCategoryData.slug,
+                  }
+                : null,
+            };
+          })
+        );
+      }
+
+      res.status(200).json({
+        success: true,
+        message: "Categories fetched successfully",
+        total: totalCategories,
+        limit: fetchLimit,
+        categories: formattedCategories,
+      });
+    }
   } catch (error) {
     console.error("Error in getCategories:", error);
+    if (error.name === "CastError") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ID format.",
+        error: error.message,
+      });
+    }
     res.status(500).json({
       success: false,
       message: "Failed to fetch categories",

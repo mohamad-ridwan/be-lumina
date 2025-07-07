@@ -9,15 +9,16 @@ const mongoose = require("mongoose"); // Diperlukan untuk ObjectId.isValid
 
 exports.getShoe = async (req, res, next) => {
   try {
-    const { id, slug } = req.params; // Ambil ID atau slug dari parameter URL
+    // Ambil ID atau slug dari parameter URL (misal: /shoes/:id atau /shoes/:slug)
+    const { id, slug, category: categoryIdFromParams } = req.params; // Ambil 'category' dari params dan rename ke categoryIdFromParams
     // Ambil newArrival, limit, dan offersId dari query string (req.query)
-    const { newArrival, limit, offerId } = req.query; // offerId sekarang menjadi filter utama di logic tertentu
+    const { newArrival, limit, offerId } = req.query;
 
     let query = {};
     let fetchLimit = parseInt(limit) || 10; // Default limit 10 jika tidak disediakan atau tidak valid
 
     // --- Logika Penentuan Query Utama ---
-    // Jika ada ID atau slug, itu berarti permintaan untuk satu sepatu spesifik.
+    // PRIORITAS: ID atau slug (untuk satu sepatu spesifik)
     if (id) {
       if (!mongoose.Types.ObjectId.isValid(id)) {
         return res.status(400).json({
@@ -30,7 +31,7 @@ exports.getShoe = async (req, res, next) => {
       query.slug = slug;
     } else if (offerId) {
       // --- Logika Khusus: Filter berdasarkan offersId saja ---
-      // Jika offerId disediakan, kita akan mengabaikan filter newArrival di sini
+      // Jika offerId disediakan, kita akan mengabaikan filter newArrival dan categoryIdFromParams
       if (!mongoose.Types.ObjectId.isValid(offerId)) {
         return res.status(400).json({
           success: false,
@@ -38,24 +39,34 @@ exports.getShoe = async (req, res, next) => {
         });
       }
       query.relatedOffers = new mongoose.Types.ObjectId(offerId);
-      // Anda bisa menambahkan sorting atau limit default khusus di sini jika diinginkan
-      // Contoh: sort berdasarkan createdAt terbaru untuk offer-related shoes
-      // query.sort = { createdAt: -1 }; // Akan diterapkan di bagian find()
+    } else if (categoryIdFromParams) {
+      // <--- LOGIKA BARU UNTUK FILTER KATEGORI DARI PARAMS
+      // --- Logika Khusus: Filter berdasarkan categoryId dari params ---
+      // Jika categoryIdFromParams disediakan, kita akan mengabaikan newArrival
+      if (!mongoose.Types.ObjectId.isValid(categoryIdFromParams)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid Category ID format in parameters.",
+        });
+      }
+      query.category = new mongoose.Types.ObjectId(categoryIdFromParams);
     } else {
-      // Jika tidak ada ID, slug, atau offerId, maka ini adalah permintaan untuk daftar sepatu umum
-      // Tambahkan filter newArrival jika disediakan
+      // --- Logika Umum: Filter berdasarkan newArrival (jika tidak ada ID, slug, offerId, atau categoryId dari params) ---
       if (newArrival !== undefined) {
         query.newArrival = newArrival === "true";
       }
     }
 
-    let shoes; // Variabel untuk menampung hasil query, bisa satu atau banyak sepatu
-    let totalCount; // Untuk menghitung total dokumen yang cocok tanpa limit (untuk paginasi)
+    let shoes;
+    let totalCount;
 
     // Logika pengambilan data sepatu
+    // Jika ada ID atau slug di params, itu adalah permintaan untuk satu sepatu spesifik.
+    // Jika ada categoryIdFromParams di params, itu adalah permintaan untuk daftar sepatu dalam kategori tersebut.
+    // Jika ada offerId di query, itu adalah permintaan untuk daftar sepatu terkait penawaran.
+    // Jika tidak ada di atas, itu adalah permintaan untuk daftar sepatu umum (dengan newArrival opsional).
     if (id || slug) {
-      // --- Case 1: Mengambil satu sepatu spesifik berdasarkan ID atau Slug ---
-      // Abaikan query parameter newArrival, limit, dan offerId di sini karena mencari spesifik
+      // Case 1: Mengambil satu sepatu spesifik berdasarkan ID atau Slug
       shoes = await shoesDB
         .findOne(query)
         .populate("brand", "name")
@@ -71,18 +82,18 @@ exports.getShoe = async (req, res, next) => {
       totalCount = 1;
       shoes = [shoes]; // Bungkus dalam array agar konsisten
     } else {
-      // --- Case 2: Mengambil daftar sepatu (dengan filter newArrival ATAU offerId, dan limit) ---
+      // Case 2: Mengambil daftar sepatu (dengan filter dari params atau query)
       totalCount = await shoesDB.countDocuments(query);
 
-      // Pastikan sorting default jika tidak ada offerId (misalnya, sorting newArrival by createdAt)
-      // Jika offerId ada, sorting bisa jadi berbeda atau tidak diperlukan tergantung kebutuhan.
       let dbQuery = shoesDB.find(query);
 
-      // Contoh: Jika Anda ingin sorting khusus untuk offer-related shoes
+      // Sorting logic
       if (offerId) {
-        dbQuery = dbQuery.sort({ name: 1 }); // Contoh: Urutkan berdasarkan nama untuk offer-related
+        dbQuery = dbQuery.sort({ name: 1 }); // Urutkan berdasarkan nama untuk offer-related
+      } else if (newArrival !== undefined) {
+        dbQuery = dbQuery.sort({ createdAt: -1 }); // Default sorting untuk newArrival
       } else {
-        dbQuery = dbQuery.sort({ createdAt: -1 }); // Default sorting untuk newArrival atau umum
+        dbQuery = dbQuery.sort({ name: 1 }); // Default sorting jika tidak ada offerId atau newArrival
       }
 
       shoes = await dbQuery
