@@ -2,78 +2,76 @@ const Category = require("../models/category"); // Pastikan path ini benar ke fi
 
 exports.getCategories = async (req, res, next) => {
   try {
-    const categories = await Category.find({}).lean(); // Ambil semua kategori dari database
+    // Ambil parameter limit dari query string
+    const { limit } = req.query;
+    const fetchLimit = parseInt(limit) || null; // Jika limit tidak valid atau tidak ada, set ke null agar tidak membatasi
 
-    // Peta untuk menyimpan kategori utama dan subkategorinya
-    const categoryMap = new Map(); // Key: _id kategori, Value: objek kategori
+    // Hitung total kategori utama (level 0) untuk paginasi yang akurat
+    // Penting: Kita hitung total sebelum menerapkan limit pada pengambilan data
+    const totalMainCategories = await Category.countDocuments({ level: 0 });
 
-    // Tahap 1: Inisialisasi kategori utama dan tambahkan parentCategory ke map
-    categories.forEach((cat) => {
-      // Pastikan parentCategory diubah menjadi string jika itu ObjectId
-      cat.parentCategory = cat.parentCategory
-        ? cat.parentCategory.toString()
-        : null;
+    // Ambil kategori utama dengan atau tanpa limit
+    let mainCategoriesQuery = Category.find({ level: 0 });
+    if (fetchLimit) {
+      mainCategoriesQuery = mainCategoriesQuery.limit(fetchLimit);
+    }
+    const mainCategories = await mainCategoriesQuery.lean();
 
-      // Jika level 0 (kategori utama), inisialisasi dengan array subCategories kosong
-      if (cat.level === 0) {
-        categoryMap.set(cat._id.toString(), {
-          _id: cat._id,
-          name: cat.name,
-          slug: cat.slug,
-          description: cat.description,
-          imageUrl: cat.imageUrl,
-          // parentCategory: cat.parentCategory, // Tidak perlu ditampilkan untuk kategori utama
-          // level: cat.level, // Tidak perlu ditampilkan
-          subCategories: [], // Inisialisasi array untuk subkategori
-        });
-      } else {
-        // Untuk kategori level 1 (subkategori), tambahkan ke map apa adanya dulu
-        categoryMap.set(cat._id.toString(), {
-          _id: cat._id,
-          name: cat.name,
-          slug: cat.slug,
-          description: cat.description,
-          imageUrl: cat.imageUrl,
-          parentCategory: cat.parentCategory,
-          // level: cat.level, // Tidak perlu ditampilkan
-        });
-      }
+    // Ambil semua subkategori (level 1) tanpa limit, karena kita perlu semua untuk mengaitkan
+    const subCategories = await Category.find({ level: 1 }).lean();
+
+    // Peta untuk menyimpan kategori utama dan subkategorinya (struktur yang sudah diformat)
+    const formattedCategoryMap = new Map();
+
+    // Tahap 1: Inisialisasi kategori utama yang diambil dengan array subCategories kosong
+    mainCategories.forEach((cat) => {
+      formattedCategoryMap.set(cat._id.toString(), {
+        _id: cat._id,
+        name: cat.name,
+        slug: cat.slug,
+        description: cat.description,
+        imageUrl: cat.imageUrl,
+        subCategories: [], // Inisialisasi array untuk subkategori
+      });
     });
 
     // Tahap 2: Masukkan subkategori ke dalam kategori induknya
-    categoryMap.forEach((cat) => {
-      if (cat.parentCategory) {
-        // Jika ini adalah subkategori
-        const parentId = cat.parentCategory;
-        const parentCategory = categoryMap.get(parentId);
+    subCategories.forEach((subCat) => {
+      // Pastikan parentCategory diubah menjadi string jika itu ObjectId
+      const parentId = subCat.parentCategory
+        ? subCat.parentCategory.toString()
+        : null;
+      if (parentId) {
+        // Jika ini adalah subkategori dan memiliki parentId
+        const parentCategory = formattedCategoryMap.get(parentId);
         if (parentCategory && parentCategory.subCategories) {
           // Buat objek subkategori yang hanya berisi field yang diinginkan
           const subCategoryData = {
-            _id: cat._id,
-            name: cat.name,
-            slug: cat.slug,
-            description: cat.description,
-            imageUrl: cat.imageUrl,
-            // parentCategory dan level tidak perlu di sini lagi
+            _id: subCat._id,
+            name: subCat.name,
+            slug: subCat.slug,
+            description: subCat.description,
+            imageUrl: subCat.imageUrl,
           };
           parentCategory.subCategories.push(subCategoryData);
         } else {
+          // Ini bisa terjadi jika subkategori memiliki parent yang tidak termasuk dalam batch mainCategories yang diambil (karena limit)
+          // Atau jika parentId mengarah ke non-main category (seharusnya tidak terjadi dengan level:0 filter di atas)
           console.warn(
-            `Parent category with ID ${parentId} not found or not a main category for subcategory ${cat.name}`
+            `Parent category with ID ${parentId} not found or not a main category for subcategory ${subCat.name}`
           );
         }
       }
     });
 
-    // Tahap 3: Filter hanya kategori utama (level 0) yang memiliki subCategories
-    // dan pastikan mereka dikembalikan dalam format array
-    const finalCategories = Array.from(categoryMap.values()).filter(
-      (cat) => !cat.parentCategory
-    );
+    // Tahap 3: Ambil kategori utama yang sudah diformat dari map
+    const finalCategories = Array.from(formattedCategoryMap.values());
 
     res.status(200).json({
       success: true,
       message: "Categories fetched successfully",
+      total: totalMainCategories, // Total kategori utama yang tersedia
+      limit: fetchLimit, // Limit yang diterapkan (atau null jika tidak ada)
       categories: finalCategories, // Mengembalikan array kategori utama dengan subkategori
     });
   } catch (error) {

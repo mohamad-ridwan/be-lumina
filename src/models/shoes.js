@@ -116,6 +116,11 @@ const shoesSchema = new Schema(
         type: "required",
       },
     },
+    relatedOffers: {
+      type: [Schema.Types.ObjectId],
+      ref: "latestOffers",
+      default: [],
+    },
   },
   {
     timestamps: true,

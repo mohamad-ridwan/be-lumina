@@ -10,6 +10,7 @@ const tools = require("./tools");
 const category = require("./category");
 const brand = require("./brand");
 const shoes = require("./shoes");
+const latestOffers = require("./latestOffers");
 
 router.use("/users", users);
 router.use("/register-verify", registerVerify);
@@ -19,5 +20,6 @@ router.use("/tools", tools);
 router.use("/categories", category);
 router.use("/brand", brand);
 router.use("/shoes", shoes);
+router.use("/latest-offers", latestOffers);
 
 module.exports = router;

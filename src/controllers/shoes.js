@@ -4,6 +4,7 @@
 const Brand = require("../models/brand");
 const Category = require("../models/category");
 const shoesDB = require("../models/shoes"); // Model Shoes Anda
+const LatestOffers = require("../models/latestOffers");
 const mongoose = require("mongoose"); // Diperlukan untuk ObjectId.isValid
 
 exports.getShoe = async (req, res, next) => {
@@ -179,13 +180,14 @@ exports.addShoe = async (req, res, next) => {
       brand,
       category,
       image,
-      price, // <<< Tetap dibutuhkan
-      stock, // <<< Akan divalidasi kondisional
+      price,
+      stock,
       variantAttributes,
       description,
       variants,
       label,
       newArrival,
+      relatedOffers, // <<< Tangkap field ini dari request body
     } = req.body;
 
     // --- Validasi Dasar (Selalu Wajib) ---
@@ -196,15 +198,56 @@ exports.addShoe = async (req, res, next) => {
       });
     }
 
-    if ((label && typeof label !== "string") || label.trim() === "") {
+    // Validasi untuk relatedOffers
+    if (relatedOffers !== undefined) {
+      // Hanya validasi jika field ini ada di request
+      if (!Array.isArray(relatedOffers)) {
+        return res.status(400).json({
+          message:
+            "Validation Error: 'relatedOffers' must be an array of offer IDs.",
+        });
+      }
+      for (const offerId of relatedOffers) {
+        if (!mongoose.Types.ObjectId.isValid(offerId)) {
+          return res.status(400).json({
+            message: `Validation Error: Invalid Latest Offer ID '${offerId}'.`,
+          });
+        }
+      }
+      // Opsional: Cek apakah semua LatestOffer ID yang diberikan benar-benar ada di database
+      // Ini bisa overhead jika relatedOffers banyak, tapi menjamin integritas data
+      if (relatedOffers.length > 0) {
+        const existingOffers = await LatestOffers.find({
+          _id: { $in: relatedOffers },
+        });
+        if (existingOffers.length !== relatedOffers.length) {
+          // Temukan ID yang tidak valid untuk pesan error yang lebih spesifik
+          const foundIds = existingOffers.map((offer) => offer._id.toString());
+          const invalidIds = relatedOffers.filter(
+            (id) => !foundIds.includes(id)
+          );
+          return res.status(400).json({
+            message: `Validation Error: One or more provided Latest Offer IDs do not exist: ${invalidIds.join(
+              ", "
+            )}.`,
+          });
+        }
+      }
+    }
+
+    if (
+      (label && typeof label !== "string") ||
+      (label && label.trim() === "")
+    ) {
       return res.status(400).json({
-        message: "Validation Error: 'label' is must be a non-empty string.",
+        message:
+          "Validation Error: 'label' is must be a non-empty string if provided.",
       });
     }
 
     if (typeof newArrival !== "undefined" && typeof newArrival !== "boolean") {
       return res.status(400).json({
-        message: "Validation Error: 'newArrival' is must be a boolean type.",
+        message: "Validation Error: 'newArrival' must be a boolean type.",
       });
     }
 
@@ -219,14 +262,12 @@ exports.addShoe = async (req, res, next) => {
       });
     }
 
-    // <<< PERUBAHAN DI SINI: Validasi 'price' selalu wajib
     if (typeof price !== "number" || price < 0) {
       return res.status(400).json({
         message:
           "Validation Error: 'price' is required and must be a non-negative number.",
       });
     }
-    // >>> AKHIR PERUBAHAN
 
     if (!category || !Array.isArray(category) || category.length === 0) {
       return res.status(400).json({
@@ -278,14 +319,11 @@ exports.addShoe = async (req, res, next) => {
       .replace(/^-+/, "")
       .replace(/-+$/, "");
 
-    // Fallback jika slug kosong setelah diproses (jika nama hanya karakter aneh)
     let finalSlug = generatedSlug || `shoe-${Date.now()}`;
 
-    // Cek apakah slug yang dihasilkan sudah ada di database untuk mencegah duplikasi unik
     const existingShoeWithSlug = await shoesDB.findOne({ slug: finalSlug });
     if (existingShoeWithSlug) {
-      // Jika ada konflik slug, tambahkan timestamp atau random string
-      finalSlug = `${finalSlug}-${Date.now()}`; // Atau gunakan counter
+      finalSlug = `${finalSlug}-${Date.now()}`;
     }
 
     // --- Siapkan objek data untuk model Mongoose ---
@@ -294,11 +332,12 @@ exports.addShoe = async (req, res, next) => {
       description: description.trim(),
       brand: brand,
       category: category,
-      slug: finalSlug, // <-- SLUG DITAMBAHKAN DI SINI
+      slug: finalSlug,
       image: image ? image.trim() : undefined,
-      price: price, // <<< Harga selalu disertakan
+      price: price,
       label: label,
       newArrival: newArrival,
+      relatedOffers: relatedOffers || [], // <<< Tambahkan relatedOffers ke shoeData. Gunakan array kosong jika tidak ada di request.
     };
 
     // --- Logika Validasi Kondisional Berdasarkan Keberadaan Varian ---
@@ -368,7 +407,6 @@ exports.addShoe = async (req, res, next) => {
 
         const optionValuesMap = new Map(Object.entries(v.optionValues));
 
-        // Validasi bahwa semua attributeName dari variantAttributes ada di optionValues
         for (const attr of variantAttributes) {
           if (
             !optionValuesMap.has(attr.name) ||
@@ -383,7 +421,6 @@ exports.addShoe = async (req, res, next) => {
             });
           }
         }
-        // Validasi jumlah optionValues harus sama dengan jumlah variantAttributes
         if (optionValuesMap.size !== variantAttributes.length) {
           return res.status(400).json({
             message: `Validation Error: Mismatch in number of option values for a variant. Expected ${variantAttributes.length}, got ${optionValuesMap.size}.`,
@@ -403,25 +440,24 @@ exports.addShoe = async (req, res, next) => {
       });
     } else {
       // --- Skenario: Produk Tanpa Varian ---
-      // Validasi 'price' sudah dipindahkan ke atas, jadi tidak perlu di sini lagi.
-
-      // Validasi 'stock' tetap di sini karena ini field kondisional di skema
       if (typeof stock !== "number" || stock < 0) {
         return res.status(400).json({
           message:
             "Validation Error: 'stock' is required and must be a non-negative number when no variant attributes are provided.",
         });
       }
-      Object.assign(shoeData, { stock }); // Hanya tambahkan stock
+      Object.assign(shoeData, { stock });
     }
 
     const newShoe = new shoesDB(shoeData);
     const savedShoe = await newShoe.save();
 
+    // Populate relatedOffers juga saat mengembalikan sepatu yang disimpan
     const populatedShoe = await shoesDB
       .findById(savedShoe._id)
       .populate("brand", "name slug logoUrl")
-      .populate("category", "name slug");
+      .populate("category", "name slug")
+      .populate("relatedOffers", "title slug imageUrl"); // <<< POPULATE relatedOffers
 
     res.status(201).json({
       message: "Shoe added successfully!",
