@@ -10,8 +10,8 @@ const mongoose = require("mongoose"); // Diperlukan untuk ObjectId.isValid
 exports.getShoe = async (req, res, next) => {
   try {
     const { id, slug } = req.params; // Ambil ID atau slug dari parameter URL
-    // Ambil newArrival dan limit dari query string (req.query)
-    const { newArrival, limit } = req.query;
+    // Ambil newArrival, limit, dan offersId dari query string (req.query)
+    const { newArrival, limit, offerId } = req.query; // offerId sekarang menjadi filter utama di logic tertentu
 
     let query = {};
     let fetchLimit = parseInt(limit) || 10; // Default limit 10 jika tidak disediakan atau tidak valid
@@ -28,22 +28,34 @@ exports.getShoe = async (req, res, next) => {
       query._id = id;
     } else if (slug) {
       query.slug = slug;
-    }
-    // Jika tidak ada ID atau slug, maka ini adalah permintaan untuk daftar sepatu
-    // dengan filter opsional (misal: newArrival)
-
-    // Tambahkan filter newArrival jika disediakan
-    // Pastikan newArrival adalah boolean. 'true' string -> true boolean
-    if (newArrival !== undefined) {
-      query.newArrival = newArrival === "true";
+    } else if (offerId) {
+      // --- Logika Khusus: Filter berdasarkan offersId saja ---
+      // Jika offerId disediakan, kita akan mengabaikan filter newArrival di sini
+      if (!mongoose.Types.ObjectId.isValid(offerId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid Offer ID format for filtering shoes.",
+        });
+      }
+      query.relatedOffers = new mongoose.Types.ObjectId(offerId);
+      // Anda bisa menambahkan sorting atau limit default khusus di sini jika diinginkan
+      // Contoh: sort berdasarkan createdAt terbaru untuk offer-related shoes
+      // query.sort = { createdAt: -1 }; // Akan diterapkan di bagian find()
+    } else {
+      // Jika tidak ada ID, slug, atau offerId, maka ini adalah permintaan untuk daftar sepatu umum
+      // Tambahkan filter newArrival jika disediakan
+      if (newArrival !== undefined) {
+        query.newArrival = newArrival === "true";
+      }
     }
 
     let shoes; // Variabel untuk menampung hasil query, bisa satu atau banyak sepatu
     let totalCount; // Untuk menghitung total dokumen yang cocok tanpa limit (untuk paginasi)
 
+    // Logika pengambilan data sepatu
     if (id || slug) {
       // --- Case 1: Mengambil satu sepatu spesifik berdasarkan ID atau Slug ---
-      // Abaikan query parameter newArrival dan limit di sini karena mencari spesifik
+      // Abaikan query parameter newArrival, limit, dan offerId di sini karena mencari spesifik
       shoes = await shoesDB
         .findOne(query)
         .populate("brand", "name")
@@ -56,30 +68,36 @@ exports.getShoe = async (req, res, next) => {
           message: "Shoe not found.",
         });
       }
-      // Jika ditemukan satu sepatu, bungkus dalam array agar konsisten dengan proses pemformatan di bawah
       totalCount = 1;
-      shoes = [shoes];
+      shoes = [shoes]; // Bungkus dalam array agar konsisten
     } else {
-      // --- Case 2: Mengambil daftar sepatu (dengan filter newArrival dan limit) ---
-      // Pertama, hitung total dokumen yang cocok dengan filter (tanpa limit)
+      // --- Case 2: Mengambil daftar sepatu (dengan filter newArrival ATAU offerId, dan limit) ---
       totalCount = await shoesDB.countDocuments(query);
 
-      // Kemudian, ambil sepatu dengan limit
-      shoes = await shoesDB
-        .find(query)
+      // Pastikan sorting default jika tidak ada offerId (misalnya, sorting newArrival by createdAt)
+      // Jika offerId ada, sorting bisa jadi berbeda atau tidak diperlukan tergantung kebutuhan.
+      let dbQuery = shoesDB.find(query);
+
+      // Contoh: Jika Anda ingin sorting khusus untuk offer-related shoes
+      if (offerId) {
+        dbQuery = dbQuery.sort({ name: 1 }); // Contoh: Urutkan berdasarkan nama untuk offer-related
+      } else {
+        dbQuery = dbQuery.sort({ createdAt: -1 }); // Default sorting untuk newArrival atau umum
+      }
+
+      shoes = await dbQuery
         .limit(fetchLimit)
         .populate("brand", "name")
         .populate("category", "name slug parentCategory level")
         .lean();
     }
 
-    // --- Proses Pemformatan Hasil untuk Setiap Sepatu ---
+    // --- Proses Pemformatan Hasil untuk Setiap Sepatu (tetap sama) ---
     const formattedShoes = shoes.map((shoe) => {
       let formattedCategories = [];
       let mainCategories = [];
       let subCategories = [];
 
-      // Logika pemformatan kategori tetap sama
       if (shoe.category && Array.isArray(shoe.category)) {
         shoe.category.forEach((cat) => {
           if (cat.level === 0) {
@@ -123,7 +141,6 @@ exports.getShoe = async (req, res, next) => {
         });
       }
 
-      // Pastikan variants Map diubah menjadi objek biasa untuk frontend
       if (shoe.variants && Array.isArray(shoe.variants)) {
         shoe.variants = shoe.variants.map((variant) => {
           if (variant.optionValues instanceof Map) {
@@ -136,7 +153,6 @@ exports.getShoe = async (req, res, next) => {
         });
       }
 
-      // Mengembalikan objek sepatu yang diformat
       return {
         _id: shoe._id,
         name: shoe.name,
@@ -151,6 +167,7 @@ exports.getShoe = async (req, res, next) => {
         stock: shoe.stock,
         variantAttributes: shoe.variantAttributes,
         variants: shoe.variants,
+        relatedOffers: shoe.relatedOffers || [],
         createdAt: shoe.createdAt,
         updatedAt: shoe.updatedAt,
       };
@@ -159,12 +176,19 @@ exports.getShoe = async (req, res, next) => {
     res.status(200).json({
       success: true,
       message: "Shoes fetched successfully.",
-      total: totalCount, // Total sepatu yang cocok (tanpa limit)
-      limit: fetchLimit, // Limit yang digunakan dalam query ini
-      shoes: formattedShoes, // Hasil sepatu yang sudah diformat dan dibatasi
+      total: totalCount,
+      limit: fetchLimit,
+      shoes: formattedShoes,
     });
   } catch (error) {
     console.error("Error in getShoe:", error);
+    if (error.name === "CastError") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ID format in query or parameters.",
+        error: error.message,
+      });
+    }
     res.status(500).json({
       success: false,
       message: "Failed to fetch shoes.",

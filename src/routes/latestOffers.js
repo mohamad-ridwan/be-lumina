@@ -1,7 +1,8 @@
 const router = require("express").Router();
 
-const { add } = require("../controllers/latestOffers");
+const { add, getOffers } = require("../controllers/latestOffers");
 
 router.post("/add", add);
+router.get("/", getOffers);
 
 module.exports = router;

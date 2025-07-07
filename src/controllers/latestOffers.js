@@ -1,5 +1,69 @@
 const LatestOffer = require("../models/latestOffers"); // Pastikan nama model sesuai (LatestOffer, bukan LatestOffers)
 
+exports.getOffers = async (req, res, next) => {
+  try {
+    // Ambil nilai 'slug' dari query parameter
+    const slug = req.query.slug;
+
+    // Inisialisasi variabel untuk hasil query
+    let offers;
+    let count;
+    let message;
+
+    if (slug) {
+      // Jika slug disediakan, cari satu offer berdasarkan slug
+      const offer = await LatestOffer.findOne({ slug: slug, isActive: true });
+
+      if (!offer) {
+        return res.status(404).json({
+          success: false,
+          message: `Penawaran dengan slug '${slug}' tidak ditemukan atau tidak aktif.`,
+          data: null,
+        });
+      }
+
+      offers = [offer]; // Bungkus hasil tunggal dalam array agar konsisten dengan format respons
+      count = 1;
+      message = `Berhasil mengambil penawaran dengan slug '${slug}'.`;
+    } else {
+      // Jika slug tidak disediakan, gunakan logika limit seperti sebelumnya
+      const limit = parseInt(req.query.limit, 10) || 10;
+      const queryLimit = limit > 0 ? limit : 10;
+
+      offers = await LatestOffer.find({ isActive: true })
+        .sort({ createdAt: -1 }) // Urutkan dari terbaru
+        .limit(queryLimit); // Terapkan limit dari query
+
+      count = offers.length;
+      message = "Berhasil mengambil data offers.";
+    }
+
+    // Kirim respons sukses
+    res.status(200).json({
+      success: true,
+      count: count,
+      message: message,
+      data: offers,
+    });
+  } catch (error) {
+    // Tangani error jika terjadi
+    console.error("Error fetching offers:", error);
+    // Periksa jika error adalah CastError (misalnya, jika ID tidak valid jika nanti Anda menambahkan fitur getById)
+    if (error.name === "CastError") {
+      return res.status(400).json({
+        success: false,
+        message: "Format parameter tidak valid.",
+        error: error.message,
+      });
+    }
+    res.status(500).json({
+      success: false,
+      message: "Gagal mengambil data penawaran. Terjadi kesalahan server.",
+      error: error.message, // Sertakan pesan error untuk debugging (opsional di produksi)
+    });
+  }
+};
+
 exports.add = async (req, res, next) => {
   try {
     // Dapatkan data dari body request
