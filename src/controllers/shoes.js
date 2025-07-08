@@ -11,8 +11,8 @@ exports.getShoe = async (req, res, next) => {
   try {
     // Ambil ID atau slug dari parameter URL (misal: /shoes/:id atau /shoes/:slug)
     const { id, slug, category: categoryIdFromParams } = req.params;
-    // Ambil newArrival, limit, offersId, DAN page dari query string (req.query)
-    const { newArrival, limit, offerId, page } = req.query; // Tambahkan page di sini
+    // Ambil newArrival, limit, offersId, page, DAN sort dari query string (req.query)
+    const { newArrival, limit, offerId, page, sort } = req.query; // Tambahkan sort di sini
 
     let query = {};
     let fetchLimit = parseInt(limit) || 10; // Default limit 10
@@ -81,20 +81,41 @@ exports.getShoe = async (req, res, next) => {
       shoes = [shoes]; // Bungkus dalam array agar konsisten
       // current page dan total pages tetap 1 untuk single item
     } else {
-      // Case 2: Mengambil daftar sepatu (dengan filter dan PAGINATION)
+      // Case 2: Mengambil daftar sepatu (dengan filter, pagination, dan SORTING)
       totalCount = await shoesDB.countDocuments(query); // Hitung total dokumen yang cocok
       totalPages = Math.ceil(totalCount / fetchLimit); // Hitung total halaman
 
       let dbQuery = shoesDB.find(query);
 
-      // Sorting logic
-      if (offerId) {
-        dbQuery = dbQuery.sort({ name: 1 });
-      } else if (newArrival !== undefined) {
-        dbQuery = dbQuery.sort({ createdAt: -1 });
+      // --- LOGIKA SORTING BARU ---
+      let sortCriteria = {}; // Objek untuk menyimpan kriteria sorting
+
+      if (sort) {
+        switch (sort.toLowerCase()) {
+          case "termurah":
+            sortCriteria = { price: 1 }; // 1 untuk ascending (termurah ke termahal)
+            break;
+          case "termahal":
+            sortCriteria = { price: -1 }; // -1 untuk descending (termahal ke termurah)
+            break;
+          case "terbaru":
+            sortCriteria = { createdAt: -1 }; // -1 untuk descending (terbaru ke terlama)
+            break;
+          default:
+            // Default sorting jika nilai 'sort' tidak valid
+            // Anda bisa pilih default lain, misalnya { name: 1 } atau { createdAt: -1 }
+            sortCriteria = { createdAt: -1 };
+            console.warn(
+              `Invalid sort parameter: ${sort}. Defaulting to 'terbaru'.`
+            );
+            break;
+        }
       } else {
-        dbQuery = dbQuery.sort({ name: 1 });
+        // Default sorting jika parameter 'sort' tidak disediakan sama sekali
+        sortCriteria = { createdAt: -1 }; // Misalnya, default ke terbaru
       }
+
+      dbQuery = dbQuery.sort(sortCriteria); // Terapkan kriteria sorting ke query
 
       shoes = await dbQuery
         .skip(skip) // Terapkan skip untuk pagination
@@ -185,15 +206,25 @@ exports.getShoe = async (req, res, next) => {
       };
     });
 
-    res.status(200).json({
+    let responseData = {
       success: true,
       message: "Shoes fetched successfully.",
-      total: totalCount, // Total sepatu yang cocok (tanpa pagination)
-      limit: fetchLimit, // Limit per halaman
-      currentPage: currentPage, // Halaman saat ini
-      totalPages: totalPages, // Total halaman yang tersedia
-      shoes: formattedShoes, // Hasil sepatu yang sudah diformat dan dipaginasi
-    });
+      total: totalCount,
+      limit: fetchLimit,
+      currentPage: currentPage,
+      totalPages: totalPages,
+      shoes: formattedShoes,
+    };
+
+    if (sort === "termurah") {
+      responseData.sort = sort;
+    } else if (sort === "termahal") {
+      responseData.sort = sort;
+    } else if (sort === "terbaru") {
+      responseData.sort = sort;
+    }
+
+    res.status(200).json(responseData);
   } catch (error) {
     console.error("Error in getShoe:", error);
     if (error.name === "CastError") {
