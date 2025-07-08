@@ -11,8 +11,8 @@ exports.getShoe = async (req, res, next) => {
   try {
     // Ambil ID atau slug dari parameter URL (misal: /shoes/:id atau /shoes/:slug)
     const { id, slug, category: categoryIdFromParams } = req.params;
-    // Ambil newArrival, limit, offersId, page, DAN sort dari query string (req.query)
-    const { newArrival, limit, offerId, page, sort } = req.query; // Tambahkan sort di sini
+    // Ambil newArrival, limit, offersId, page, sort, DAN search dari query string (req.query)
+    const { newArrival, limit, offerId, page, sort, search } = req.query; // Tambahkan search di sini
 
     let query = {};
     let fetchLimit = parseInt(limit) || 10; // Default limit 10
@@ -56,6 +56,18 @@ exports.getShoe = async (req, res, next) => {
       if (newArrival !== undefined) {
         query.newArrival = newArrival === "true";
       }
+
+      // --- LOGIKA SEARCH BARU ---
+      // Ini diterapkan jika TIDAK ada ID, slug, offerId, atau categoryIdFromParams
+      // dan akan digabungkan dengan newArrival jika ada.
+      if (search) {
+        const searchRegex = new RegExp(search, "i"); // 'i' untuk case-insensitive
+        // Gunakan $or untuk mencari di beberapa field (name ATAU description)
+        query.$or = [
+          { name: { $regex: searchRegex } },
+          { description: { $regex: searchRegex } },
+        ];
+      }
     }
 
     let shoes;
@@ -65,6 +77,8 @@ exports.getShoe = async (req, res, next) => {
     // Logika pengambilan data sepatu
     if (id || slug) {
       // Case 1: Mengambil satu sepatu spesifik berdasarkan ID atau Slug
+      // Query parameter search, page, limit, sort DIABAIKAN di sini
+      // karena kita mencari satu item spesifik.
       shoes = await shoesDB
         .findOne(query)
         .populate("brand", "name")
@@ -87,23 +101,21 @@ exports.getShoe = async (req, res, next) => {
 
       let dbQuery = shoesDB.find(query);
 
-      // --- LOGIKA SORTING BARU ---
+      // --- LOGIKA SORTING ---
       let sortCriteria = {}; // Objek untuk menyimpan kriteria sorting
 
       if (sort) {
         switch (sort.toLowerCase()) {
           case "termurah":
-            sortCriteria = { price: 1 }; // 1 untuk ascending (termurah ke termahal)
+            sortCriteria = { price: 1 };
             break;
           case "termahal":
-            sortCriteria = { price: -1 }; // -1 untuk descending (termahal ke termurah)
+            sortCriteria = { price: -1 };
             break;
           case "terbaru":
-            sortCriteria = { createdAt: -1 }; // -1 untuk descending (terbaru ke terlama)
+            sortCriteria = { createdAt: -1 };
             break;
           default:
-            // Default sorting jika nilai 'sort' tidak valid
-            // Anda bisa pilih default lain, misalnya { name: 1 } atau { createdAt: -1 }
             sortCriteria = { createdAt: -1 };
             console.warn(
               `Invalid sort parameter: ${sort}. Defaulting to 'terbaru'.`
@@ -111,8 +123,7 @@ exports.getShoe = async (req, res, next) => {
             break;
         }
       } else {
-        // Default sorting jika parameter 'sort' tidak disediakan sama sekali
-        sortCriteria = { createdAt: -1 }; // Misalnya, default ke terbaru
+        sortCriteria = { createdAt: -1 }; // Default ke terbaru
       }
 
       dbQuery = dbQuery.sort(sortCriteria); // Terapkan kriteria sorting ke query
@@ -216,12 +227,16 @@ exports.getShoe = async (req, res, next) => {
       shoes: formattedShoes,
     };
 
-    if (sort === "termurah") {
-      responseData.sort = sort;
-    } else if (sort === "termahal") {
-      responseData.sort = sort;
-    } else if (sort === "terbaru") {
-      responseData.sort = sort;
+    // Tambahkan kembali sort ke respons jika ada
+    if (
+      sort &&
+      ["termurah", "termahal", "terbaru"].includes(sort.toLowerCase())
+    ) {
+      responseData.sort = sort.toLowerCase();
+    }
+    // Tambahkan search query ke respons jika ada
+    if (search) {
+      responseData.search = search;
     }
 
     res.status(200).json(responseData);
