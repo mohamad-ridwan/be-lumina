@@ -2,10 +2,11 @@ const Category = require("../models/category"); // Pastikan path ini benar ke fi
 
 exports.getCategories = async (req, res, next) => {
   try {
-    const { limit, slug, level } = req.query; // Ambil limit, slug, DAN level dari query string
+    const { limit, slug, level, isPopular } = req.query; // Ambil isPopular dari query string
 
     let categoryLevel = null;
-    if (slug) {
+    // Pindahkan validasi level ke awal agar bisa digunakan oleh kedua branch (slug dan non-slug)
+    if (level !== undefined) {
       const parsedLevel = parseInt(level, 10);
       if (parsedLevel === 0 || parsedLevel === 1) {
         categoryLevel = parsedLevel;
@@ -17,22 +18,51 @@ exports.getCategories = async (req, res, next) => {
       }
     }
 
+    // Konversi isPopular dari string ke boolean
+    let filterByIsPopular = null;
+    if (isPopular !== undefined) {
+      if (isPopular === "true") {
+        filterByIsPopular = true;
+      } else if (isPopular === "false") {
+        filterByIsPopular = false; // Jika Anda ingin memfilter yang isPopular: false juga
+      } else {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid 'isPopular' query parameter. Must be 'true' or 'false'.",
+        });
+      }
+    }
+
     // --- LOGIC UTAMA: FILTER BERDASARKAN SLUG ATAU AMBIL SEMUA DENGAN LIMIT ---
     if (slug) {
       // --- Case: Mengambil Kategori Spesifik berdasarkan SLUG ---
+      // Perhatian: Jika 'isPopular=true' digunakan dengan 'slug', ini akan mencari
+      // kategori spesifik DENGAN status popularitas tersebut. Ini TIDAK akan mengembalikan
+      // semua kategori populer dalam satu array seperti permintaan Anda untuk daftar.
+      // Jika tujuan Anda adalah 'slug' hanya untuk mencari satu item, dan
+      // 'isPopular' hanya untuk daftar, maka logika ini sudah tepat.
+      // Jika Anda ingin 'isPopular' selalu mem-flatten hasilnya, bahkan dengan slug,
+      // maka logikanya perlu dirancang ulang secara lebih kompleks.
+      // Untuk saat ini, asumsikan 'slug' akan mencari satu item spesifik.
       const queryConditions = { slug: slug };
-      // Jika level disediakan di query, tambahkan ke kondisi pencarian
       if (categoryLevel !== null) {
         queryConditions.level = categoryLevel;
+      }
+      if (filterByIsPopular !== null) {
+        // Hanya terapkan filter isPopular jika tidak null
+        queryConditions.isPopular = filterByIsPopular;
       }
 
       const foundCategory = await Category.findOne(queryConditions).lean();
 
       if (!foundCategory) {
-        // Pesan error lebih spesifik jika level tidak cocok
         let message = `Category with slug '${slug}' not found.`;
         if (categoryLevel !== null) {
           message = `Category with slug '${slug}' and level ${categoryLevel} not found.`;
+        }
+        if (filterByIsPopular !== null) {
+          message += ` (isPopular: ${filterByIsPopular})`;
         }
         return res.status(404).json({
           success: false,
@@ -41,15 +71,22 @@ exports.getCategories = async (req, res, next) => {
         });
       }
 
-      // Jika level disediakan di query dan tidak cocok dengan level kategori yang ditemukan
       if (categoryLevel !== null && foundCategory.level !== categoryLevel) {
         return res.status(400).json({
           success: false,
           message: `Category with slug '${slug}' found, but its level (${foundCategory.level}) does not match the requested level (${categoryLevel}).`,
         });
       }
+      if (
+        filterByIsPopular !== null &&
+        foundCategory.isPopular !== filterByIsPopular
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: `Category with slug '${slug}' found, but its 'isPopular' status (${foundCategory.isPopular}) does not match the requested status (${filterByIsPopular}).`,
+        });
+      }
 
-      // Inisialisasi objek respons untuk kategori tunggal
       let singleCategoryResponse = {
         _id: foundCategory._id,
         name: foundCategory.name,
@@ -57,12 +94,15 @@ exports.getCategories = async (req, res, next) => {
         description: foundCategory.description,
         imageUrl: foundCategory.imageUrl,
         level: foundCategory.level,
+        isPopular: foundCategory.isPopular,
         createdAt: foundCategory.createdAt,
         updatedAt: foundCategory.updatedAt,
       };
 
       if (foundCategory.level === 0) {
-        // Jika ini adalah Kategori Utama (Level 0)
+        // Ketika mencari berdasarkan slug, kita masih ingin subkategori di dalamnya
+        // Namun, filter isPopular di sini hanya berlaku untuk kategori utama.
+        // Jika Anda ingin hanya subkategori populer di sini, Anda perlu menambahkan filter isPopular di sini juga.
         const collections = await Category.find({
           parentCategory: foundCategory._id,
           level: 1,
@@ -74,9 +114,9 @@ exports.getCategories = async (req, res, next) => {
           slug: col.slug,
           description: col.description,
           imageUrl: col.imageUrl,
+          isPopular: col.isPopular,
         }));
       } else if (foundCategory.level === 1) {
-        // Jika ini adalah Subkategori (Level 1)
         const parentCategoryData = await Category.findById(
           foundCategory.parentCategory
         ).lean();
@@ -86,6 +126,7 @@ exports.getCategories = async (req, res, next) => {
             _id: parentCategoryData._id,
             name: parentCategoryData.name,
             slug: parentCategoryData.slug,
+            isPopular: parentCategoryData.isPopular,
           };
         } else {
           console.warn(
@@ -95,7 +136,6 @@ exports.getCategories = async (req, res, next) => {
         }
       }
 
-      // Kirim respons untuk kategori tunggal
       return res.status(200).json({
         success: true,
         message: "Category fetched successfully.",
@@ -104,14 +144,30 @@ exports.getCategories = async (req, res, next) => {
     } else {
       // --- Case: Mengambil Daftar Kategori (tanpa slug, dengan limit & level opsional) ---
       const fetchLimit = parseInt(limit) || null;
+      let listQueryConditions = {}; // Gunakan let agar bisa diubah
 
-      const listQueryConditions = {};
-      // Jika level disediakan di query, terapkan sebagai filter utama
-      if (categoryLevel !== null) {
-        listQueryConditions.level = categoryLevel;
+      // --- LOGIKA BARU UNTUK isPopular ---
+      if (filterByIsPopular === true) {
+        // Jika isPopular=true diminta
+        listQueryConditions = { isPopular: true }; // Hanya filter kategori yang populer
+        // Tidak perlu memfilter berdasarkan level di sini, karena kita ingin semua level populer
+        // Jika level juga disertakan, maka itu akan menjadi filter tambahan
+        if (categoryLevel !== null) {
+          // Jika level juga diminta bersama isPopular=true
+          listQueryConditions.level = categoryLevel;
+        }
       } else {
-        // Jika level tidak disediakan, default ke level 0 seperti sebelumnya
-        listQueryConditions.level = 0;
+        // Jika isPopular tidak diminta, atau isPopular=false
+        // Pertahankan logika filtering level yang sudah ada
+        if (categoryLevel !== null) {
+          listQueryConditions.level = categoryLevel;
+        } else {
+          listQueryConditions.level = 0; // Default ke level 0 jika level tidak disediakan
+        }
+        // Tambahkan filter isPopular=false jika itu yang diminta secara eksplisit
+        if (filterByIsPopular === false) {
+          listQueryConditions.isPopular = false;
+        }
       }
 
       const totalCategories = await Category.countDocuments(
@@ -122,66 +178,88 @@ exports.getCategories = async (req, res, next) => {
       if (fetchLimit) {
         categoriesQuery = categoriesQuery.limit(fetchLimit);
       }
+      // Tambahkan sort agar hasil selalu konsisten, misalnya berdasarkan nama
+      categoriesQuery = categoriesQuery.sort({ name: 1 });
+
       const foundCategories = await categoriesQuery.lean();
 
-      let formattedCategories = [];
+      // Memformat kategori menjadi satu array datar
+      let formattedCategories = foundCategories.map((cat) => ({
+        _id: cat._id,
+        name: cat.name,
+        slug: cat.slug,
+        description: cat.description,
+        imageUrl: cat.imageUrl,
+        level: cat.level,
+        isPopular: cat.isPopular,
+        // collections atau parentCategory tidak disertakan jika filterByIsPopular adalah true,
+        // karena tujuannya adalah array datar dari kategori populer
+        // Jika tidak ada filter isPopular, atau isPopular=false, Anda mungkin ingin tetap ada collections/parentCategory.
+        // Untuk menyederhanakan, saya akan menghapus field ini jika filterByIsPopular true.
+        // Pertimbangkan apakah Anda masih ingin parentCategory/collections muncul di sini jika isPopular=false.
+        ...(filterByIsPopular === true
+          ? {}
+          : {
+              // Jika isPopular=true, jangan sertakan collections/parentCategory
+              parentCategory: cat.parentCategory
+                ? {
+                    _id: cat.parentCategory,
+                    name: "Parent Name (if populated)",
+                  }
+                : null, // Anda mungkin perlu populate di sini jika ingin nama parent
+            }),
+      }));
 
-      if (categoryLevel === 0 || categoryLevel === null) {
-        // Jika yang diminta level 0 (atau tidak ditentukan, default ke 0)
-        // Ambil semua subkategori (level 1) untuk dihubungkan
+      // --- Perbaikan untuk respons parentCategory jika level 1 diminta tanpa isPopular=true ---
+      // Jika categoryLevel === 1 dan filterByIsPopular TIDAK true, maka kita perlu populate parentCategory
+      if (categoryLevel === 1 && filterByIsPopular !== true) {
+        formattedCategories = await Promise.all(
+          formattedCategories.map(async (cat) => {
+            if (cat.parentCategory && cat.parentCategory._id) {
+              // Cek apakah parentCategory ada dan punya _id
+              const parentData = await Category.findById(
+                cat.parentCategory._id
+              ).lean();
+              if (parentData) {
+                cat.parentCategory = {
+                  _id: parentData._id,
+                  name: parentData.name,
+                  slug: parentData.slug,
+                  isPopular: parentData.isPopular,
+                };
+              }
+            }
+            return cat;
+          })
+        );
+      } else if (categoryLevel === 0 && filterByIsPopular !== true) {
+        // Jika level 0 diminta tanpa filter isPopular, kita perlu menambahkan collections
         const subCategories = await Category.find({ level: 1 }).lean();
-
         formattedCategories = foundCategories.map((mainCat) => {
           const collections = subCategories.filter(
             (subCat) =>
               subCat.parentCategory &&
               subCat.parentCategory.toString() === mainCat._id.toString()
           );
-
           return {
             _id: mainCat._id,
             name: mainCat.name,
             slug: mainCat.slug,
             description: mainCat.description,
             imageUrl: mainCat.imageUrl,
-            level: mainCat.level, // Tambahkan level ke respons
+            level: mainCat.level,
+            isPopular: mainCat.isPopular,
             collections: collections.map((col) => ({
               _id: col._id,
               name: col.name,
               slug: col.slug,
               description: col.description,
               imageUrl: col.imageUrl,
-              level: col.level, // Tambahkan level ke subkategori
+              level: col.level,
+              isPopular: col.isPopular,
             })),
           };
         });
-      } else if (categoryLevel === 1) {
-        // Jika yang diminta level 1
-        formattedCategories = await Promise.all(
-          foundCategories.map(async (subCat) => {
-            let parentCategoryData = null;
-            if (subCat.parentCategory) {
-              parentCategoryData = await Category.findById(
-                subCat.parentCategory
-              ).lean();
-            }
-            return {
-              _id: subCat._id,
-              name: subCat.name,
-              slug: subCat.slug,
-              description: subCat.description,
-              imageUrl: subCat.imageUrl,
-              level: subCat.level, // Tambahkan level ke respons
-              parentCategory: parentCategoryData
-                ? {
-                    _id: parentCategoryData._id,
-                    name: parentCategoryData.name,
-                    slug: parentCategoryData.slug,
-                  }
-                : null,
-            };
-          })
-        );
       }
 
       res.status(200).json({
@@ -211,7 +289,7 @@ exports.getCategories = async (req, res, next) => {
 
 exports.addCategory = async (req, res, next) => {
   try {
-    const { name, description, imageUrl, parentCategory } = req.body; // <<< TAMBAHKAN parentCategory DI SINI
+    const { name, description, imageUrl, parentCategory, isPopular } = req.body; // <<< TAMBAHKAN parentCategory DI SINI
 
     // --- Validasi Input dari Request Body ---
     if (!name || typeof name !== "string" || name.trim() === "") {
@@ -240,6 +318,7 @@ exports.addCategory = async (req, res, next) => {
       // Hanya tambahkan jika parentCategory diberikan di body, jika tidak biarkan undefined/null
       // Mongoose akan menangani `default: null` dan logika `level` di pre-save hook.
       parentCategory: parentCategory || undefined,
+      isPopular: isPopular,
     });
 
     // Slug dan level akan otomatis dibuat/divalidasi oleh pre-save hook di skema

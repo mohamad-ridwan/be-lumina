@@ -35,6 +35,10 @@ const categorySchema = new Schema(
       min: 0,
       max: 1,
     },
+    isPopular: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,
