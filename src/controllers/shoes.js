@@ -161,10 +161,12 @@ exports.getShoe = async (req, res, next) => {
             _id: mainCat._id,
             name: mainCat.name,
             slug: mainCat.slug,
+            level: mainCat.level,
             subCategories: children.map((child) => ({
               _id: child._id,
               name: child.name,
               slug: child.slug,
+              level: child.level,
             })),
           };
         });
@@ -180,6 +182,7 @@ exports.getShoe = async (req, res, next) => {
               _id: subCat._id,
               name: subCat.name,
               slug: subCat.slug,
+              level: subCat.level,
             });
           }
         });
