@@ -29,7 +29,12 @@ exports.getCart = async (req, res, next) => {
     })
       .populate({
         path: "shoe",
-        model: "shoes", // Pastikan nama model sepatu Anda di Mongoose adalah 'Shoe' atau sesuai
+        model: "shoes", // Pastikan nama model sepatu Anda di Mongoose adalah 'Shoe' (kapital) atau sesuai
+        // Penting: pastikan Anda memilih semua field yang dibutuhkan dari model sepatu
+        // Termasuk 'image', 'price', 'stock', 'variants', 'slug', dll.
+        // Jika tidak, populate tidak akan mengambilnya.
+        // Contoh select jika diperlukan:
+        // select: 'name image price stock slug variants.optionValues variants.price variants.stock variants.sku variants.imageUrl'
       })
       .lean();
 
@@ -39,7 +44,7 @@ exports.getCart = async (req, res, next) => {
         message: "Cart is empty for this user.",
         cartItems: [],
         currentCartTotalUniqueItems: 0,
-        cartTotalPrice: 0, // Tambahkan ini untuk keranjang kosong
+        cartTotalPrice: 0,
       });
     }
 
@@ -54,9 +59,10 @@ exports.getCart = async (req, res, next) => {
       let itemImage = shoe ? shoe.image : null;
       let variantOptionValues = null;
       let variantSku = null;
-      let actualPrice = item.price; // Harga disimpan di dokumen cart item
+      let actualPrice = item.price; // Harga diambil dari snapshot di dokumen cart item
+      let availableStock = null; // <<< Inisialisasi stok
 
-      // Jika ada selectedVariantId, cari varian yang sesuai di data sepatu
+      // Logika untuk menentukan stok: dari varian atau dari stok utama sepatu
       if (
         item.selectedVariantId &&
         shoe &&
@@ -68,6 +74,8 @@ exports.getCart = async (req, res, next) => {
         );
 
         if (selectedVariant) {
+          // Varian ditemukan, ambil stok dari varian tersebut
+          availableStock = selectedVariant.stock;
           if (selectedVariant.imageUrl) {
             itemImage = selectedVariant.imageUrl;
           }
@@ -75,12 +83,19 @@ exports.getCart = async (req, res, next) => {
             Object.entries(selectedVariant.optionValues)
           );
           variantSku = selectedVariant.sku;
+        } else {
+          // Varian tidak ditemukan (mungkin dihapus setelah ditambahkan ke keranjang)
+          // Fallback ke stok utama sepatu atau nol
+          availableStock = shoe ? shoe.stock : 0;
         }
+      } else {
+        // Tidak ada selectedVariantId, ambil stok dari sepatu utama
+        availableStock = shoe ? shoe.stock : 0;
       }
 
       // Hitung subtotal untuk item ini dan tambahkan ke total harga keranjang
       const itemSubtotal = actualPrice * item.quantity;
-      cartTotalPrice += itemSubtotal; // Akumulasi total harga
+      cartTotalPrice += itemSubtotal;
 
       return {
         _id: item._id,
@@ -89,17 +104,17 @@ exports.getCart = async (req, res, next) => {
         image: itemImage,
         price: actualPrice,
         quantity: item.quantity,
-        subtotal: itemSubtotal, // Tambahkan subtotal untuk setiap item
+        subtotal: itemSubtotal,
         selectedVariantId: item.selectedVariantId,
         variantOptionValues: variantOptionValues,
         variantSku: variantSku,
         slug: item.shoe ? item.shoe.slug : null,
+        availableStock: availableStock, // <<< BARIS INI DITAMBAHKAN
         createdAt: item.createdAt,
         updatedAt: item.updatedAt,
       };
     });
 
-    // Hitung total item unik di keranjang pengguna
     const totalUniqueCartItems = formattedCartItems.length;
 
     res.status(200).json({
@@ -107,7 +122,7 @@ exports.getCart = async (req, res, next) => {
       message: "Cart items retrieved successfully.",
       cartItems: formattedCartItems,
       currentCartTotalUniqueItems: totalUniqueCartItems,
-      cartTotalPrice: cartTotalPrice, // <<< BARIS INI DITAMBAHKAN
+      cartTotalPrice: cartTotalPrice,
     });
   } catch (error) {
     console.error("Error getting cart:", error);
