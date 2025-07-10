@@ -90,6 +90,64 @@ const getAndFormatCartData = async (userId) => {
   };
 };
 
+exports.deleteCart = async (req, res, next) => {
+  try {
+    const { userId, cartId } = req.query; // Mengambil userId dan cartId dari query parameter
+
+    // 1. Validasi Input
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid User ID is required in query parameters.",
+      });
+    }
+    if (!cartId || !mongoose.Types.ObjectId.isValid(cartId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid Cart Item ID is required in query parameters.",
+      });
+    }
+
+    // 2. Hapus item keranjang spesifik
+    // Penting: Hapus berdasarkan _id item keranjang DAN userId
+    // Ini mencegah pengguna menghapus item keranjang pengguna lain hanya dengan mengetahui cartId
+    const deleteResult = await Cart.deleteOne({
+      _id: new mongoose.Types.ObjectId(cartId),
+      user: new mongoose.Types.ObjectId(userId),
+    });
+
+    if (deleteResult.deletedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Cart item not found or already deleted for this user.",
+      });
+    }
+
+    // 3. Ambil dan kembalikan seluruh keranjang yang sudah diperbarui
+    const updatedCartData = await getAndFormatCartData(userId);
+
+    res.status(200).json({
+      success: true,
+      message: "Item removed from cart successfully.",
+      ...updatedCartData,
+    });
+  } catch (error) {
+    console.error("Error deleting cart item:", error);
+    if (error.name === "CastError") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ID format in request or database.",
+        error: error.message,
+      });
+    }
+    res.status(500).json({
+      success: false,
+      message: "Failed to remove item from cart.",
+      error: error.message,
+    });
+  }
+};
+
 exports.updateCart = async (req, res, next) => {
   try {
     const { userId } = req.query; // Dari query
