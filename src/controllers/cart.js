@@ -284,121 +284,24 @@ exports.getCart = async (req, res, next) => {
     const { userId } = req.query; // Mengambil userId dari query parameter
 
     // 1. Validasi Input userId
-    if (!userId) {
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({
         success: false,
-        message: "User ID is required in query parameters.",
+        message: "Valid User ID is required in query parameters.",
       });
     }
 
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid User ID format.",
-      });
-    }
+    // 2. Panggil fungsi helper untuk mendapatkan dan memformat data keranjang
+    const cartData = await getAndFormatCartData(userId);
 
-    // 2. Cari semua item keranjang untuk userId yang diberikan
-    // Menggunakan .populate() untuk mengambil detail sepatu dari koleksi shoesDB
-    const cartItems = await Cart.find({
-      user: new mongoose.Types.ObjectId(userId),
-    })
-      .populate({
-        path: "shoe",
-        model: "shoes", // Pastikan nama model sepatu Anda di Mongoose adalah 'Shoe' (kapital) atau sesuai
-        // Penting: pastikan Anda memilih semua field yang dibutuhkan dari model sepatu
-        // Termasuk 'image', 'price', 'stock', 'variants', 'slug', dll.
-        // Jika tidak, populate tidak akan mengambilnya.
-        // Contoh select jika diperlukan:
-        // select: 'name image price stock slug variants.optionValues variants.price variants.stock variants.sku variants.imageUrl'
-      })
-      .lean();
-
-    if (!cartItems || cartItems.length === 0) {
-      return res.status(200).json({
-        success: true,
-        message: "Cart is empty for this user.",
-        cartItems: [],
-        currentCartTotalUniqueItems: 0,
-        cartTotalPrice: 0,
-      });
-    }
-
-    // 3. Format ulang data cartItems untuk respons frontend dan hitung total harga
-    let cartTotalPrice = 0; // Inisialisasi total harga
-
-    const formattedCartItems = cartItems.map((item) => {
-      // Dapatkan data sepatu yang dipopulasi
-      const shoe = item.shoe;
-
-      // Inisialisasi default values
-      let itemImage = shoe ? shoe.image : null;
-      let variantOptionValues = null;
-      let variantSku = null;
-      let actualPrice = item.price; // Harga diambil dari snapshot di dokumen cart item
-      let availableStock = null; // <<< Inisialisasi stok
-
-      // Logika untuk menentukan stok: dari varian atau dari stok utama sepatu
-      if (
-        item.selectedVariantId &&
-        shoe &&
-        shoe.variants &&
-        shoe.variants.length > 0
-      ) {
-        const selectedVariant = shoe.variants.find(
-          (v) => v._id && v._id.equals(item.selectedVariantId)
-        );
-
-        if (selectedVariant) {
-          // Varian ditemukan, ambil stok dari varian tersebut
-          availableStock = selectedVariant.stock;
-          if (selectedVariant.imageUrl) {
-            itemImage = selectedVariant.imageUrl;
-          }
-          variantOptionValues = Object.fromEntries(
-            Object.entries(selectedVariant.optionValues)
-          );
-          variantSku = selectedVariant.sku;
-        } else {
-          // Varian tidak ditemukan (mungkin dihapus setelah ditambahkan ke keranjang)
-          // Fallback ke stok utama sepatu atau nol
-          availableStock = shoe ? shoe.stock : 0;
-        }
-      } else {
-        // Tidak ada selectedVariantId, ambil stok dari sepatu utama
-        availableStock = shoe ? shoe.stock : 0;
-      }
-
-      // Hitung subtotal untuk item ini dan tambahkan ke total harga keranjang
-      const itemSubtotal = actualPrice * item.quantity;
-      cartTotalPrice += itemSubtotal;
-
-      return {
-        _id: item._id,
-        shoeId: item.shoe ? item.shoe._id : null,
-        name: item.name,
-        image: itemImage,
-        price: actualPrice,
-        quantity: item.quantity,
-        subtotal: itemSubtotal,
-        selectedVariantId: item.selectedVariantId,
-        variantOptionValues: variantOptionValues,
-        variantSku: variantSku,
-        slug: item.shoe ? item.shoe.slug : null,
-        availableStock: availableStock, // <<< BARIS INI DITAMBAHKAN
-        createdAt: item.createdAt,
-        updatedAt: item.updatedAt,
-      };
-    });
-
-    const totalUniqueCartItems = formattedCartItems.length;
-
+    // 3. Kirim respons dengan data yang sudah diformat
     res.status(200).json({
       success: true,
-      message: "Cart items retrieved successfully.",
-      cartItems: formattedCartItems,
-      currentCartTotalUniqueItems: totalUniqueCartItems,
-      cartTotalPrice: cartTotalPrice,
+      message:
+        cartData.cartItems.length > 0
+          ? "Cart items retrieved successfully."
+          : "Cart is empty for this user.",
+      ...cartData, // Menggabungkan properti dari cartData (cartItems, currentCartTotalUniqueItems, cartTotalPrice)
     });
   } catch (error) {
     console.error("Error getting cart:", error);
@@ -425,33 +328,17 @@ exports.addCart = async (req, res, next) => {
     const { shoeId, quantity, selectedVariantId } = req.body;
 
     // 1. Validasi Input
-    if (!userId) {
-      // Tambahkan validasi untuk userId dari query
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({
         success: false,
-        message: "User ID is required in query parameters.",
+        message: "Valid User ID is required in query parameters.",
       });
     }
 
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-      // Pastikan userId dari query valid ObjectId
+    if (!shoeId || !mongoose.Types.ObjectId.isValid(shoeId)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid User ID format.",
-      });
-    }
-
-    if (!shoeId || !quantity) {
-      return res.status(400).json({
-        success: false,
-        message: "Shoe ID and quantity are required.",
-      });
-    }
-
-    if (!mongoose.Types.ObjectId.isValid(shoeId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid Shoe ID format.",
+        message: "Valid Shoe ID is required.",
       });
     }
 
@@ -552,14 +439,13 @@ exports.addCart = async (req, res, next) => {
     }
 
     // 4. Tambahkan/Perbarui Item di Keranjang
-    let updatedCartItem;
     if (existingCartItem) {
       existingCartItem.quantity = newTotalQuantity;
       existingCartItem.price = itemPrice;
       existingCartItem.name = shoe.name;
-      updatedCartItem = await existingCartItem.save();
+      await existingCartItem.save();
     } else {
-      updatedCartItem = await Cart.create({
+      await Cart.create({
         user: new mongoose.Types.ObjectId(userId),
         shoe: new mongoose.Types.ObjectId(shoeId),
         selectedVariantId: selectedVariantId
@@ -571,27 +457,13 @@ exports.addCart = async (req, res, next) => {
       });
     }
 
-    const totalUniqueCartItems = await Cart.countDocuments({
-      user: new mongoose.Types.ObjectId(userId),
-    });
+    // --- BARIS KUNCI: Ambil dan kembalikan seluruh keranjang yang sudah diperbarui ---
+    const updatedCartData = await getAndFormatCartData(userId);
 
     res.status(200).json({
       success: true,
       message: "Item added/updated in cart successfully.",
-      cartItem: {
-        _id: updatedCartItem._id,
-        shoeId: updatedCartItem.shoe,
-        name: updatedCartItem.name,
-        image: itemImage,
-        price: updatedCartItem.price,
-        quantity: updatedCartItem.quantity,
-        selectedVariantId: updatedCartItem.selectedVariantId,
-        variantOptionValues: variantOptionValues,
-        variantSku: variantSku,
-        createdAt: updatedCartItem.createdAt,
-        updatedAt: updatedCartItem.updatedAt,
-      },
-      currentCartTotalUniqueItems: totalUniqueCartItems,
+      ...updatedCartData, // Menggabungkan data keranjang yang sudah diformat
     });
   } catch (error) {
     console.error("Error adding to cart:", error);
