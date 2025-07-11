@@ -20,10 +20,13 @@ const getAndFormatCartData = async (userId) => {
       cartItems: [],
       currentCartTotalUniqueItems: 0,
       cartTotalPrice: 0,
+      totalProduct: 0, // <<< Tambahkan ini untuk keranjang kosong
     };
   }
 
   let cartTotalPrice = 0;
+  let totalProductQuantity = 0; // <<< Inisialisasi variabel baru untuk total kuantitas
+
   const formattedCartItems = cartItems.map((item) => {
     const shoe = item.shoe;
 
@@ -64,6 +67,7 @@ const getAndFormatCartData = async (userId) => {
 
     const itemSubtotal = actualPrice * item.quantity;
     cartTotalPrice += itemSubtotal;
+    totalProductQuantity += item.quantity; // <<< Akumulasikan total kuantitas
 
     return {
       _id: item._id,
@@ -87,6 +91,7 @@ const getAndFormatCartData = async (userId) => {
     cartItems: formattedCartItems,
     currentCartTotalUniqueItems: formattedCartItems.length,
     cartTotalPrice: cartTotalPrice,
+    totalProduct: totalProductQuantity, // <<< Tambahkan field baru di sini
   };
 };
 
