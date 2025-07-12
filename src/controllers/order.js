@@ -16,6 +16,81 @@ const calculateOrderTotals = (cartItems) => {
   return { subtotal, shippingCost, totalAmount };
 };
 
+exports.getOrderDetail = async (req, res, next) => {
+  try {
+    const { orderId } = req.query; // Get orderId from query parameters
+
+    // 1. Validate Input
+    if (!orderId) {
+      return res.status(400).json({
+        success: false,
+        message: "Order ID is required in query parameters.",
+      });
+    }
+
+    // 2. Find the Order by orderId
+    // We use .lean() for faster retrieval if we're not modifying the document
+    const order = await Order.findOne({ orderId: orderId })
+      // Optionally populate the 'shoe' reference inside items array
+      // This is useful if you want to display current product info alongside the snapshot
+      // but remember that the 'items' array already contains snapshot data (name, price, image, variant details)
+      // so populating 'shoe' might only be needed for current product status or latest image/name.
+      // For a demo, the snapshot might be enough.
+      // .populate({
+      //   path: 'items.shoe',
+      //   model: 'Shoe', // Ensure this matches your Shoe model name
+      //   select: 'name slug image' // Select only necessary fields if populating
+      // })
+      .lean();
+
+    // 3. Handle Order Not Found
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found.",
+      });
+    }
+
+    // 4. Send Success Response
+    // The response structure is made similar to createOrder's success response
+    res.status(200).json({
+      success: true,
+      message: "Order details retrieved successfully.",
+      order: {
+        _id: order._id,
+        orderId: order.orderId,
+        publicOrderUrl: order.publicOrderUrl,
+        totalAmount: order.totalAmount,
+        subtotal: order.subtotal, // Include subtotal
+        shippingCost: order.shippingCost, // Include shippingCost
+        status: order.status,
+        orderedAt: order.orderedAt,
+        shippingAddress: order.shippingAddress,
+        items: order.items, // The items array with its snapshot data
+        paymentMethod: order.paymentMethod,
+        notes: order.notes,
+        createdAt: order.createdAt, // Include timestamps
+        updatedAt: order.updatedAt, // Include timestamps
+      },
+    });
+  } catch (error) {
+    console.error("Error getting order details:", error);
+    // Handle CastError if _id was used instead of orderId, or other potential Mongoose errors
+    if (error.name === "CastError") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ID format in query.",
+        error: error.message,
+      });
+    }
+    res.status(500).json({
+      success: false,
+      message: "Failed to retrieve order details.",
+      error: error.message,
+    });
+  }
+};
+
 exports.createOrder = async (req, res, next) => {
   try {
     const { userId } = req.query; // Mengambil userId dari query parameter
