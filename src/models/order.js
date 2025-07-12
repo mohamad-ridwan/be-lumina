@@ -42,6 +42,10 @@ const orderSchema = new Schema(
         name: { type: String, required: true },
         price: { type: Number, required: true, min: 0 }, // Harga per unit saat pesanan dibuat
         quantity: { type: Number, required: true, min: 1 },
+        variant: {
+          type: Object,
+          default: null,
+        },
         // Anda bisa tambahkan snapshot detail varian di sini jika perlu untuk riwayat
         // Misalnya:
         // variantOptionValues: { type: Map, of: String },

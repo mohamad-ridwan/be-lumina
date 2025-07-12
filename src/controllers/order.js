@@ -80,7 +80,7 @@ exports.createOrder = async (req, res, next) => {
         path: "shoe",
         model: "shoes", // Pastikan nama model Anda 'Shoe' (kapital) atau sesuai
         select:
-          "name price stock variants.optionValues variants.price variants.stock variants.sku variants.imageUrl variants._id",
+          "name price stock image variants.optionValues variants.price variants.stock variants.sku variants.imageUrl variants._id", // Menambahkan 'image' dari shoe dan detail varian
       })
       .lean();
 
@@ -106,6 +106,8 @@ exports.createOrder = async (req, res, next) => {
       let itemStock = 0;
       let actualPrice = item.price; // Gunakan harga dari snapshot di cart
       let itemSnapshotName = item.name; // Gunakan nama dari snapshot di cart
+      let itemImageUrl = shoe.image; // Default ke gambar produk utama
+      let variantDetails = null; // Objek untuk menyimpan detail varian jika ada
 
       // Tentukan stok dan harga berdasarkan varian atau produk utama
       if (item.selectedVariantId && shoe.variants && shoe.variants.length > 0) {
@@ -119,16 +121,23 @@ exports.createOrder = async (req, res, next) => {
           continue;
         }
         itemStock = selectedVariant.stock;
-        // Opsional: perbarui harga dari varian jika Anda ingin harga terbaru dari produk,
-        // tapi skema cart Anda sudah menyimpan harga snapshot.
-        // actualPrice = selectedVariant.price;
-        // variantOptionValues = selectedVariant.optionValues; // Simpan snapshot varian
-        // variantSku = selectedVariant.sku; // Simpan snapshot varian
+        itemImageUrl = selectedVariant.imageUrl || shoe.image; // Gunakan gambar varian jika ada, fallback ke gambar produk utama
+        actualPrice = selectedVariant.price; // Gunakan harga varian terbaru saat ini
+
+        // Simpan semua detail varian yang relevan
+        variantDetails = {
+          _id: selectedVariant._id,
+          sku: selectedVariant.sku,
+          imageUrl: selectedVariant.imageUrl,
+          optionValues: selectedVariant.optionValues,
+          price: selectedVariant.price, // Harga varian
+        };
       } else {
         itemStock = shoe.stock;
-        // actualPrice = shoe.price;
+        actualPrice = shoe.price; // Gunakan harga produk utama terbaru saat ini
       }
 
+      // Validasi stok
       if (item.quantity > itemStock) {
         stockErrors.push(
           `Insufficient stock for "${itemSnapshotName}" (ID: ${item.shoe._id}${
@@ -139,18 +148,28 @@ exports.createOrder = async (req, res, next) => {
         );
       }
 
-      // Siapkan item untuk objek Order
-      orderItems.push({
+      let createOrderItem = {
         shoe: item.shoe._id,
         selectedVariantId: item.selectedVariantId,
-        name: itemSnapshotName,
-        price: actualPrice,
-        quantity: item.quantity,
-        // Jika Anda ingin menyimpan snapshot detail varian, tambahkan di sini:
-        // variantOptionValues: item.variantOptionValues,
-        // variantSku: item.variantSku,
-        // imageUrl: item.image, // Menggunakan image dari cart item yang sudah ada
-      });
+        name: itemSnapshotName, // Nama produk
+        price: actualPrice, // Harga snapshot (harga varian atau produk utama)
+        quantity: item.quantity, // Kuantitas yang dipesan
+        imageUrl: itemImageUrl,
+      };
+
+      if (Object.keys(variantDetails).length > 0) {
+        createOrderItem.variant = {
+          // Masukkan detail varian ke dalam sub-objek 'variant'
+          _id: variantDetails._id,
+          sku: variantDetails.sku,
+          imageUrl: variantDetails.imageUrl,
+          optionValues: variantDetails.optionValues,
+          price: variantDetails.price,
+        };
+      }
+
+      // Siapkan item untuk objek Order
+      orderItems.push(createOrderItem);
     }
 
     if (stockErrors.length > 0) {
@@ -169,10 +188,11 @@ exports.createOrder = async (req, res, next) => {
     const newOrder = new Order({
       user: new mongoose.Types.ObjectId(userId),
       shippingAddress: shippingAddress,
-      items: orderItems,
+      items: orderItems, // Menggunakan orderItems yang sudah diformat dengan detail varian
       subtotal: subtotal,
       shippingCost: shippingCost,
       totalAmount: totalAmount,
+      status: "pending", // Status awal
       paymentMethod: paymentMethod,
       notes: notes,
       // orderId dan publicOrderUrl akan di-generate oleh middleware pre('save')
@@ -181,12 +201,11 @@ exports.createOrder = async (req, res, next) => {
     // 6. Simpan Pesanan ke Database
     const savedOrder = await newOrder.save();
 
-    // 7. Kurangi Stok Produk (opsional untuk demo, tapi disarankan)
-    // Untuk demo sederhana, ini bisa diabaikan atau disimulasikan.
-    // Untuk aplikasi nyata, Anda harus melakukan ini dalam transaksi untuk keandalan.
+    // 7. Kurangi Stok Produk
+    // Penting: Dalam produksi, ini harus dalam transaksi untuk atomicity!
     for (const item of cartItems) {
-      const shoe = await Shoe.findById(item.shoe._id); // Re-fetch untuk update
-      if (!shoe) continue;
+      const shoe = await Shoe.findById(item.shoe._id);
+      if (!shoe) continue; // Produk mungkin sudah dihapus, lewati
 
       if (item.selectedVariantId) {
         const variant = shoe.variants.id(item.selectedVariantId);
@@ -213,15 +232,11 @@ exports.createOrder = async (req, res, next) => {
         totalAmount: savedOrder.totalAmount,
         status: savedOrder.status,
         orderedAt: savedOrder.orderedAt,
-        // Anda bisa menambahkan detail lain yang relevan untuk respons awal
-        // seperti daftar item atau alamat pengiriman jika frontend membutuhkannya
-        // tanpa harus melakukan request GET baru ke publicOrderUrl.
-        // Misalnya: items: savedOrder.items
+        shippingAddress: savedOrder.shippingAddress, // Sertakan alamat pengiriman
+        items: savedOrder.items, // Sertakan detail item yang disimpan
+        paymentMethod: savedOrder.paymentMethod, // Sertakan metode pembayaran
+        notes: savedOrder.notes, // Sertakan catatan
       },
-      // Optional: Redirect frontend or provide full cart data if needed for immediate UI update
-      // cartItems: [], // Keranjang harus kosong sekarang
-      // currentCartTotalUniqueItems: 0,
-      // cartTotalPrice: 0,
     });
   } catch (error) {
     console.error("Error creating order:", error);
