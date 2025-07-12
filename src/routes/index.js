@@ -12,6 +12,7 @@ const brand = require("./brand");
 const shoes = require("./shoes");
 const latestOffers = require("./latestOffers");
 const cart = require("./cart");
+const order = require("./order");
 
 router.use("/users", users);
 router.use("/register-verify", registerVerify);
@@ -23,5 +24,6 @@ router.use("/brand", brand);
 router.use("/shoes", shoes);
 router.use("/latest-offers", latestOffers);
 router.use("/cart", cart);
+router.use("/order", order);
 
 module.exports = router;
