@@ -16,6 +16,129 @@ const calculateOrderTotals = (cartItems) => {
   return { subtotal, shippingCost, totalAmount };
 };
 
+exports.getOrdersByUserId = async (req, res, next) => {
+  try {
+    const { userId, status, page = 1, limit = 10 } = req.query; // Ambil userId, status, page, dan limit dari query
+
+    // 1. Validasi Input
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid User ID is required in query parameters.",
+      });
+    }
+
+    // Siapkan kriteria query
+    let query = { user: new mongoose.Types.ObjectId(userId) };
+
+    // Tambahkan filter status jika disediakan dan valid
+    const allowedStatuses = [
+      "pending",
+      "processing",
+      "shipped",
+      "delivered",
+      "cancelled",
+    ];
+    if (
+      status &&
+      typeof status === "string" &&
+      allowedStatuses.includes(status.toLowerCase())
+    ) {
+      query.status = status.toLowerCase();
+    } else if (status) {
+      // Jika status disediakan tapi tidak valid
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status provided. Allowed statuses are: ${allowedStatuses.join(
+          ", "
+        )}.`,
+      });
+    }
+
+    // Konversi page dan limit ke angka
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+
+    if (isNaN(pageNum) || pageNum < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid page number. Page must be a positive integer.",
+      });
+    }
+
+    if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+      // Batasi limit maksimal
+      return res.status(400).json({
+        success: false,
+        message: "Invalid limit number. Limit must be between 1 and 100.",
+      });
+    }
+
+    const skip = (pageNum - 1) * limitNum;
+
+    // 2. Ambil Pesanan dengan Paginasi
+    const orders = await Order.find(query)
+      .sort({ orderedAt: -1 }) // Urutkan dari yang terbaru
+      .skip(skip)
+      .limit(limitNum)
+      .lean(); // Gunakan .lean() untuk performa lebih baik karena kita tidak akan memodifikasi dokumen
+
+    // 3. Hitung Total Pesanan (untuk paginasi)
+    const totalOrders = await Order.countDocuments(query);
+    const totalPages = Math.ceil(totalOrders / limitNum);
+
+    // 4. Format Respons Pesanan
+    const formattedOrders = orders.map((order) => ({
+      _id: order._id,
+      orderId: order.orderId,
+      publicOrderUrl: order.publicOrderUrl,
+      totalAmount: order.totalAmount,
+      subtotal: order.subtotal,
+      shippingCost: order.shippingCost,
+      status: order.status,
+      orderedAt: order.orderedAt,
+      shippingAddress: order.shippingAddress,
+      items: order.items, // Array items dengan snapshot data produk/varian
+      paymentMethod: order.paymentMethod,
+      notes: order.notes,
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+    }));
+
+    // 5. Kirim Respons dengan Data Paginasi
+    res.status(200).json({
+      success: true,
+      message:
+        formattedOrders.length > 0
+          ? "Orders retrieved successfully."
+          : "No orders found for this user.",
+      data: formattedOrders, // Array pesanan
+      pagination: {
+        totalItems: totalOrders,
+        totalPages: totalPages,
+        currentPage: pageNum,
+        itemsPerPage: limitNum,
+        hasNextPage: pageNum < totalPages,
+        hasPrevPage: pageNum > 1,
+      },
+    });
+  } catch (error) {
+    console.error("Error getting user orders:", error);
+    if (error.name === "CastError") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ID format in request.",
+        error: error.message,
+      });
+    }
+    res.status(500).json({
+      success: false,
+      message: "Failed to retrieve user orders.",
+      error: error.message,
+    });
+  }
+};
+
 exports.getOrderDetail = async (req, res, next) => {
   try {
     const { orderId } = req.query; // Get orderId from query parameters
