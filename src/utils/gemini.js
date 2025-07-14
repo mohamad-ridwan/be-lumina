@@ -179,14 +179,28 @@ const setProductDataForFrontend = (functionCallResult, functionName) => {
 // `;
 
 const instructionPrompt = `
-AI diwajibkan untuk menjawab pertanyaan yang singkat dan juga menyimpulkan pertanyaan yang jelas sesuai dari data yang di berikan, seperti kecocokan antara pertanyaan dengan field value dari name, price, brand, category, description, price_info, total_stock.
-
-AI diwajibkan memberikan solusi yang akurat dan nyambung jika data produk yang dicari tidak ada atau tidak sesuai dengan kriteria pengguna.
-
-Berikan respons ketersediaan produk yang singkat, jangan menjelaskan nama, harga, variant produk yang ada.
-
-Jika tidak ada produk, berikan respons maaf yang singkat.
+Anda adalah asisten layanan pelanggan (CS) untuk 'Sneaker Haven', toko sepatu online. Tugas utama Anda adalah membantu pelanggan dengan pertanyaan terkait stok produk, harga, informasi pesanan (status, pelacakan, pengembalian), dan kebijakan toko. Tanggapi dengan nada ramah, membantu, dan informatif. Jika Anda tidak memiliki informasi yang spesifik (misalnya, nomor pesanan tertentu atau detail akun), instruksikan pelanggan untuk memeriksa email konfirmasi mereka atau menghubungi dukungan manusia.
 `;
+
+const siText1 = {
+  text: `Anda adalah asisten layanan pelanggan (CS) untuk 'Sneaker Haven', toko sepatu online. Tugas utama Anda adalah membantu pelanggan dengan pertanyaan terkait stok produk, harga, informasi pesanan (status, pelacakan, pengembalian), dan kebijakan toko. Tanggapi dengan nada ramah, membantu, dan informatif. Jika Anda tidak memiliki informasi yang spesifik (misalnya, nomor pesanan tertentu atau detail akun), instruksikan pelanggan untuk memeriksa email konfirmasi mereka atau menghubungi dukungan manusia.`,
+};
+const siText2 = {
+  text: `Anda adalah asisten pencarian sepatu yang ahli. Tugas Anda adalah menggunakan alat pencarian canggih untuk menemukan produk sepatu yang paling sesuai dengan kebutuhan pengguna. Alat ini juga dapat memberikan solusi matematika untuk harga atau jumlah produk sesuai pertanyaan atau kebutuhan pengguna.`,
+};
+const siText3 = {
+  text: `Anda adalah seorang ahli pengklasifikasi sepatu. Tugas Anda adalah menganalisis pertanyaan pengguna dan memberikan kategori sepatu yang paling tepat berdasarkan makna pertanyaan tersebut.`,
+};
+
+// const instructionPrompt = `
+// AI diwajibkan untuk menjawab pertanyaan yang singkat dan juga menyimpulkan pertanyaan yang jelas sesuai dari data yang di berikan, seperti kecocokan antara pertanyaan dengan field value dari name, price, brand, category, description, price_info, total_stock.
+
+// AI diwajibkan memberikan solusi yang akurat dan nyambung jika data produk yang dicari tidak ada atau tidak sesuai dengan kriteria pengguna.
+
+// Berikan respons ketersediaan produk yang singkat, jangan menjelaskan nama, harga, variant produk yang ada.
+
+// Jika tidak ada produk, berikan respons maaf yang singkat.
+// `;
 
 const processNewMessageWithAI = async (
   formattedHisory,
@@ -210,17 +224,20 @@ const processNewMessageWithAI = async (
         thinkingConfig: {
           thinkingBudget: 1024,
         },
-      },
-      history: [
-        {
-          parts: [
-            {
-              text: instructionPrompt,
-            },
-          ],
-          role: "model",
+        systemInstruction: {
+          parts: [siText1, siText2, siText3],
         },
-      ],
+      },
+      // history: [
+      //   {
+      //     parts: [
+      //       {
+      //         text: instructionPrompt,
+      //       },
+      //     ],
+      //     role: "model",
+      //   },
+      // ],
     });
 
     const response = await chat.sendMessage({

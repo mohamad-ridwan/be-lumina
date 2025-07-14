@@ -6,6 +6,7 @@ const {
 const Brand = require("../../models/brand"); // Model Brand
 const Category = require("../../models/category"); // Model Category
 const Shoe = require("../../models/shoes"); // Sesuaikan path jika berbeda
+const LatestOffer = require("../../models/latestOffers");
 const mongoose = require("mongoose");
 // const genAI = require("../gemini");
 
@@ -205,7 +206,7 @@ const searchShoes = async ({
   if (brand) {
     try {
       const brandDoc = await Brand.findOne({
-        name: { $regex: new RegExp(brand, "i") },
+        $text: { $search: brand },
       });
       if (brandDoc) {
         initialDbQuery.brand = brandDoc._id;
@@ -224,7 +225,7 @@ const searchShoes = async ({
   if (category) {
     try {
       const categoryDoc = await Category.findOne({
-        name: { $regex: new RegExp(category, "i") },
+        $text: { $search: category },
       });
       if (categoryDoc) {
         initialDbQuery.category = categoryDoc._id;
