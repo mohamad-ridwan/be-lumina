@@ -178,6 +178,9 @@ const searchShoes = async ({
   variantFilters = {},
   limit = 10,
   excludeIds = [],
+  newArrival,
+  relatedOffers,
+  isPopular,
 }) => {
   console.log("--- START searchShoes ---");
   console.log("Calling searchShoes with parameters:", {
@@ -189,6 +192,9 @@ const searchShoes = async ({
     variantFilters,
     limit,
     excludeIds,
+    newArrival,
+    relatedOffers,
+    isPopular,
   });
 
   const queryEmbedding = await getEmbedding(query);
@@ -221,22 +227,67 @@ const searchShoes = async ({
     }
   }
 
+  const categoryMap = new Map(
+    (await Category.find()).map((c) => [
+      c._id.toString(),
+      { name: c.name, isPopular: c.isPopular },
+    ])
+  );
+
   // Menambahkan filter category jika tersedia
-  if (category) {
-    try {
-      const categoryDoc = await Category.findOne({
-        $text: { $search: category },
-      });
-      if (categoryDoc) {
-        initialDbQuery.category = categoryDoc._id;
-        console.log(`Initial DB query - Category ID added: ${categoryDoc._id}`);
-      } else {
-        console.log(
-          `No exact category found for "${category}". Will rely on semantic search later.`
+  if (category || isPopular) {
+    const matchedCategoryIds = new Set();
+
+    if (category) {
+      const normalizedQueryCategory = normalizeTextForSearch(category);
+
+      for (const [categoryId, categoryInfo] of categoryMap.entries()) {
+        const normalizedCategoryName = normalizeTextForSearch(
+          categoryInfo.name
         );
+
+        // Lakukan pencocokan semantik antara query 'category' dengan nama kategori yang ada
+        // dan periksa juga isPopular jika ditentukan
+        let semantic1 = { name: normalizedQueryCategory };
+        let semantic2 = { name: normalizedCategoryName };
+        if (isPopular) {
+          semantic1.isPopular = true;
+          semantic2.isPopular = true;
+        }
+        if (
+          (await checkSemanticMatch(
+            `(name: ${semantic1.name}${
+              semantic1.isPopular ? ", isPopular: true" : ""
+            })`,
+            `(name : ${semantic2.name})${
+              semantic2.isPopular ? ", isPopular: true" : ""
+            })`,
+            0.65
+          )) &&
+          (isPopular === undefined || categoryInfo.isPopular === isPopular)
+        ) {
+          matchedCategoryIds.add(categoryId);
+        }
       }
-    } catch (error) {
-      console.error(`Error finding category "${category}":`, error);
+
+      if (matchedCategoryIds.size === 0 && isPopular !== undefined) {
+        for (const [categoryId, categoryInfo] of categoryMap.entries()) {
+          if (categoryInfo.isPopular === isPopular) {
+            matchedCategoryIds.add(categoryId);
+          }
+        }
+      }
+    } else if (isPopular !== undefined) {
+      // Jika 'category' tidak ada, tapi 'isPopular' ditentukan
+      for (const [categoryId, categoryInfo] of categoryMap.entries()) {
+        if (categoryInfo.isPopular === isPopular) {
+          matchedCategoryIds.add(categoryId);
+        }
+      }
+    }
+
+    if (matchedCategoryIds.size > 0) {
+      initialDbQuery.category = { $in: Array.from(matchedCategoryIds) };
     }
   }
 
@@ -271,9 +322,6 @@ const searchShoes = async ({
 
   const brandMap = new Map(
     (await Brand.find()).map((b) => [b._id.toString(), b.name])
-  );
-  const categoryMap = new Map(
-    (await Category.find()).map((c) => [c._id.toString(), c.name])
   );
 
   const shoesWithScores = [];
@@ -312,7 +360,7 @@ const searchShoes = async ({
         }. Brand: ${brandMap.get(
           shoe.brand.toString()
         )}. Kategori: ${shoe.category
-          .map((id) => categoryMap.get(id.toString()))
+          .map((id) => JSON.stringify(categoryMap.get(id.toString())))
           .join(
             ", "
           )}. Varian: ${variantDescriptionText}. Atribut Varian: ${currentVariantAttributesText}`
@@ -370,11 +418,21 @@ const searchShoes = async ({
 
     if (productPassesAllFilters && category) {
       const categoryNames = shoe.category.map((id) =>
-        categoryMap.get(id.toString())
+        JSON.stringify(categoryMap.get(id.toString()))
       );
       let isCategoryMatch = false;
       for (const catName of categoryNames) {
-        if (await checkSemanticMatch(category, catName, 0.75)) {
+        let semanticCategory = { name: category };
+        if (isPopular) {
+          semanticCategory.isPopular = true;
+        }
+        if (
+          await checkSemanticMatch(
+            JSON.stringify(semanticCategory),
+            catName,
+            0.75
+          )
+        ) {
           isCategoryMatch = true;
           break;
         }
@@ -692,7 +750,13 @@ const searchShoes = async ({
       `${shoe.name || ""} ${shoe.description || ""} ${
         brandMap.get(shoe.brand.toString()) || ""
       } ${shoe.category
-        .map((id) => categoryMap.get(id.toString()) || "")
+        .map(
+          (id) =>
+            JSON.stringify({
+              name: categoryMap.get(id.toString()).name,
+              isPopular: categoryMap.get(id.toString()).isPopular,
+            }) || ""
+        )
         .join(" ")} ${variantOptionValuesText} ${currentVariantAttributesText}`
     );
 
@@ -781,7 +845,14 @@ const searchShoes = async ({
     const item = {
       name: shoe.name,
       brand: brandMap.get(shoe.brand.toString()),
-      category: shoe.category.map((id) => categoryMap.get(id.toString())),
+      category: JSON.stringify(
+        shoe.category.map((id) =>
+          JSON.stringify({
+            name: categoryMap.get(id.toString()).name,
+            isPopular: categoryMap.get(id.toString()).isPopular,
+          })
+        )
+      ),
       image: shoe.image,
       description: shoe.description,
       price_info: shoe.display_price,
@@ -817,11 +888,26 @@ const searchShoes = async ({
   console.log(
     `--- END searchShoes. Found ${formattedOutputForGemini.length} results. ---`
   );
+  console.log("formattedOutputForGemini", formattedOutputForGemini);
   return {
     shoes: formattedOutputForGemini,
     productsForFrontend: rawProductsForFrontendFinal,
   };
 };
+
+// searchShoes({
+//   query: "sepatu anak sekolah popular merek adidas",
+//   minPrice: undefined,
+//   maxPrice: undefined,
+//   brand: "Adidas",
+//   category: "Anak Sekolah",
+//   variantFilters: {},
+//   limit: 10,
+//   excludeIds: [],
+//   newArrival: undefined,
+//   relatedOffers: undefined,
+//   isPopular: true,
+// });
 
 // Map fungsi ke objek agar mudah dipanggil oleh AI
 const availableFunctions = {

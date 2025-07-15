@@ -63,10 +63,14 @@ exports.getShoe = async (req, res, next) => {
       if (search) {
         const searchRegex = new RegExp(search, "i"); // 'i' untuk case-insensitive
         // Gunakan $or untuk mencari di beberapa field (name ATAU description)
+        const brand_id = await Brand.findOne({ name: { $regex: searchRegex } });
         query.$or = [
           { name: { $regex: searchRegex } },
           { description: { $regex: searchRegex } },
         ];
+        if (brand_id) {
+          query.$or.push({ brand: { _id: brand_id._id } });
+        }
       }
     }
 
