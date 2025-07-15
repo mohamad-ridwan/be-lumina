@@ -430,7 +430,7 @@ const searchShoes = async ({
           await checkSemanticMatch(
             JSON.stringify(semanticCategory),
             catName,
-            0.75
+            0.65
           )
         ) {
           isCategoryMatch = true;
@@ -441,14 +441,14 @@ const searchShoes = async ({
         console.log(
           `  FAIL: Categories "${categoryNames.join(
             ", "
-          )}" do not semantically match query category "${category}" (threshold 0.75).`
+          )}" do not semantically match query category "${category}" (threshold 0.65).`
         );
         productPassesAllFilters = false;
       } else {
         console.log(
           `  SUCCESS: Categories "${categoryNames.join(
             ", "
-          )}" semantically match query category "${category}" (threshold 0.75).`
+          )}" semantically match query category "${category}" (threshold 0.65).`
         );
       }
     }
@@ -888,7 +888,6 @@ const searchShoes = async ({
   console.log(
     `--- END searchShoes. Found ${formattedOutputForGemini.length} results. ---`
   );
-  console.log("formattedOutputForGemini", formattedOutputForGemini);
   return {
     shoes: formattedOutputForGemini,
     productsForFrontend: rawProductsForFrontendFinal,

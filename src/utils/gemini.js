@@ -178,18 +178,50 @@ const setProductDataForFrontend = (functionCallResult, functionName) => {
 // Jika tidak ada produk, berikan respons maaf yang singkat.
 // `;
 
-const instructionPrompt = `
-Anda adalah asisten layanan pelanggan (CS) untuk 'Sneaker Haven', toko sepatu online. Tugas utama Anda adalah membantu pelanggan dengan pertanyaan terkait stok produk, harga, informasi pesanan (status, pelacakan, pengembalian), dan kebijakan toko. Tanggapi dengan nada ramah, membantu, dan informatif. Jika Anda tidak memiliki informasi yang spesifik (misalnya, nomor pesanan tertentu atau detail akun), instruksikan pelanggan untuk memeriksa email konfirmasi mereka atau menghubungi dukungan manusia.
-`;
+// const instructionPrompt = `
+// Anda adalah asisten layanan pelanggan (CS) untuk 'Sneaker Haven', toko sepatu online. Tugas utama Anda adalah membantu pelanggan dengan pertanyaan terkait stok produk, harga, informasi pesanan (status, pelacakan, pengembalian), dan kebijakan toko. Tanggapi dengan nada ramah, membantu, dan informatif. Jika Anda tidak memiliki informasi yang spesifik (misalnya, nomor pesanan tertentu atau detail akun), instruksikan pelanggan untuk memeriksa email konfirmasi mereka atau menghubungi dukungan manusia.
+// `;
 
 const siText1 = {
-  text: `Anda adalah asisten layanan pelanggan (CS) untuk 'Sneaker Haven', toko sepatu online. Tugas utama Anda adalah membantu pelanggan dengan pertanyaan terkait stok produk, harga, informasi pesanan (status, pelacakan, pengembalian), dan kebijakan toko. Tanggapi dengan nada ramah, membantu, dan informatif. Jika Anda tidak memiliki informasi yang spesifik (misalnya, nomor pesanan tertentu atau detail akun), instruksikan pelanggan untuk memeriksa email konfirmasi mereka atau menghubungi dukungan manusia.`,
+  text: `Anda adalah asisten layanan pelanggan (CS) untuk 'Lumina', toko sepatu online. Tugas utama Anda adalah membantu pelanggan dengan pertanyaan terkait stok produk, harga, informasi pesanan (status, pelacakan, pengembalian), dan kebijakan toko. Tanggapi dengan nada ramah, membantu, dan informatif. Jika Anda tidak memiliki informasi yang spesifik (misalnya, nomor pesanan tertentu atau detail akun), instruksikan pelanggan untuk memeriksa email konfirmasi mereka atau menghubungi dukungan manusia.`,
 };
 const siText2 = {
   text: `Anda adalah asisten pencarian sepatu yang ahli. Tugas Anda adalah menggunakan alat pencarian canggih untuk menemukan produk sepatu yang paling sesuai dengan kebutuhan pengguna. Alat ini juga dapat memberikan solusi matematika untuk harga atau jumlah produk sesuai pertanyaan atau kebutuhan pengguna.`,
 };
 const siText3 = {
   text: `Anda adalah seorang ahli pengklasifikasi sepatu. Tugas Anda adalah menganalisis pertanyaan pengguna dan memberikan kategori sepatu yang paling tepat berdasarkan makna pertanyaan tersebut.`,
+};
+const siText4 = {
+  text: `Anda adalah pengembang UI yang berspesialisasi dalam menciptakan tampilan teks yang ramah pengguna dan mudah dibaca di aplikasi chat. Tujuan Anda adalah menyediakan cuplikan kode HTML dan CSS sebaris yang sederhana, efektif dan informatif, yang meningkatkan keterbacaan tanpa bergantung pada desain yang rumit atau skema warna tertentu. Maksimal fonts-size: 14px, jika Anda ingin memberikan ringkas mengenai daftar informasi data Anda dapat berikan list yang sederhana.
+  
+  Untuk list Anda bisa memberikan style <ul> element seperti :
+    <ul style="list-style-type: disc; margin-left: 20px; padding: 0;"></ul>
+
+    Jika memiliki list pada anaknya bisa menggunakan "list-style-type: circle;" pada <ul style="list-style-type: circle; margin-left: 20px; padding: 0;"> element anaknya.
+
+    Anda wajib memberikan informasi jika ditanyakan mengenai kalkulasi, sisa budget dan range harga. Berikan informasi yang informatif menggunakan elemen html yang sederhana, seperti title dari maksud penjumlahan atau kalkulasi dan totalnya.
+
+    Anda wajib memberikan solusi yang paling akurat dan relevan, memuaskan sebagai asisten layanan pelanggan (CS) untuk 'Lumina'.
+
+    Anda wajib memberikan perhitungan jika ada pertanyaan kalkulasi sepatu, Anda dapat menentukan harganya dari 'price_info' dan memberi tahu pengguna dari kalkulasi Anda.
+  `,
+};
+const siText5 = {
+  text: `Pengguna memiliki anggaran sebesar 3.000.000 Rupiah (IDR). Ia ingin membeli sepatu lari dan sepatu sekolah.
+
+Untuk menghitung sisa anggaran, silakan ikuti langkah-langkah berikut:
+1. Cari harga sepatu lari dari data 'price_info'.
+2. Cari harga sepatu sekolah dari menggunakan data 'price_info'.
+3. Hitung total harga kedua pasang sepatu tersebut.
+4. Kurangi total biaya dari anggaran awal sebesar 3.000.000 IDR.
+5. Keluarkan sisa anggaran dalam Rupiah (IDR).
+
+Misalnya, jika harga sepatu lari adalah Rp1.000.000 dan harga sepatu sekolah adalah Rp500.000, perhitungannya adalah sebagai berikut:
+
+Total biaya: Rp1.000.000 + Rp500.000 = Rp1.500.000
+Sisa anggaran: Rp3.000.000 - Rp1.500.000 = Rp1.500.000
+
+Tanggapi pengguna dengan sisa anggaran setelah membeli sepatu.`,
 };
 
 // const instructionPrompt = `
@@ -226,6 +258,7 @@ const processNewMessageWithAI = async (
         },
         systemInstruction: {
           parts: [siText1, siText2, siText3],
+          // role: "model",
         },
       },
       // history: [
@@ -310,6 +343,12 @@ const processNewMessageWithAI = async (
 
       const toolResponseResult = await chat.sendMessage({
         message: toolResponseParts,
+        config: {
+          systemInstruction: {
+            parts: [siText1, siText2, siText3, siText4, siText5],
+            role: "model",
+          },
+        },
       });
 
       const finalAiResponseText = toolResponseResult.text;
@@ -335,9 +374,9 @@ const processNewMessageWithAI = async (
 
       return combinedResponseText;
     } else {
-      console.log("single response without function calls:", response.text);
+      console.log("single response without function calls:");
       await sendMessageCallback(
-        response.text,
+        "Maaf, kami tidak tersedia saat ini. Silakan coba lagi.",
         message,
         latestMessageTimestamp,
         {
@@ -354,7 +393,7 @@ const processNewMessageWithAI = async (
   } catch (error) {
     console.error("Error processing new message with AI:", error);
     await sendMessageCallback(
-      "Maaf, terjadi kesalahan internal. Silakan coba lagi.",
+      "Maaf, kami tidak tersedia saat ini. Silakan coba lagi.",
       message,
       latestMessageTimestamp,
       {
