@@ -262,7 +262,7 @@ const searchShoes = async ({
             `(name : ${semantic2.name})${
               semantic2.isPopular ? ", isPopular: true" : ""
             })`,
-            0.65
+            0.75
           )) &&
           (isPopular === undefined || categoryInfo.isPopular === isPopular)
         ) {
@@ -293,28 +293,21 @@ const searchShoes = async ({
 
   // Menambahkan filter harga ke query awal
   if (minPrice !== undefined || maxPrice !== undefined) {
-    initialDbQuery.$or = [
-      {
-        // Untuk produk tanpa varian (harga di level shoe)
-        $and: [
-          { variants: { $exists: false } },
-          minPrice !== undefined ? { price: { $gte: minPrice } } : {},
-          maxPrice !== undefined ? { price: { $lte: maxPrice } } : {},
-        ],
-      },
-      {
-        // Untuk produk dengan varian (cek harga di sub-dokumen varian)
-        $and: [
-          { "variants.price": { $exists: true } },
-          minPrice !== undefined
-            ? { "variants.price": { $gte: minPrice } }
-            : {},
-          maxPrice !== undefined
-            ? { "variants.price": { $lte: maxPrice } }
-            : {},
-        ],
-      },
-    ];
+    let defaultPriceQuery = { price: {} };
+    let variantPriceQuery = {
+      variants: { $elemMatch: { price: {} }, $exists: true },
+    };
+
+    if (minPrice !== undefined) {
+      defaultPriceQuery.price.$gte = minPrice;
+      variantPriceQuery.variants.$elemMatch.price.$gte = minPrice;
+    }
+    if (maxPrice !== undefined) {
+      defaultPriceQuery.price.$lte = maxPrice;
+      variantPriceQuery.variants.$elemMatch.price.$lte = maxPrice;
+    }
+
+    initialDbQuery.$or = [defaultPriceQuery, variantPriceQuery];
   }
 
   console.log("Mongoose initial query:", JSON.stringify(initialDbQuery));
@@ -888,6 +881,7 @@ const searchShoes = async ({
   console.log(
     `--- END searchShoes. Found ${formattedOutputForGemini.length} results. ---`
   );
+  console.log("format for gemini : ", formattedOutputForGemini);
   return {
     shoes: formattedOutputForGemini,
     productsForFrontend: rawProductsForFrontendFinal,
@@ -895,17 +889,17 @@ const searchShoes = async ({
 };
 
 // searchShoes({
-//   query: "sepatu anak sekolah popular merek adidas",
+//   query: "sepatu untuk lari",
 //   minPrice: undefined,
-//   maxPrice: undefined,
-//   brand: "Adidas",
-//   category: "Anak Sekolah",
+//   maxPrice: 2000000,
+//   brand: undefined,
+//   category: "Sepatu lari",
 //   variantFilters: {},
 //   limit: 10,
 //   excludeIds: [],
 //   newArrival: undefined,
 //   relatedOffers: undefined,
-//   isPopular: true,
+//   isPopular: undefined,
 // });
 
 // Map fungsi ke objek agar mudah dipanggil oleh AI

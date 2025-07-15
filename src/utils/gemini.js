@@ -207,7 +207,10 @@ const siText4 = {
   `,
 };
 const siText5 = {
-  text: `Pengguna memiliki anggaran sebesar 3.000.000 Rupiah (IDR). Ia ingin membeli sepatu lari dan sepatu sekolah.
+  text: `
+  Jika pengguna menanyakan hal kalkulasi, Anda wajib memberikan jawaban seperti ini :
+
+  Misalkan Pengguna memiliki anggaran sebesar 3.000.000 Rupiah (IDR). Ia ingin membeli sepatu lari dan sepatu sekolah.
 
 Untuk menghitung sisa anggaran, silakan ikuti langkah-langkah berikut:
 1. Cari harga sepatu lari dari data 'price_info'.
