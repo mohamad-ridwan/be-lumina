@@ -5,7 +5,11 @@ const Category = require("../../models/category"); // Model Category
 const Shoe = require("../../models/shoes"); // Sesuaikan path jika berbeda
 const LatestOffer = require("../../models/latestOffers");
 const mongoose = require("mongoose");
-const { getEmbedding } = require("../../utils/embeddings");
+const {
+  getEmbedding,
+  normalizeTextForSearch,
+  checkSemanticMatch,
+} = require("../../utils/embeddings");
 // const genAI = require("../gemini");
 
 // async function getEmbedding(text) {
@@ -58,45 +62,6 @@ const { getEmbedding } = require("../../utils/embeddings");
 //   }
 //   return dotProduct / (magnitudeA * magnitudeB);
 // }
-
-async function checkSemanticMatch(
-  textOrEmbedding1,
-  textOrEmbedding2,
-  threshold = 0.6
-) {
-  let embedding1;
-  let embedding2;
-
-  // Determine if input is text or embedding
-  if (Array.isArray(textOrEmbedding1)) {
-    embedding1 = textOrEmbedding1;
-  } else {
-    embedding1 = await getEmbedding(textOrEmbedding1);
-  }
-
-  if (Array.isArray(textOrEmbedding2)) {
-    embedding2 = textOrEmbedding2;
-  } else {
-    embedding2 = await getEmbedding(textOrEmbedding2);
-  }
-
-  if (!embedding1 || !embedding2) {
-    // console.warn("WARNING: Could not generate embeddings for semantic match check.");
-    return false; // Cannot perform semantic match without embeddings
-  }
-
-  const similarity = cosineSimilarity(embedding1, embedding2);
-  // console.log(`  Semantic Match Check: "${textOrEmbedding1}" vs "${textOrEmbedding2}" -> Similarity: ${similarity.toFixed(4)} (Threshold: ${threshold})`);
-  return similarity >= threshold;
-}
-
-function normalizeTextForSearch(text) {
-  if (text === null || text === undefined) return ""; // Handle null/undefined input
-  return String(text)
-    .toLowerCase()
-    .replace(/\s+/g, " ") // Ganti multiple spaces dengan single space
-    .trim(); // Hapus spasi di awal/akhir
-}
 
 function mapColorToEnglishAndIndonesian(colorName) {
   const normalizedColor = normalizeTextForSearch(colorName);
