@@ -11,6 +11,7 @@ const { chatRoom } = require("./src/sockets/chatRoom");
 const { usersSocket } = require("./src/sockets/users");
 const { chatsSocket } = require("./src/sockets/chats");
 const { Agenda } = require("@hokify/agenda");
+const { initializeEmbeddingPipeline } = require("./src/utils/embeddings");
 
 const origin = [
   "https://lumina-id.web.app",
@@ -67,6 +68,8 @@ dbConnection()
     app.use(customHeader);
     app.use("/", require("./src/routes"));
     app.use(errorHandler);
+
+    await initializeEmbeddingPipeline();
 
     // app.listen(PORT, () => {
     //     console.log(`Server is running on port ${PORT}`)

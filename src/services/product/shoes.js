@@ -1,56 +1,12 @@
 // productsService.js atau file tempat fungsi-fungsi tools AI Anda berada
-const {
-  pipeline,
-  cos_sim: cosineSimilarity,
-} = require("@huggingface/transformers");
+const { cos_sim: cosineSimilarity } = require("@huggingface/transformers");
 const Brand = require("../../models/brand"); // Model Brand
 const Category = require("../../models/category"); // Model Category
 const Shoe = require("../../models/shoes"); // Sesuaikan path jika berbeda
 const LatestOffer = require("../../models/latestOffers");
 const mongoose = require("mongoose");
+const { getEmbedding } = require("../../utils/embeddings");
 // const genAI = require("../gemini");
-
-let extractor = null;
-
-async function initializeEmbeddingPipeline() {
-  if (!extractor) {
-    console.log(
-      "Menginisialisasi pipeline embedding dengan @huggingface/transformers..."
-    );
-    // Pilih model yang cocok untuk text embedding.
-    // 'Xenova/all-MiniLM-L6-v2' adalah salah satu model Sentence-Transformers yang sangat efektif
-    // dan relatif ringan. Anda bisa mencari model 'feature-extraction' lain di Hugging Face Hub.
-    extractor = await pipeline(
-      "feature-extraction",
-      "mixedbread-ai/mxbai-embed-large-v1"
-    );
-    console.log("Pipeline embedding siap digunakan.");
-  }
-}
-
-async function getEmbedding(text) {
-  try {
-    // Pastikan pipeline sudah diinisialisasi
-    if (!extractor) {
-      await initializeEmbeddingPipeline();
-    }
-
-    // Jalankan inferensi untuk mendapatkan embedding
-    // 'pooling: mean' umumnya digunakan untuk mendapatkan embedding kalimat/dokumen
-    // 'normalize: true' disarankan untuk perbandingan kemiripan menggunakan cosine similarity
-    const output = await extractor(text, { pooling: "mean", normalize: true });
-
-    // Output dari pipeline adalah objek dengan properti 'data' yang berisi Float32Array.
-    // Ubah ke array JavaScript biasa agar lebih mudah diolah jika diperlukan.
-    return Array.from(output.data);
-  } catch (error) {
-    console.error(
-      "Error generating embedding with @huggingface/transformers:",
-      error
-    );
-    return null;
-  }
-}
 
 // async function getEmbedding(text) {
 //   try {
