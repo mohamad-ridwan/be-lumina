@@ -17,7 +17,10 @@ const {
   findLatestMessageForUser,
   existingBotReplyMessageJob,
 } = require("../helpers/general");
-const { processNewMessageWithAI } = require("../utils/gemini");
+const {
+  processNewMessageWithAI,
+  getConversationHistoryForGemini,
+} = require("../utils/gemini");
 
 dayjs.extend(isToday);
 dayjs.extend(isYesterday);
@@ -160,7 +163,7 @@ const handleSendMessageFromAI = async (
           : "Maaf kami tidak tersedia untuk saat ini. Mohon coba lagi nanti.",
     },
     recipientProfileId: newRecipientProfileId,
-    role: "admin",
+    role: "model",
   };
 
   const isAvailableMessage = await chatRoomDB.findOne({
@@ -259,7 +262,7 @@ const handleGetNewMessageForBot = async (
 ) => {
   const { latestMessage, isNeedHeaderDate, recipientProfileId, role } = message;
 
-  if (role === "admin" || latestMessage?.messageType !== "text") {
+  if (role === "model" || latestMessage?.messageType !== "text") {
     return;
   }
 
@@ -293,8 +296,10 @@ const handleGetNewMessageForBot = async (
 
   // sendMessage(newMessageForUser, io, socket, client, agenda, false);
 
+  const history = await getConversationHistoryForGemini(message);
+
   await processNewMessageWithAI(
-    [],
+    history,
     message,
     async (
       responseText,
@@ -467,6 +472,9 @@ const sendMessage = async (
   }
   if (productData?.productData?.length > 0) {
     chatRoomData.productData = productData.productData;
+  }
+  if (message?.role === "model") {
+    chatRoomData.role = "model";
   }
 
   const newChatRoom = new chatRoomDB(chatRoomData);

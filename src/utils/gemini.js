@@ -81,17 +81,28 @@ const getConversationHistoryForGemini = async (message, io, socket, client) => {
         },
       },
       { $sort: { sortTimestamp: -1 } }, // Urutkan berdasarkan sortTimestamp yang baru dibuat
-      { $limit: 1 },
+      { $limit: 10 },
     ]);
 
     if (messages.length === 0) {
       return [];
     }
 
-    const formattedHisory = messages.map((msg) => ({
-      role: "user",
-      parts: [{ text: msg.textMessage }],
-    }));
+    const formattedHisory = messages.map((msg) => {
+      const productDataCurrently =
+        msg?.productData?.length > 0 ? msg.productData : [];
+      let function_response = undefined;
+      if (productDataCurrently.length > 0 && msg.role === "model") {
+        function_response = {
+          name: "searchShoes",
+          response: productDataCurrently,
+        };
+      }
+      return {
+        role: msg.role,
+        parts: [{ text: msg.textMessage, function_response }],
+      };
+    });
 
     return formattedHisory;
   } catch (error) {
@@ -332,12 +343,7 @@ const processNewMessageWithAI = async (
         //   parts: [siText1, siText2, siText3],
         // },
       },
-      history: [
-        {
-          parts: exampleHistoryData.parts,
-          role: "model",
-        },
-      ],
+      history: formattedHisory?.length > 0 ? formattedHisory : undefined,
     });
 
     const response = await chat.sendMessage({
