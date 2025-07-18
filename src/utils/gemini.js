@@ -2,7 +2,7 @@ const chatRoomDB = require("../models/chatRoom");
 const toolsDB = require("../models/tools");
 const genAI = require("../services/gemini");
 // const availableTools = require("../tools/productTools");
-const { availableFunctions } = require("../services/product");
+const { availableFunctionProducts } = require("../services/product");
 const { generateRandomId } = require("../helpers/generateRandomId");
 
 const getConversationHistoryForGemini = async (message, io, socket, client) => {
@@ -378,8 +378,8 @@ const processNewMessageWithAI = async (
         }
         // <<< AKHIR LOGIKA PENTING >>>
 
-        if (availableFunctions[functionName]) {
-          const resultFromTool = await availableFunctions[functionName](
+        if (availableFunctionProducts[functionName]) {
+          const resultFromTool = await availableFunctionProducts[functionName](
             functionArgs
           );
           console.log("result database from tool:", resultFromTool.shoes);
