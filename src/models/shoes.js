@@ -121,6 +121,12 @@ const shoesSchema = new Schema(
       ref: "latestOffers",
       default: [],
     },
+    isRefundable: { type: Boolean },
+    refundPercentage: {
+      type: Number,
+      min: 0,
+      max: 100,
+    },
   },
   {
     timestamps: true,
