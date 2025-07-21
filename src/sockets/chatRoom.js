@@ -220,10 +220,12 @@ const handleSendMessageFromAI = async (
     if (existingIndexUserId1 !== -1) {
       updatedLatestMessages[existingIndexUserId1].textMessage = generatedText;
       updatedLatestMessages[existingIndexUserId1].productData = productData;
+      updatedLatestMessages[existingIndexUserId1].orderData = orderData;
     }
     if (existingIndexUserId2 !== -1) {
       updatedLatestMessages[existingIndexUserId2].textMessage = generatedText;
       updatedLatestMessages[existingIndexUserId2].productData = productData;
+      updatedLatestMessages[existingIndexUserId2].orderData = orderData;
     }
 
     updatedLatestMessages = updatedLatestMessages.filter(
@@ -519,12 +521,14 @@ const sendMessage = async (
   const latestMessageWithUserId1 = {
     ...latestMessage,
     productData: productData?.productData ?? null,
+    orderData: productData?.orderData ?? null,
     userId: chatsCurrently.userIds[0],
     timeId,
   };
   const latestMessageWithUserId2 = {
     ...latestMessage,
     productData: productData?.productData ?? null,
+    orderData: productData?.orderData ?? null,
     userId: chatsCurrently.userIds[1],
     timeId,
   };

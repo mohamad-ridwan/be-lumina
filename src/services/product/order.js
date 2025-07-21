@@ -34,20 +34,20 @@ const getOrderStatus = async ({
 
   const order = await Order.find(orderQuery);
   return Array.isArray(order)
-    ? order.map((odr) => {
+    ? order.map(({ _doc }) => {
         const status = () => {
-          if (odr.status === "pending") {
+          if (_doc.status === "pending") {
             return "Menunggu Pembayaran";
-          } else if (odr.status === "processing") {
+          } else if (_doc.status === "processing") {
             return "Diproses";
-          } else if (odr.status === "shipped") {
+          } else if (_doc.status === "shipped") {
             return "Dikirim";
           } else {
             return "Status Tidak Diketahui";
           }
         };
         return {
-          ...odr,
+          ..._doc,
           status: status(),
         };
       })
