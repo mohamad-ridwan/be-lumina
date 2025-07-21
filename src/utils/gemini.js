@@ -318,6 +318,20 @@ const siText5 = {
   
   Anda wajib memberikan informasi jika ditanyakan mengenai kalkulasi, sisa budget dan range harga. Berikan informasi yang informatif menggunakan elemen html yang sederhana, seperti title dari maksud penjumlahan atau kalkulasi dan totalnya.`,
 };
+const orderStatusInstruction = {
+  text: `
+  jika fungsi respon merupakan "getOrderStatus" anda wajib memberikan inline style css ui dan html yang konsisten seperti contoh :
+
+- Jika tersedia alamat jadikan dalam satu paragraph, namun pisahkan jika tersedia nama dan email, untuk style ini (font-size: 13px, color: #777).
+- Jika tersedia URL order, berikan attribute (target="_blank") supaya browser membuka tab baru, untuk style ini (font-size: 13px, color: #0000FF).
+
+untuk list ini Anda wajib untuk tidak memberikan warna background dan border atau apapun itu seperti style card.
+
+Untuk list Anda bisa memberikan style <ul> element seperti :
+    <ul style="list-style-type: disc; margin-left: 20px; padding: 0;"></ul>
+
+    Jika memiliki list pada anaknya bisa menggunakan "list-style-type: circle;" pada <ul style="list-style-type: circle; margin-left: 20px; padding: 0;"> element anaknya.`,
+};
 
 const exampleFunctionCallData = {
   functionCall: {
@@ -379,7 +393,14 @@ const processNewMessageWithAI = async (
           thinkingBudget: 1024,
         },
         systemInstruction: {
-          parts: [siText1, siText2, siText3, siText4, siText5],
+          parts: [
+            siText1,
+            siText2,
+            siText3,
+            siText4,
+            siText5,
+            orderStatusInstruction,
+          ],
           role: "model",
         },
       },
@@ -466,7 +487,14 @@ const processNewMessageWithAI = async (
         message: toolResponseParts,
         config: {
           systemInstruction: {
-            parts: [siText1, siText2, siText3, siText4, siText5],
+            parts: [
+              siText1,
+              siText2,
+              siText3,
+              siText4,
+              siText5,
+              orderStatusInstruction,
+            ],
             role: "model",
           },
         },
