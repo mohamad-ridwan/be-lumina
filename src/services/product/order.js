@@ -33,7 +33,25 @@ const getOrderStatus = async ({
   }
 
   const order = await Order.find(orderQuery);
-  return Array.isArray(order) ? order : [];
+  return Array.isArray(order)
+    ? order.map((odr) => {
+        const status = () => {
+          if (odr.status === "pending") {
+            return "Menunggu Pembayaran";
+          } else if (odr.status === "processing") {
+            return "Diproses";
+          } else if (odr.status === "shipped") {
+            return "Dikirim";
+          } else {
+            return "Status Tidak Diketahui";
+          }
+        };
+        return {
+          ...odr,
+          status: status(),
+        };
+      })
+    : [];
 };
 
 module.exports = { getOrderStatus };

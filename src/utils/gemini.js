@@ -324,6 +324,8 @@ const orderStatusInstruction = {
 
 - Jika tersedia alamat jadikan dalam satu paragraph, namun pisahkan jika tersedia nama dan email, untuk style ini (font-size: 13px, color: #777).
 - Jika tersedia URL order, berikan attribute (target="_blank") supaya browser membuka tab baru, untuk style ini (font-size: 13px, color: #0000FF).
+- Jika status "Menunggu Pembayaran", berikan style (color: oklch(68.1% 0.162 75.834)).
+- Jika status "Diproses", berikan style (color: oklch(54.6% 0.245 262.881)).
 
 untuk list ini Anda wajib untuk tidak memberikan warna background dan border atau apapun itu seperti style card.
 
