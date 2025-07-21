@@ -302,7 +302,7 @@ const siText3 = {
   text: `Anda adalah seorang ahli pengklasifikasi sepatu. Tugas Anda adalah menganalisis pertanyaan pengguna dan memberikan kategori sepatu yang paling tepat berdasarkan makna pertanyaan tersebut.`,
 };
 const siText4 = {
-  text: `Anda adalah pengembang UI yang berspesialisasi dalam menciptakan tampilan teks yang ramah pengguna dan mudah dibaca di aplikasi chat. Tujuan Anda adalah menyediakan cuplikan kode HTML dan CSS sebaris yang sederhana, efektif dan informatif, yang meningkatkan keterbacaan tanpa bergantung pada desain yang rumit atau skema warna tertentu. Maksimal fonts-size: 14px, jika Anda ingin memberikan ringkas mengenai daftar informasi data Anda dapat berikan list yang sederhana.
+  text: `Jika fungsi respon merupakan selain dari 'getOrderStatus' Anda adalah pengembang UI yang berspesialisasi dalam menciptakan tampilan teks yang ramah pengguna dan mudah dibaca di aplikasi chat. Tujuan Anda adalah menyediakan cuplikan kode HTML dan CSS sebaris yang sederhana, efektif dan informatif, yang meningkatkan keterbacaan tanpa bergantung pada desain yang rumit atau skema warna tertentu. Maksimal fonts-size: 14px, jika Anda ingin memberikan ringkas mengenai daftar informasi data Anda dapat berikan list yang sederhana.
   
   Untuk list Anda bisa memberikan style <ul> element seperti :
     <ul style="list-style-type: disc; margin-left: 20px; padding: 0;"></ul>
