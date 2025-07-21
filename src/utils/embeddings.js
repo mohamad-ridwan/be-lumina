@@ -28,7 +28,6 @@ async function initializeEmbeddingPipeline() {
       console.error("Gagal menginisialisasi pipeline embedding:", error);
       // Anda mungkin ingin menangani error ini lebih lanjut,
       // seperti keluar dari aplikasi atau mencoba lagi.
-      process.exit(1); // Contoh: Keluar dari proses jika inisialisasi gagal
     }
   }
 }

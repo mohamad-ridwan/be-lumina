@@ -5,6 +5,82 @@ const genAI = require("../services/gemini");
 const { availableFunctionProducts } = require("../services/product");
 const { generateRandomId } = require("../helpers/generateRandomId");
 
+const exampleTextHistoryData = `Tentu, saya akan bantu Anda mencari sepatu lari yang didesain untuk mengurangi kepanasan saat cuaca terik matahari! Berdasarkan pencarian saya, berikut beberapa rekomendasi sepatu lari dari Lumina yang memiliki fitur *breathable* atau material yang cocok untuk cuaca panas:\n\n<div style="font-family: Arial, sans-serif; font-size: 14px; color: #333;">\n  <p style="margin-bottom: 10px;">Berikut adalah beberapa pilihan sepatu lari yang cocok untuk cuaca terik:</p>\n  <ul style="list-style-type: disc; margin-left: 20px; padding: 0;">\n    <li>\n      <strong style="color: #0056b3;">Adidas UltraBoost 23</strong>\n      <ul style="list-style-type: circle; margin-left: 20px; padding: 0;">\n        <li><span style="font-weight: bold;">Deskripsi:</span> Sepatu lari inovatif dengan desain ringan dan <span style="font-weight: bold; color: #d9534f;"><i>breathable</i></span> untuk kenyamanan maksimal.</li>\n        <li><span style="font-weight: bold;">Harga:</span> Rp 2.500.000</li>\n        <li><span style="font-weight: bold;">Stok:</span> 150</li>\n      </ul>\n    </li>\n    <li style="margin-top: 10px;">\n      <strong style="color: #0056b3;">Puma ForeverRun NITRO</strong>\n      <ul style="list-style-type: circle; margin-left: 20px; padding: 0;">\n        <li><span style="font-weight: bold;">Deskripsi:</span> Dilengkapi dengan <span style="font-weight: bold; color: #d9534f;"><i>engineered mesh upper</i></span> yang memastikan <span style="font-weight: bold; color: #d9534f;"><i>fit</i></span> yang aman dan <span style="font-weight: bold; color: #d9534f;"><i>breathable</i></span> untuk lari jarak jauh.</li>\n        <li><span style="font-weight: bold;">Harga:</span> Rp 2.300.000</li>\n        <li><span style="font-weight: bold;">Stok:</span> 70</li>\n      </ul>\n    </li>\n    <li style="margin-top: 10px;">\n      <strong style="color: #0056b3;">Adidas Duramo SL</strong>\n      <ul style="list-style-type: circle; margin-left: 20px; padding: 0;">\n        <li><span style="font-weight: bold;">Deskripsi:</span> Memiliki <span style="font-weight: bold; color: #d9534f;"><i>upper mesh yang breathable</i></span> untuk sirkulasi udara optimal, menjaga kaki tetap sejuk.</li>\n        <li><span style="font-weight: bold;">Harga:</span> Rp 899.000</li>\n        <li><span style="font-weight: bold;">Stok:</span> 180</li>\n      </ul>\n    </li>\n    <li style="margin-top: 10px;">\n      <strong style="color: #0056b3;">New Balance Fresh Foam X More v4</strong>\n      <ul style="list-style-type: circle; margin-left: 20px; padding: 0;">\n        <li><span style="font-weight: bold;">Deskripsi:</span> Dengan <span style="font-weight: bold; color: #d9534f;"><i>upper mesh yang lembut dan engineered</i></span> memberikan <span style="font-weight: bold; color: #d9534f;"><i>fit</i></span> yang suportif dan <span style="font-weight: bold; color: #d9534f;"><i>breathable</i></span>.</li>\n        <li><span style="font-weight: bold;">Harga:</span> Rp 2.100.000</li>\n        <li><span style="font-weight: bold;">Stok:</span> 95</li>\n      </ul>\n    </li>\n    <li style="margin-top: 10px;">\n      <strong style="color: #0056b3;">Adidas Ultraboost DNA</strong>\n      <ul style="list-style-type: circle; margin-left: 20px; padding: 0;">\n        <li><span style="font-weight: bold;">Deskripsi:</span> Dengan <span style="font-weight: bold; color: #d9534f;"><i>upper Primeknit yang adaptif</i></span>, memberikan kenyamanan superior dan pengembalian energi di setiap langkah.</li>\n        <li><span style="font-weight: bold;">Harga:</span> Rp 2.750.000</li>\n        <li><span style="font-weight: bold;">Stok:</span> 65</li>\n      </ul>\n    </li>\n  </ul>\n  <p style="margin-top: 15px;">\n    Sepatu-sepatu ini umumnya menggunakan material <strong style="color: #d9534f;"><i>mesh</i></strong> atau <strong style="color: #d9534f;"><i>Primeknit</i></strong> pada bagian <i>upper</i>-nya yang dikenal sangat baik dalam sirkulasi udara, sehingga membantu mengurangi panas dan menjaga kaki tetap sejuk saat lari di bawah terik matahari.\n  </p>\n  <p style="margin-top: 10px;">\n    Apakah ada pertanyaan lain atau ingin saya bantu mencarikan model lain?\n  </p>\n</div>
+`;
+
+const exampleHistoryData = {
+  parts: [
+    {
+      text: exampleTextHistoryData,
+      function_response: {
+        name: "searchShoes",
+        response: [
+          {
+            name: "Sepatu Lari UltraBoost 23",
+            brand: "Adidas",
+            category:
+              '["{\\"name\\":\\"Olahraga\\",\\"isPopular\\":false}","{\\"name\\":\\"Lari\\",\\"isPopular\\":true}"]',
+            image:
+              "https://images.unsplash.com/photo-1508609349937-5ec4ae374ebf?q=80&w=1518&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
+            description:
+              "Sepatu lari inovatif dengan bantalan responsif yang optimal untuk performa lari jarak jauh. Desain ringan dan breathable memberikan kenyamanan maksimal di setiap langkah. Cocok untuk pelari profesional maupun harian.",
+            price_info: "Rp 2.500.000",
+            total_stock: 150,
+          },
+          {
+            name: "Puma ForeverRun NITRO",
+            brand: "Puma",
+            category:
+              '["{\\"name\\":\\"Lari\\",\\"isPopular\\":true}","{\\"name\\":\\"Olahraga\\",\\"isPopular\\":false}"]',
+            image:
+              "https://images.unsplash.com/photo-1715003132895-b10a23d3c90f?q=80&w=2532&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
+            description:
+              "Puma ForeverRun NITRO dirancang untuk pelari yang mencari stabilitas dan bantalan maksimal. Sepatu ini dilengkapi dengan **bantalan busa NITRO Infused** di seluruh midsole, memberikan responsivitas dan kenyamanan luar biasa tanpa mengorbank dukungan. Desainnya yang adaptif dan *engineered mesh upper* memastikan *fit* yang aman dan *breathable* untuk lari jarak jauh.",
+            price_info: "Rp 2.300.000",
+            total_stock: 70,
+          },
+          {
+            name: "Adidas Duramo SL",
+            brand: "Adidas",
+            category:
+              '["{\\"name\\":\\"Lari\\",\\"isPopular\\":true}","{\\"name\\":\\"Olahraga\\",\\"isPopular\\":false}"]',
+            image:
+              "https://images.unsplash.com/photo-1572710376280-23712329d51d?q=80&w=1740&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
+            description:
+              "Adidas Duramo SL adalah sepatu lari serbaguna yang dirancang untuk kenyamanan harian. Dibangun dengan **bantalan Lightmotion** yang ringan dan responsif, sepatu ini memberikan pijakan yang empuk dan fleksibel di setiap langkah. Upper mesh yang *breathable* memastikan sirkulasi udara optimal, menjaga kaki tetap sejuk. Ideal untuk lari jarak pendek, nge-gym, atau aktivitas sehari-hari.",
+            price_info: "Rp 899.000",
+            total_stock: 180,
+          },
+          {
+            name: "New Balance Fresh Foam X More v4",
+            brand: "New Balance",
+            category:
+              '["{\\"name\\":\\"Lari\\",\\"isPopular\\":true}","{\\"name\\":\\"Olahraga\\",\\"isPopular\\":false}"]',
+            image:
+              "https://images.unsplash.com/photo-1465453869711-7e174808ace9?q=80&w=1752&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
+            description:
+              "New Balance Fresh Foam X More v4 adalah sepatu lari dengan bantalan paling empuk di lini Fresh Foam X. Sepatu ini memiliki **midsole Fresh Foam X yang tebal** untuk penyerapan benturan maksimal dan kenyamanan superior selama lari jarak jauh. Upper mesh yang lembut dan *engineered* memberikan *fit* yang suportif dan *breathable*. Sempurna untuk lari pemulihan atau latihan harian yang membutuhkan bantalan ekstra.",
+            price_info: "Rp 2.100.000",
+            total_stock: 95,
+          },
+          {
+            name: "Adidas Ultraboost DNA",
+            brand: "Adidas",
+            category:
+              '["{\\"name\\":\\"Lari\\",\\"isPopular\\":true}","{\\"name\\":\\"Olahraga\\",\\"isPopular\\":false}"]',
+            image:
+              "https://images.unsplash.com/photo-1667668049170-51781ab56452?q=80&w=1548&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
+            description:
+              "Sepatu lari Adidas Ultraboost DNA adalah perpaduan sempurna antara performa dan gaya. Dengan bantalan Boost yang responsif dan upper Primeknit yang adaptif, memberikan kenyamanan superior dan pengembalian energi di setiap langkah. Ideal untuk latihan harian maupun gaya hidup aktif.",
+            price_info: "Rp 2.750.000",
+            total_stock: 65,
+          },
+        ],
+      },
+    },
+  ],
+};
+
 const getConversationHistoryForGemini = async (message, io, socket, client) => {
   try {
     const { latestMessage, isNeedHeaderDate, recipientProfileId } = message;
@@ -44,7 +120,7 @@ const getConversationHistoryForGemini = async (message, io, socket, client) => {
     const queryConditions = {
       chatId,
       chatRoomId,
-      senderUserId: recipientProfileId,
+      // senderUserId: recipientProfileId,
       messageType: "text",
       // $nor array sekarang berisi dua kondisi pengecualian
       $nor: [
@@ -95,14 +171,37 @@ const getConversationHistoryForGemini = async (message, io, socket, client) => {
       if (productDataCurrently.length > 0 && msg.role === "model") {
         function_response = {
           name: "searchShoes",
-          response: productDataCurrently,
+          response: { productData: productDataCurrently },
         };
+      } else if (msg.role === "model") {
+        function_response = {
+          name: "searchShoes",
+          response: { productData: [] },
+        };
+      }
+      let parts = [
+        {
+          text: msg.textMessage,
+        },
+      ];
+
+      if (function_response) {
+        parts.push({
+          function_response: function_response,
+        });
       }
       return {
         role: msg.role,
-        parts: [{ text: msg.textMessage, function_response }],
+        parts: [
+          {
+            text: msg.textMessage,
+            function_response: function_response,
+          },
+        ],
       };
     });
+
+    console.log("Formatted history for Gemini:", formattedHisory);
 
     return formattedHisory;
   } catch (error) {
@@ -220,9 +319,6 @@ const siText5 = {
   Anda wajib memberikan informasi jika ditanyakan mengenai kalkulasi, sisa budget dan range harga. Berikan informasi yang informatif menggunakan elemen html yang sederhana, seperti title dari maksud penjumlahan atau kalkulasi dan totalnya.`,
 };
 
-const exampleTextHistoryData = `Tentu, saya akan bantu Anda mencari sepatu lari yang didesain untuk mengurangi kepanasan saat cuaca terik matahari! Berdasarkan pencarian saya, berikut beberapa rekomendasi sepatu lari dari Lumina yang memiliki fitur *breathable* atau material yang cocok untuk cuaca panas:\n\n<div style="font-family: Arial, sans-serif; font-size: 14px; color: #333;">\n  <p style="margin-bottom: 10px;">Berikut adalah beberapa pilihan sepatu lari yang cocok untuk cuaca terik:</p>\n  <ul style="list-style-type: disc; margin-left: 20px; padding: 0;">\n    <li>\n      <strong style="color: #0056b3;">Adidas UltraBoost 23</strong>\n      <ul style="list-style-type: circle; margin-left: 20px; padding: 0;">\n        <li><span style="font-weight: bold;">Deskripsi:</span> Sepatu lari inovatif dengan desain ringan dan <span style="font-weight: bold; color: #d9534f;"><i>breathable</i></span> untuk kenyamanan maksimal.</li>\n        <li><span style="font-weight: bold;">Harga:</span> Rp 2.500.000</li>\n        <li><span style="font-weight: bold;">Stok:</span> 150</li>\n      </ul>\n    </li>\n    <li style="margin-top: 10px;">\n      <strong style="color: #0056b3;">Puma ForeverRun NITRO</strong>\n      <ul style="list-style-type: circle; margin-left: 20px; padding: 0;">\n        <li><span style="font-weight: bold;">Deskripsi:</span> Dilengkapi dengan <span style="font-weight: bold; color: #d9534f;"><i>engineered mesh upper</i></span> yang memastikan <span style="font-weight: bold; color: #d9534f;"><i>fit</i></span> yang aman dan <span style="font-weight: bold; color: #d9534f;"><i>breathable</i></span> untuk lari jarak jauh.</li>\n        <li><span style="font-weight: bold;">Harga:</span> Rp 2.300.000</li>\n        <li><span style="font-weight: bold;">Stok:</span> 70</li>\n      </ul>\n    </li>\n    <li style="margin-top: 10px;">\n      <strong style="color: #0056b3;">Adidas Duramo SL</strong>\n      <ul style="list-style-type: circle; margin-left: 20px; padding: 0;">\n        <li><span style="font-weight: bold;">Deskripsi:</span> Memiliki <span style="font-weight: bold; color: #d9534f;"><i>upper mesh yang breathable</i></span> untuk sirkulasi udara optimal, menjaga kaki tetap sejuk.</li>\n        <li><span style="font-weight: bold;">Harga:</span> Rp 899.000</li>\n        <li><span style="font-weight: bold;">Stok:</span> 180</li>\n      </ul>\n    </li>\n    <li style="margin-top: 10px;">\n      <strong style="color: #0056b3;">New Balance Fresh Foam X More v4</strong>\n      <ul style="list-style-type: circle; margin-left: 20px; padding: 0;">\n        <li><span style="font-weight: bold;">Deskripsi:</span> Dengan <span style="font-weight: bold; color: #d9534f;"><i>upper mesh yang lembut dan engineered</i></span> memberikan <span style="font-weight: bold; color: #d9534f;"><i>fit</i></span> yang suportif dan <span style="font-weight: bold; color: #d9534f;"><i>breathable</i></span>.</li>\n        <li><span style="font-weight: bold;">Harga:</span> Rp 2.100.000</li>\n        <li><span style="font-weight: bold;">Stok:</span> 95</li>\n      </ul>\n    </li>\n    <li style="margin-top: 10px;">\n      <strong style="color: #0056b3;">Adidas Ultraboost DNA</strong>\n      <ul style="list-style-type: circle; margin-left: 20px; padding: 0;">\n        <li><span style="font-weight: bold;">Deskripsi:</span> Dengan <span style="font-weight: bold; color: #d9534f;"><i>upper Primeknit yang adaptif</i></span>, memberikan kenyamanan superior dan pengembalian energi di setiap langkah.</li>\n        <li><span style="font-weight: bold;">Harga:</span> Rp 2.750.000</li>\n        <li><span style="font-weight: bold;">Stok:</span> 65</li>\n      </ul>\n    </li>\n  </ul>\n  <p style="margin-top: 15px;">\n    Sepatu-sepatu ini umumnya menggunakan material <strong style="color: #d9534f;"><i>mesh</i></strong> atau <strong style="color: #d9534f;"><i>Primeknit</i></strong> pada bagian <i>upper</i>-nya yang dikenal sangat baik dalam sirkulasi udara, sehingga membantu mengurangi panas dan menjaga kaki tetap sejuk saat lari di bawah terik matahari.\n  </p>\n  <p style="margin-top: 10px;">\n    Apakah ada pertanyaan lain atau ingin saya bantu mencarikan model lain?\n  </p>\n</div>
-`;
-
 const exampleFunctionCallData = {
   functionCall: {
     name: "searchShoes",
@@ -232,79 +328,6 @@ const exampleFunctionCallData = {
         "sepatu lari yang bahannya dapat mengurangi kepanasan dari cuaca yang terik matahari",
     },
   },
-};
-
-const exampleHistoryData = {
-  parts: [
-    {
-      text: exampleTextHistoryData,
-      function_response: {
-        name: "searchShoes",
-        response: [
-          {
-            name: "Sepatu Lari UltraBoost 23",
-            brand: "Adidas",
-            category:
-              '["{\\"name\\":\\"Olahraga\\",\\"isPopular\\":false}","{\\"name\\":\\"Lari\\",\\"isPopular\\":true}"]',
-            image:
-              "https://images.unsplash.com/photo-1508609349937-5ec4ae374ebf?q=80&w=1518&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
-            description:
-              "Sepatu lari inovatif dengan bantalan responsif yang optimal untuk performa lari jarak jauh. Desain ringan dan breathable memberikan kenyamanan maksimal di setiap langkah. Cocok untuk pelari profesional maupun harian.",
-            price_info: "Rp 2.500.000",
-            total_stock: 150,
-          },
-          {
-            name: "Puma ForeverRun NITRO",
-            brand: "Puma",
-            category:
-              '["{\\"name\\":\\"Lari\\",\\"isPopular\\":true}","{\\"name\\":\\"Olahraga\\",\\"isPopular\\":false}"]',
-            image:
-              "https://images.unsplash.com/photo-1715003132895-b10a23d3c90f?q=80&w=2532&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
-            description:
-              "Puma ForeverRun NITRO dirancang untuk pelari yang mencari stabilitas dan bantalan maksimal. Sepatu ini dilengkapi dengan **bantalan busa NITRO Infused** di seluruh midsole, memberikan responsivitas dan kenyamanan luar biasa tanpa mengorbank dukungan. Desainnya yang adaptif dan *engineered mesh upper* memastikan *fit* yang aman dan *breathable* untuk lari jarak jauh.",
-            price_info: "Rp 2.300.000",
-            total_stock: 70,
-          },
-          {
-            name: "Adidas Duramo SL",
-            brand: "Adidas",
-            category:
-              '["{\\"name\\":\\"Lari\\",\\"isPopular\\":true}","{\\"name\\":\\"Olahraga\\",\\"isPopular\\":false}"]',
-            image:
-              "https://images.unsplash.com/photo-1572710376280-23712329d51d?q=80&w=1740&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
-            description:
-              "Adidas Duramo SL adalah sepatu lari serbaguna yang dirancang untuk kenyamanan harian. Dibangun dengan **bantalan Lightmotion** yang ringan dan responsif, sepatu ini memberikan pijakan yang empuk dan fleksibel di setiap langkah. Upper mesh yang *breathable* memastikan sirkulasi udara optimal, menjaga kaki tetap sejuk. Ideal untuk lari jarak pendek, nge-gym, atau aktivitas sehari-hari.",
-            price_info: "Rp 899.000",
-            total_stock: 180,
-          },
-          {
-            name: "New Balance Fresh Foam X More v4",
-            brand: "New Balance",
-            category:
-              '["{\\"name\\":\\"Lari\\",\\"isPopular\\":true}","{\\"name\\":\\"Olahraga\\",\\"isPopular\\":false}"]',
-            image:
-              "https://images.unsplash.com/photo-1465453869711-7e174808ace9?q=80&w=1752&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
-            description:
-              "New Balance Fresh Foam X More v4 adalah sepatu lari dengan bantalan paling empuk di lini Fresh Foam X. Sepatu ini memiliki **midsole Fresh Foam X yang tebal** untuk penyerapan benturan maksimal dan kenyamanan superior selama lari jarak jauh. Upper mesh yang lembut dan *engineered* memberikan *fit* yang suportif dan *breathable*. Sempurna untuk lari pemulihan atau latihan harian yang membutuhkan bantalan ekstra.",
-            price_info: "Rp 2.100.000",
-            total_stock: 95,
-          },
-          {
-            name: "Adidas Ultraboost DNA",
-            brand: "Adidas",
-            category:
-              '["{\\"name\\":\\"Lari\\",\\"isPopular\\":true}","{\\"name\\":\\"Olahraga\\",\\"isPopular\\":false}"]',
-            image:
-              "https://images.unsplash.com/photo-1667668049170-51781ab56452?q=80&w=1548&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
-            description:
-              "Sepatu lari Adidas Ultraboost DNA adalah perpaduan sempurna antara performa dan gaya. Dengan bantalan Boost yang responsif dan upper Primeknit yang adaptif, memberikan kenyamanan superior dan pengembalian energi di setiap langkah. Ideal untuk latihan harian maupun gaya hidup aktif.",
-            price_info: "Rp 2.750.000",
-            total_stock: 65,
-          },
-        ],
-      },
-    },
-  ],
 };
 
 // const instructionPrompt = `
@@ -326,6 +349,7 @@ const processNewMessageWithAI = async (
   const latestMessageTimestamp = Date.now();
   const newMessageId = generateRandomId(15);
   let accumulatedProductsForFrontend = [];
+  let orderForFrontendData = [];
   let combinedResponseText = "";
   // Set untuk melacak ID produk yang sudah dikumpulkan secara keseluruhan
   const collectedProductIds = new Set();
@@ -334,15 +358,16 @@ const processNewMessageWithAI = async (
     const tools = await toolsDB.find();
     const chat = genAI.chats.create({
       model: "gemini-2.5-flash",
-      config: {
-        // tools: [{ functionDeclarations: tools }],
-        // thinkingConfig: {
-        //   thinkingBudget: 1024,
-        // },
-        // systemInstruction: {
-        //   parts: [siText1, siText2, siText3],
-        // },
-      },
+      // config: {
+      //   tools: [{ functionDeclarations: tools }],
+      //   thinkingConfig: {
+      //     thinkingBudget: 1024,
+      //   },
+      //   systemInstruction: {
+      //     parts: [siText1, siText2, siText3, siText4, siText5],
+      //     role: "model",
+      //   },
+      // },
       history: formattedHisory?.length > 0 ? formattedHisory : undefined,
     });
 
@@ -370,6 +395,7 @@ const processNewMessageWithAI = async (
       for (const call of response.functionCalls) {
         const functionName = call.name;
         const functionArgs = { ...call.args }; // Salin argumen
+        const geminiResult = { shoes: [] };
 
         // <<< LOGIKA PENTING DI SINI >>>
         // Tambahkan ID yang sudah dikumpulkan ke parameter excludeIds
@@ -382,14 +408,21 @@ const processNewMessageWithAI = async (
           const resultFromTool = await availableFunctionProducts[functionName](
             functionArgs
           );
-          console.log("result database from tool:", resultFromTool.shoes);
-          console.log(
-            "result category product from tool:",
-            resultFromTool.shoes?.[indexCount]?.category
-          );
+          console.log("Function call result:", resultFromTool);
+          if (functionName === "searchShoes") {
+            console.log(
+              "result database from tool 'searchShoes':",
+              resultFromTool?.shoes
+            );
+          }
+
           indexCount += 1;
 
-          if (resultFromTool && resultFromTool.productsForFrontend) {
+          if (
+            functionName === "searchShoes" &&
+            resultFromTool &&
+            resultFromTool?.productsForFrontend
+          ) {
             resultFromTool.productsForFrontend.forEach((product) => {
               const id = product._id?.toString();
               if (id && !collectedProductIds.has(id)) {
@@ -397,19 +430,23 @@ const processNewMessageWithAI = async (
                 collectedProductIds.add(id); // Tambahkan ID ke set global
               }
             });
-
-            const geminiResult = { shoes: resultFromTool.shoes };
+            geminiResult.shoes = resultFromTool.shoes;
             if (resultFromTool.message) {
               geminiResult.message = resultFromTool.message;
             }
             functionCallResultsForGemini.push({
               name: functionName,
-              response: geminiResult,
+              response: { productData: resultFromTool.shoes },
             });
-          } else {
+          } else if (
+            functionName === "getOrderStatus" &&
+            resultFromTool?.length > 0
+          ) {
+            orderForFrontendData = resultFromTool;
+            geminiResult.orders = resultFromTool;
             functionCallResultsForGemini.push({
               name: functionName,
-              response: resultFromTool,
+              response: { orderData: resultFromTool },
             });
           }
         } else {
@@ -423,6 +460,7 @@ const processNewMessageWithAI = async (
       const toolResponseParts = functionCallResultsForGemini.map((result) => ({
         functionResponse: result,
       }));
+      console.log("tools response parts: ", toolResponseParts);
 
       const toolResponseResult = await chat.sendMessage({
         message: toolResponseParts,
@@ -452,6 +490,7 @@ const processNewMessageWithAI = async (
           agenda,
           newMessageId,
           productData: accumulatedProductsForFrontend, // Kirimkan data produk unik
+          orderData: orderForFrontendData, // Kirimkan data order unik
         }
       );
 
@@ -469,6 +508,7 @@ const processNewMessageWithAI = async (
           agenda,
           newMessageId,
           productData: [],
+          orderData: [],
         }
       );
       return response.text;
@@ -486,6 +526,7 @@ const processNewMessageWithAI = async (
         agenda,
         newMessageId,
         productData: [],
+        orderData: [],
       }
     );
     return error;

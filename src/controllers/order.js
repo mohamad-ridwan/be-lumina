@@ -355,7 +355,7 @@ exports.createOrder = async (req, res, next) => {
         imageUrl: itemImageUrl,
       };
 
-      if (Object.keys(variantDetails).length > 0) {
+      if (variantDetails && Object.keys(variantDetails).length > 0) {
         createOrderItem.variant = {
           // Masukkan detail varian ke dalam sub-objek 'variant'
           _id: variantDetails._id,

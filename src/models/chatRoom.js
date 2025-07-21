@@ -42,6 +42,9 @@ const chatRoom = new Schema(
     productData: {
       type: Array,
     },
+    orderData: {
+      type: Array,
+    },
     reactions: [
       {
         emoji: { type: String },

@@ -137,7 +137,7 @@ const handleSendMessageFromAI = async (
   generatedText,
   message,
   latestMessageTimestamp,
-  { io, socket, client, agenda, newMessageId, productData }
+  { io, socket, client, agenda, newMessageId, productData, orderData }
 ) => {
   const { latestMessage, isNeedHeaderDate, recipientProfileId, role } = message;
 
@@ -175,6 +175,7 @@ const handleSendMessageFromAI = async (
   if (!isAvailableMessage?._id) {
     await sendMessage(newMessageForUser, io, socket, client, agenda, {
       productData,
+      orderData,
     });
   } else {
     isAvailableMessage.textMessage =
@@ -183,6 +184,9 @@ const handleSendMessageFromAI = async (
         : "Maaf kami tidak tersedia untuk saat ini. Mohon coba lagi nanti.";
     if (productData?.length > 0) {
       isAvailableMessage.productData = productData;
+    }
+    if (orderData?.length > 0) {
+      isAvailableMessage.orderData = orderData;
     }
     await isAvailableMessage.save();
     // await chatRoomDB.findOneAndUpdate(
@@ -247,6 +251,7 @@ const handleSendMessageFromAI = async (
       messageUpdated: {
         ...newMessageForUser.latestMessage,
         productData,
+        orderData,
       },
     });
   }
@@ -305,13 +310,13 @@ const handleGetNewMessageForBot = async (
       responseText,
       message,
       latestMessageTimestamp,
-      { io, socket, client, agenda, newMessageId, productData }
+      { io, socket, client, agenda, newMessageId, productData, orderData }
     ) => {
       const result = await handleSendMessageFromAI(
         responseText,
         message,
         latestMessageTimestamp,
-        { io, socket, client, agenda, newMessageId, productData }
+        { io, socket, client, agenda, newMessageId, productData, orderData }
       );
       return result;
     },
@@ -472,6 +477,9 @@ const sendMessage = async (
   }
   if (productData?.productData?.length > 0) {
     chatRoomData.productData = productData.productData;
+  }
+  if (productData?.orderData?.length > 0) {
+    chatRoomData.orderData = productData.orderData;
   }
   if (message?.role === "model") {
     chatRoomData.role = "model";
