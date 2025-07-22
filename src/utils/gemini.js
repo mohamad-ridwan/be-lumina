@@ -369,6 +369,7 @@ const processNewMessageWithAI = async (
   let combinedResponseText = "";
   // Set untuk melacak ID produk yang sudah dikumpulkan secara keseluruhan
   const collectedProductIds = new Set();
+  const collectedOrderIds = new Set();
 
   try {
     const tools = await toolsDB.find();
@@ -420,12 +421,12 @@ const processNewMessageWithAI = async (
         const functionArgs = { ...call.args }; // Salin argumen
         const geminiResult = { shoes: [] };
 
-        // <<< LOGIKA PENTING DI SINI >>>
-        // Tambahkan ID yang sudah dikumpulkan ke parameter excludeIds
         if (functionName === "searchShoes") {
           functionArgs.excludeIds = Array.from(collectedProductIds);
         }
-        // <<< AKHIR LOGIKA PENTING >>>
+        if (functionName === "getOrderStatus") {
+          functionArgs.excludeOrderIds = Array.from(collectedOrderIds);
+        }
 
         if (availableFunctionProducts[functionName]) {
           const resultFromTool = await availableFunctionProducts[functionName](
@@ -465,7 +466,13 @@ const processNewMessageWithAI = async (
             functionName === "getOrderStatus" &&
             resultFromTool?.length > 0
           ) {
-            orderForFrontendData = resultFromTool;
+            resultFromTool.forEach((order) => {
+              const id = order._id?.toString();
+              if (id && !collectedOrderIds.has(id)) {
+                orderForFrontendData.push(order);
+                collectedOrderIds.add(id); // Tambahkan ID ke set global
+              }
+            });
             geminiResult.orders = resultFromTool;
             functionCallResultsForGemini.push({
               name: functionName,

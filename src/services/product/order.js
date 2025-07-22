@@ -1,21 +1,38 @@
 const Order = require("../../models/order");
+const mongoose = require("mongoose");
 
 const getOrderStatus = async ({
   orderId,
   userEmail,
   userPhoneNumber,
+  status,
   query,
+  excludeOrderIds,
 }) => {
   console.log("ORDER ARGUMENTS:", {
     orderId,
     userEmail,
     userPhoneNumber,
     query,
+    status,
+    excludeOrderIds,
   });
   const defaultAvailableStatus = ["pending", "processing", "shipped"];
 
+  let validStatus;
+
+  if (status) {
+    const statusCurrently = defaultAvailableStatus.find(
+      (s) => s.toLowerCase() === status.toLowerCase()
+    );
+    if (statusCurrently) {
+      validStatus = statusCurrently;
+    }
+  }
+
   const orderQuery = {
-    $and: [{ status: { $in: defaultAvailableStatus } }],
+    _id: { $nin: excludeOrderIds.map((id) => new mongoose.Types.ObjectId(id)) },
+    $and: [{ status: { $in: validStatus ?? defaultAvailableStatus } }],
   };
 
   if (orderId) {
