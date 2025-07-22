@@ -64,6 +64,11 @@ const orderSchema = new Schema(
       default: 0, // Jika ada biaya pengiriman (bisa diatur manual untuk demo)
       min: 0,
     },
+    totalQuantity: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
     totalAmount: {
       type: Number,
       required: true,

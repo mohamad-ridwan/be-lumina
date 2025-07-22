@@ -382,6 +382,11 @@ exports.createOrder = async (req, res, next) => {
     const { subtotal, shippingCost, totalAmount } =
       calculateOrderTotals(orderItems);
 
+    let totalQuantity = orderItems.reduce(
+      (sum, item) => sum + item.quantity,
+      0
+    );
+
     // 5. Buat Objek Pesanan Baru
     const newOrder = new Order({
       user: new mongoose.Types.ObjectId(userId),
@@ -393,6 +398,7 @@ exports.createOrder = async (req, res, next) => {
       status: "pending", // Status awal
       paymentMethod: paymentMethod,
       notes: notes,
+      totalQuantity: totalQuantity,
       // orderId dan publicOrderUrl akan di-generate oleh middleware pre('save')
     });
 
@@ -434,6 +440,7 @@ exports.createOrder = async (req, res, next) => {
         items: savedOrder.items, // Sertakan detail item yang disimpan
         paymentMethod: savedOrder.paymentMethod, // Sertakan metode pembayaran
         notes: savedOrder.notes, // Sertakan catatan
+        totalQuantity: totalQuantity, // Sertakan total kuantitas
       },
     });
   } catch (error) {
