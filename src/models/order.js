@@ -83,6 +83,7 @@ const orderSchema = new Schema(
         "shipped", // Sudah dikirim
         "delivered", // Sudah sampai tujuan
         "cancelled", // Dibatalkan
+        "cancel-requested",
       ],
       default: "pending",
       required: true,

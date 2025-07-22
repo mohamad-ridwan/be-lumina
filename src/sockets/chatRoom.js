@@ -480,7 +480,7 @@ const sendMessage = async (
   if (productData?.productData?.length > 0) {
     chatRoomData.productData = productData.productData;
   }
-  if (productData?.orderData?.length > 0) {
+  if (productData?.orderData?.orders?.length > 0) {
     chatRoomData.orderData = productData.orderData;
   }
   if (message?.role === "model") {

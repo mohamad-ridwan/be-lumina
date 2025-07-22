@@ -1,13 +1,352 @@
 const mongoose = require("mongoose");
 const chats = require("../models/chats");
 const chatRoom = require("../models/chatRoom");
+const usersDB = require("../models/users");
 const { HTTP_STATUS_CODE } = require("../constant");
 const { generateRandomId } = require("../helpers/generateRandomId");
+const Order = require("../models/order");
 const {
   uploadVideoService,
   uploadImageService,
 } = require("../services/chatRoom/uploadFileService");
-const { getSortTimestampAggregationField } = require("../helpers/general");
+const {
+  getSortTimestampAggregationField,
+  getTodayHeader,
+  isUserInRoom,
+} = require("../helpers/general");
+const genAI = require("../services/gemini");
+
+exports.confirmCancelOrder = async (req, res) => {
+  const { messageId, profileId, recipientId } = req.body;
+
+  const senderUserId = recipientId;
+  const io = req.app.locals.io; // Mengakses instance Socket.IO dari app.locals
+  const client = req.app.locals.redisClient;
+
+  try {
+    const chatRoomCurrently = await chatRoom.findOne({
+      messageId,
+      $nor: [
+        {
+          isDeleted: {
+            $elemMatch: {
+              senderUserId: profileId,
+              deletionType: { $in: ["me", "permanent", "everyone"] },
+            },
+          },
+        },
+        {
+          isDeleted: {
+            $elemMatch: {
+              senderUserId: senderUserId,
+              deletionType: { $in: ["everyone", "permanent"] },
+            },
+          },
+        },
+      ],
+    });
+
+    if (!chatRoomCurrently) {
+      return res
+        .status(404)
+        .json({ error: "Message not found. Please try again" });
+    }
+
+    const orderItemsFromChat = chatRoomCurrently?.orderData?.orders ?? [];
+    const orderIdsToProcess = orderItemsFromChat
+      .map((item) => item.orderId)
+      .filter(Boolean); // Ambil orderId dari setiap item
+
+    if (orderIdsToProcess.length === 0) {
+      return res
+        .status(400)
+        .json({ error: "No valid order IDs found in the message to process." });
+    }
+
+    // Pastikan permintaan belum dikonfirmasi sebelumnya di level chatRoom
+    if (chatRoomCurrently?.orderData?.isConfirmed) {
+      return res
+        .status(400)
+        .json({ error: "The request has been confirmed already." });
+    }
+
+    // --- Logic untuk Memperbarui Status Order ---
+    let updatedOrders = [];
+    const failedToUpdateOrders = [];
+
+    // Mengambil semua order dari database berdasarkan orderIdsToProcess
+    const ordersInDb = await Order.find({
+      orderId: { $in: orderIdsToProcess },
+    }).lean();
+    const ordersMap = new Map(
+      ordersInDb.map((order) => [order.orderId, order])
+    );
+
+    for (const orderId of orderIdsToProcess) {
+      const order = ordersMap.get(orderId);
+
+      if (order) {
+        let newStatus;
+        if (order.status === "pending") {
+          // Jika statusnya 'pending' (Menunggu Pembayaran)
+          newStatus = "cancelled";
+        } else {
+          // Jika statusnya selain 'pending'
+          newStatus = "cancel-requested";
+          // Pastikan 'cancel-requested' ada di enum status skema Order Anda
+        }
+
+        try {
+          const updatedOrder = await Order.findOneAndUpdate(
+            { _id: order._id }, // Cari berdasarkan _id Order
+            { status: newStatus },
+            { new: true } // Mengembalikan dokumen yang sudah diperbarui
+          ).lean();
+
+          if (updatedOrder) {
+            updatedOrders.push(updatedOrder);
+          } else {
+            failedToUpdateOrders.push({
+              orderId,
+              reason: "Order not found or updated after query.",
+            });
+          }
+        } catch (updateError) {
+          console.error(`Error updating order ${orderId}:`, updateError);
+          failedToUpdateOrders.push({
+            orderId,
+            reason: "Database update failed.",
+          });
+        }
+      } else {
+        failedToUpdateOrders.push({
+          orderId,
+          reason: "Order not found in database.",
+        });
+      }
+    }
+
+    updatedOrders = updatedOrders.map((order) => {
+      const status = () => {
+        if (order.status === "cancelled") {
+          return "Dibatalkan";
+        } else if (order.status === "cancel-requested") {
+          return "Permintaan Membatalkan";
+        }
+      };
+      return {
+        ...order,
+        status: status(),
+      };
+    });
+
+    // Tandai chatRoom sebagai sudah dikonfirmasi setelah mencoba memproses order
+    await chatRoom.updateOne(
+      { messageId },
+      { $set: { "orderData.isConfirmed": true } }
+    );
+
+    const listInstruction = {
+      text: `Berikan informasi singkat pesanan tersebut telah berhasil dibatalkan sesuai dengan data yang diberikan seperti notifikasi:
+      
+      Berikut permintaan pembatalan pesanan Anda yang telah kami tanggapi :
+
+      - Jika order merupakan status (Dibatalkan), maka AI wajib memberikan informasi bahwa order tersebut berhasil (Dibatalkan)
+      - Jika order merupakan status (Permintaan Membatalkan), maka AI wajib memberikan informasi bahwa order tersebut sedang dalam pratinjau (review) tim kami, dan mohon bersabar, kami akan memberitahu Anda dalam beberapa menit.
+
+      Berikan keterangan tersebut dengan UI element html dan style inline css tanpa background color dan tanpa border.
+      maksimal font-size: 14px
+
+      - Jika status (Dibatalkan) berikan color: oklch(57.7% 0.245 27.325)
+      - Jika status (Permintaan Membatalkan) berikan color: oklch(64.5% 0.246 16.439)
+
+      untuk list ini Anda wajib untuk tidak memberikan warna background dan border atau apapun itu seperti style card.
+
+Untuk list Anda bisa memberikan style <ul> element seperti :
+    <ul style="list-style-type: disc; margin-left: 20px; padding: 0;"></ul>
+
+    Jika memiliki list pada anaknya bisa menggunakan "list-style-type: circle;" pada <ul style="list-style-type: circle; margin-left: 20px; padding: 0;"> element anaknya.
+      `,
+    };
+
+    const content = await genAI.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: JSON.stringify(updatedOrders),
+      config: {
+        systemInstruction: [listInstruction],
+      },
+    });
+
+    const chatRoomId = chatRoomCurrently?.chatRoomId;
+    const chatId = chatRoomCurrently?.chatId;
+
+    const headerMessageToday = await getTodayHeader(chatId, chatRoomId);
+
+    let timeId;
+    let headerMessage;
+    let headerId;
+    let latestMessageTimestamp = Date.now();
+
+    if (!headerMessageToday) {
+      // ❌ Belum ada header → buat header baru
+      timeId = generateRandomId(15);
+      headerId = generateRandomId(15);
+
+      headerMessage = new chatRoom({
+        chatId,
+        chatRoomId,
+        messageId: headerId,
+        isHeader: true,
+        senderUserId: senderUserId,
+        latestMessageTimestamp: latestMessageTimestamp,
+        timeId,
+      });
+      await headerMessage.save();
+    } else {
+      timeId = headerMessageToday.timeId;
+      headerId = headerMessageToday.messageId;
+    }
+
+    const chatRoomData = {
+      chatId,
+      chatRoomId,
+      messageId: generateRandomId(15),
+      senderUserId: senderUserId,
+      messageType: "text",
+      textMessage: content.text,
+      latestMessageTimestamp: latestMessageTimestamp,
+      status: "UNREAD",
+      timeId,
+      role: "model",
+    };
+
+    chatRoomData.orderData = {
+      type: "confirmCancelOrderData",
+      orders: updatedOrders,
+    };
+
+    const newChatRoom = new chatRoom(chatRoomData);
+    await newChatRoom.save();
+
+    // Update unread count
+    const chatsCurrently = await chats.findOne({ chatRoomId, chatId });
+    const secondUserId = Object.keys(chatsCurrently?.unreadCount || {}).find(
+      (id) => id !== senderUserId
+    );
+    const currentUnreadCount = chatsCurrently?.unreadCount?.[secondUserId] || 0;
+
+    const isSecondUserInRoom = await isUserInRoom(
+      chatId,
+      chatRoomId,
+      secondUserId,
+      client
+    );
+
+    const newUnreadCount = {
+      [senderUserId]: 0,
+      [secondUserId]: isSecondUserInRoom ? 0 : currentUnreadCount + 1,
+    };
+
+    // Update latestMessage sebagai array
+    let updatedLatestMessages = Array.isArray(chatsCurrently.latestMessage)
+      ? [...chatsCurrently.latestMessage]
+      : [];
+
+    const latestMessageWithUserId1 = {
+      ...chatRoomData,
+      productData: null,
+      orderData: chatRoomData.orderData,
+      userId: chatsCurrently.userIds[0],
+      timeId,
+    };
+    const latestMessageWithUserId2 = {
+      ...chatRoomData,
+      productData: null,
+      orderData: chatRoomData.orderData,
+      userId: chatsCurrently.userIds[1],
+      timeId,
+    };
+
+    const existingIndexUserId1 = updatedLatestMessages.findIndex(
+      (item) => item.userId === latestMessageWithUserId1.userId
+    );
+    const existingIndexUserId2 = updatedLatestMessages.findIndex(
+      (item) => item.userId === latestMessageWithUserId2.userId
+    );
+
+    if (existingIndexUserId1 !== -1) {
+      updatedLatestMessages[existingIndexUserId1] = latestMessageWithUserId1;
+    } else {
+      updatedLatestMessages.push(latestMessageWithUserId1);
+    }
+    if (existingIndexUserId2 !== -1) {
+      updatedLatestMessages[existingIndexUserId2] = latestMessageWithUserId2;
+    } else {
+      updatedLatestMessages.push(latestMessageWithUserId2);
+    }
+
+    updatedLatestMessages = updatedLatestMessages.filter(
+      (item) => item?.userId
+    );
+
+    await chats.updateOne(
+      { chatRoomId, chatId },
+      {
+        unreadCount: newUnreadCount,
+        latestMessage: updatedLatestMessages,
+      },
+      { new: true }
+    );
+    const senderUserProfile = await usersDB.findOne({ id: senderUserId });
+
+    if (headerMessage?.messageId) {
+      io.emit("newMessage", {
+        chatId,
+        chatRoomId,
+        eventType: "send-message",
+        recipientProfileId: profileId,
+        timeId,
+        messageId: headerMessage.messageId,
+        isHeader: true,
+        latestMessageTimestamp: headerMessage.latestMessageTimestamp,
+        isFromMedia: null,
+        senderUserId: senderUserId,
+      });
+    }
+
+    io.emit("newMessage", {
+      chatId,
+      chatRoomId,
+      eventType: "send-message",
+      username: senderUserProfile?.username,
+      image: senderUserProfile?.image,
+      imgCropped: senderUserProfile?.imgCropped,
+      thumbnail: senderUserProfile?.thumbnail,
+      latestMessage: updatedLatestMessages,
+      unreadCount: newUnreadCount,
+      isFromMedia: null,
+      timeId,
+      headerId,
+      recipientProfileId: profileId,
+      senderUserId: senderUserId,
+      confirmCancelOrder: {
+        messageId,
+        isConfirmed: true,
+      },
+    });
+
+    return res.json({
+      message: "Order confirmation process completed.",
+      chatRoom: chatRoomCurrently, // Mengembalikan chatRoom dengan data asli
+      updatedOrders: updatedOrders, // List order yang berhasil diupdate
+      failedToUpdateOrders: failedToUpdateOrders, // List order yang gagal diupdate
+      content: content.text, // Konten yang dihasilkan oleh genAI
+    });
+  } catch (error) {
+    console.error("Error in confirmCancelOrder:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
 
 exports.uploadMediaMessage = async (req, res) => {
   const message = JSON.parse(req.body.message);

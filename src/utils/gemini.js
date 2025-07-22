@@ -320,7 +320,7 @@ const siText5 = {
 };
 const orderStatusInstruction = {
   text: `
-  jika fungsi respon merupakan "getOrderStatus" anda wajib memberikan inline style css ui dan html yang konsisten seperti contoh :
+  jika fungsi respon merupakan "requestCancelOrder" anda wajib memberikan inline style css ui dan html yang konsisten seperti contoh :
 
 - Jika tersedia alamat jadikan dalam satu paragraph, namun pisahkan jika tersedia nama dan email, untuk style ini (font-size: 13px, color: #777).
 - Jika tersedia URL order, berikan attribute (target="_blank") supaya browser membuka tab baru, untuk style ini (font-size: 13px, color: #0000FF).
@@ -333,6 +333,15 @@ Untuk list Anda bisa memberikan style <ul> element seperti :
     <ul style="list-style-type: disc; margin-left: 20px; padding: 0;"></ul>
 
     Jika memiliki list pada anaknya bisa menggunakan "list-style-type: circle;" pada <ul style="list-style-type: circle; margin-left: 20px; padding: 0;"> element anaknya.`,
+};
+const confirmCancelOrderInstruction = {
+  text: `
+ AI wajib memberikan instruksi ini apabila customer mengajukan ingin membatalkan pesanannya dan jika fungsi respon merupakan "requestCancelOrder", Jika tidak jangan berikan instruksi ini.
+
+ AI wajib memberikan pesan catatan kepada customer bahwa secara langsung yang dapat dibatalkan adalah pesanan yang belum dibayar (Menunggu Pembayaran), jika pesanan ('Diproses', 'Dikirim') maka pembatalan ini akan melewati proses review (tinjauan) oleh tim kami, berikan awalan dengan Note : .
+
+ Catatan tersebut wajib diberikan <br/><br/> di atasnya untuk memberikan jarak antar teks dan 'Note'
+  `,
 };
 
 const exampleFunctionCallData = {
@@ -367,6 +376,7 @@ const processNewMessageWithAI = async (
   let accumulatedProductsForFrontend = [];
   let orderForFrontendData = [];
   let combinedResponseText = "";
+  let typeOrder = "";
   // Set untuk melacak ID produk yang sudah dikumpulkan secara keseluruhan
   const collectedProductIds = new Set();
   const collectedOrderIds = new Set();
@@ -403,6 +413,7 @@ const processNewMessageWithAI = async (
             siText4,
             siText5,
             orderStatusInstruction,
+            confirmCancelOrderInstruction,
           ],
           role: "model",
         },
@@ -424,7 +435,7 @@ const processNewMessageWithAI = async (
         if (functionName === "searchShoes") {
           functionArgs.excludeIds = Array.from(collectedProductIds);
         }
-        if (functionName === "getOrderStatus") {
+        if (functionName === "requestCancelOrder") {
           functionArgs.excludeOrderIds = Array.from(collectedOrderIds);
         }
 
@@ -463,9 +474,10 @@ const processNewMessageWithAI = async (
               response: { productData: resultFromTool.shoes },
             });
           } else if (
-            functionName === "getOrderStatus" &&
+            functionName === "requestCancelOrder" &&
             resultFromTool?.length > 0
           ) {
+            typeOrder = "requestCancelOrderData";
             resultFromTool.forEach((order) => {
               const id = order._id?.toString();
               if (id && !collectedOrderIds.has(id)) {
@@ -473,10 +485,10 @@ const processNewMessageWithAI = async (
                 collectedOrderIds.add(id); // Tambahkan ID ke set global
               }
             });
-            geminiResult.orders = resultFromTool;
+            geminiResult.requestCancelOrderData = resultFromTool;
             functionCallResultsForGemini.push({
               name: functionName,
-              response: { orderData: resultFromTool },
+              response: { requestCancelOrderData: resultFromTool },
             });
           }
         } else {
@@ -503,6 +515,7 @@ const processNewMessageWithAI = async (
               siText4,
               siText5,
               orderStatusInstruction,
+              confirmCancelOrderInstruction,
             ],
             role: "model",
           },
@@ -527,7 +540,12 @@ const processNewMessageWithAI = async (
           agenda,
           newMessageId,
           productData: accumulatedProductsForFrontend, // Kirimkan data produk unik
-          orderData: orderForFrontendData, // Kirimkan data order unik
+          orderData: {
+            loading: false,
+            type: typeOrder,
+            orders: orderForFrontendData,
+            isConfirmed: false,
+          }, // Kirimkan data order unik
         }
       );
 
@@ -545,7 +563,7 @@ const processNewMessageWithAI = async (
           agenda,
           newMessageId,
           productData: [],
-          orderData: [],
+          orderData: {},
         }
       );
       return response.text;
@@ -563,7 +581,7 @@ const processNewMessageWithAI = async (
         agenda,
         newMessageId,
         productData: [],
-        orderData: [],
+        orderData: {},
       }
     );
     return error;

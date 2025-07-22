@@ -10,6 +10,7 @@ const {
   getMessagesAround,
   getMediaMessagesAround,
   uploadMediaMessage,
+  confirmCancelOrder,
   // getBatchChatRoom
 } = require("../controllers/chatRoom");
 
@@ -40,6 +41,7 @@ router.post("/", getChatRoom);
 router.post("/upload-media-message", upload.single("file"), uploadMediaMessage);
 router.get("/stream", stream);
 router.get("/messages", getMessagesPagination);
+router.post("/confirm-cancel-order", confirmCancelOrder);
 router.get(
   "/messages/:chatRoomId/message/:messageId/around",
   getMessagesAround

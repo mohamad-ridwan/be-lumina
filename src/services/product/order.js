@@ -71,4 +71,43 @@ const getOrderStatus = async ({
     : [];
 };
 
-module.exports = { getOrderStatus };
+const requestCancelOrder = async ({ query, status, orderIds }) => {
+  if (!Array.isArray(orderIds) || orderIds.length === 0) {
+    return [];
+  }
+  const orders = await Order.find({
+    orderId: { $in: orderIds },
+    $nor: [
+      {
+        status: "cancel-requested",
+      },
+      {
+        status: "delivered",
+      },
+      {
+        status: "cancelled",
+      },
+    ],
+  });
+  return Array.isArray(orders)
+    ? orders.map(({ _doc }) => {
+        const status = () => {
+          if (_doc.status === "pending") {
+            return "Menunggu Pembayaran";
+          } else if (_doc.status === "processing") {
+            return "Diproses";
+          } else if (_doc.status === "shipped") {
+            return "Dikirim";
+          } else {
+            return "Status Tidak Diketahui";
+          }
+        };
+        return {
+          ..._doc,
+          status: status(),
+        };
+      })
+    : [];
+};
+
+module.exports = { getOrderStatus, requestCancelOrder };

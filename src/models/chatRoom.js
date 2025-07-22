@@ -43,7 +43,7 @@ const chatRoom = new Schema(
       type: Array,
     },
     orderData: {
-      type: Array,
+      type: Object,
     },
     reactions: [
       {
