@@ -16,6 +16,77 @@ const calculateOrderTotals = (cartItems) => {
   return { subtotal, shippingCost, totalAmount };
 };
 
+exports.createJobForResponseReqCancelOrder = async (req, res, next) => {
+  const { orderId, responseType } = req.query; // Mengambil orderId dari query string
+
+  try {
+    const agenda = req.app.locals.agenda; // Mengambil instance Agenda dari app.locals
+
+    if (!agenda) {
+      console.error("Agenda instance not found in app.locals.");
+      return res.status(500).json({
+        success: false,
+        message: "Job scheduler not initialized. Please try again later.",
+      });
+    }
+
+    const order = await Order.findOne({ orderId });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: `Order with ID ${orderId} not found.`,
+      });
+    }
+
+    // Pastikan order belum memiliki job ID yang aktif atau sedang diproses
+    // Anda bisa menambahkan logic di sini untuk mencegah duplikasi job
+    if (order.agendaJobId) {
+      console.log(
+        `Order ${orderId} already has an associated job ID: ${order.agendaJobId}`
+      );
+      // Anda bisa memilih untuk mengembalikan job ID yang sudah ada atau membuat yang baru
+      return res.status(200).json({
+        success: true,
+        message: `Job already exists for order ${orderId}.`,
+        agendaJobId: order.agendaJobId,
+      });
+    }
+
+    // 1. Buat (schedule) job Agenda.js
+    // Pastikan nama job 'responseCancelOrder' sudah didefinisikan dan memiliki handler
+    const job = await agenda.schedule(
+      "in 5 seconds", // Jadwalkan 5 detik dari sekarang
+      "responseCancelOrder", // Nama job yang akan dieksekusi
+      { orderId: order.orderId, responseType } // Data yang akan diteruskan ke job (gunakan _id Mongoose)
+    );
+
+    // Dapatkan ID job yang baru dibuat
+    const agendaJobId = job.attrs._id.toString();
+    console.log(`Agenda job '${agendaJobId}' scheduled for order ${orderId}.`);
+
+    // 2. Update dokumen Order dengan ID job Agenda.js
+    await Order.updateOne(
+      { orderId: order.orderId }, // Cari dokumen Order berdasarkan _id
+      { $set: { agendaJobId: agendaJobId } } // Set field agendaJobId
+      // Anda mungkin juga ingin menambahkan field lain seperti `lastJobScheduledAt: new Date()`
+    );
+    console.log(`Order ${orderId} updated with agendaJobId: ${agendaJobId}`);
+
+    // 3. Kembalikan ID job Agenda.js di response
+    return res.status(200).json({
+      success: true,
+      message: `Job to respond to cancel request for order ${orderId} created successfully.`,
+      agendaJobId: agendaJobId,
+    });
+  } catch (error) {
+    console.error("Error in createJobForResponseReqCancelOrder:", error);
+    // Menggunakan `next(error)` jika Anda memiliki middleware error handling terpusat
+    // Jika tidak, Anda bisa langsung mengirim respons error seperti ini:
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+};
+
 exports.getRequestCancelOrder = async (req, res, next) => {
   try {
     // 1. Ambil parameter page dan limit dari query string
@@ -27,7 +98,10 @@ exports.getRequestCancelOrder = async (req, res, next) => {
     const skip = (page - 1) * limit;
 
     // 3. Lakukan query dengan skip dan limit
-    const orders = await Order.find({ status: "cancel-requested" })
+    const orders = await Order.find({
+      status: "cancel-requested",
+      agendaJobId: { $exists: false },
+    })
       .skip(skip) // Lewati dokumen sesuai perhitungan
       .limit(limit) // Batasi jumlah dokumen yang dikembalikan
       .sort({ orderedAt: -1 }); // Opsional: Urutkan berdasarkan tanggal terbaru
@@ -36,6 +110,7 @@ exports.getRequestCancelOrder = async (req, res, next) => {
     // Ini penting untuk frontend agar bisa membangun kontrol paginasi (misal: total halaman)
     const totalOrders = await Order.countDocuments({
       status: "cancel-requested",
+      agendaJobId: { $exists: false },
     });
 
     // 5. Hitung total halaman

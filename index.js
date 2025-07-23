@@ -87,12 +87,16 @@ dbConnection()
       console.log("A user connected", socket.id);
       const socketId = socket.id;
 
-      agenda.define("sendMessageToCustomer", async (data) => {
+      agenda.define("sendMessageToCustomer", (data) => {
         const message = data.attrs.data;
         chatRoom.handleGetNewMessageForBot(message, io, socket, client, agenda);
       });
 
-      // app.locals.agenda = agenda;
+      agenda.define("responseCancelOrder", (data) => {
+        const order = data.attrs.data;
+      });
+
+      app.locals.agenda = agenda;
 
       // Jalankan agenda
       (async function () {

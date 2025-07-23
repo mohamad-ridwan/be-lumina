@@ -11,6 +11,7 @@ const orderSchema = new Schema(
       index: true, // Untuk memudahkan pencarian pesanan berdasarkan pengguna
     },
     // ID Pesanan Unik (untuk referensi eksternal, seperti URL berbagi)
+    agendaJobId: { type: String },
     orderId: {
       type: String,
       unique: true,
