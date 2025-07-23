@@ -16,6 +16,58 @@ const calculateOrderTotals = (cartItems) => {
   return { subtotal, shippingCost, totalAmount };
 };
 
+exports.getRequestCancelOrder = async (req, res, next) => {
+  try {
+    // 1. Ambil parameter page dan limit dari query string
+    // Pastikan nilai default jika tidak disediakan
+    const page = parseInt(req.query.page) || 1; // Default ke halaman 1
+    const limit = parseInt(req.query.limit) || 10; // Default ke 10 item per halaman
+
+    // 2. Hitung jumlah dokumen yang akan dilewati (skip)
+    const skip = (page - 1) * limit;
+
+    // 3. Lakukan query dengan skip dan limit
+    const orders = await Order.find({ status: "cancel-requested" })
+      .skip(skip) // Lewati dokumen sesuai perhitungan
+      .limit(limit) // Batasi jumlah dokumen yang dikembalikan
+      .sort({ orderedAt: -1 }); // Opsional: Urutkan berdasarkan tanggal terbaru
+
+    // 4. (Opsional tapi sangat direkomendasikan) Dapatkan total jumlah dokumen
+    // Ini penting untuk frontend agar bisa membangun kontrol paginasi (misal: total halaman)
+    const totalOrders = await Order.countDocuments({
+      status: "cancel-requested",
+    });
+
+    // 5. Hitung total halaman
+    const totalPages = Math.ceil(totalOrders / limit);
+
+    // 6. Kirim respons dengan data orders dan informasi paginasi
+    res.status(200).json({
+      success: true,
+      data:
+        orders.length === 0
+          ? []
+          : orders.map(({ _doc }) => ({
+              ..._doc,
+              status: "Permintaan Membatalkan",
+            })),
+      pagination: {
+        totalOrders,
+        totalPages,
+        currentPage: page,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1,
+        limit,
+      },
+    });
+  } catch (error) {
+    console.error("Error in getRequestCancelOrder:", error);
+    // Menggunakan `next(error)` jika Anda memiliki middleware error handling terpusat
+    // Jika tidak, Anda bisa langsung mengirim respons error seperti ini:
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+};
+
 exports.getOrdersByUserId = async (req, res, next) => {
   try {
     const { userId, status, page = 1, limit = 10 } = req.query; // Ambil userId, status, page, dan limit dari query

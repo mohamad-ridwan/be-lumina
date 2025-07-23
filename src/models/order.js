@@ -88,6 +88,10 @@ const orderSchema = new Schema(
       default: "pending",
       required: true,
     },
+    previousStatus: {
+      type: String,
+      enum: ["processing", "shipped"],
+    },
     // Tanggal dan Waktu
     orderedAt: {
       type: Date,

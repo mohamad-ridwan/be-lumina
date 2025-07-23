@@ -86,20 +86,21 @@ exports.confirmCancelOrder = async (req, res) => {
       const order = ordersMap.get(orderId);
 
       if (order) {
-        let newStatus;
+        let updateData = {};
         if (order.status === "pending") {
           // Jika statusnya 'pending' (Menunggu Pembayaran)
-          newStatus = "cancelled";
+          updateData.status = "cancelled";
         } else {
           // Jika statusnya selain 'pending'
-          newStatus = "cancel-requested";
+          updateData.status = "cancel-requested";
+          updateData.previousStatus = order.status;
           // Pastikan 'cancel-requested' ada di enum status skema Order Anda
         }
 
         try {
           const updatedOrder = await Order.findOneAndUpdate(
             { _id: order._id }, // Cari berdasarkan _id Order
-            { status: newStatus },
+            updateData,
             { new: true } // Mengembalikan dokumen yang sudah diperbarui
           ).lean();
 
