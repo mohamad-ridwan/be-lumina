@@ -94,6 +94,13 @@ dbConnection()
 
       agenda.define("responseCancelOrder", (data) => {
         const order = data.attrs.data;
+        chatRoom.handlePushNotifResponseCancelOrder(
+          order,
+          io,
+          socket,
+          client,
+          agenda
+        );
       });
 
       app.locals.agenda = agenda;

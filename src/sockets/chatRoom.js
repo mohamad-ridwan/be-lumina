@@ -1,6 +1,7 @@
 const chatRoomDB = require("../models/chatRoom");
 const chatsDB = require("../models/chats");
 const usersDB = require("../models/users");
+const Order = require("../models/order");
 const mongoose = require("mongoose");
 const dayjs = require("dayjs");
 require("dayjs/locale/id");
@@ -21,6 +22,7 @@ const {
   processNewMessageWithAI,
   getConversationHistoryForGemini,
 } = require("../utils/gemini");
+const genAI = require("../services/gemini");
 
 dayjs.extend(isToday);
 dayjs.extend(isYesterday);
@@ -132,6 +134,185 @@ const markMessageAsRead = async (message, io) => {
 //         unreadCount: newUnreadCount()
 //     });
 // }
+
+const handlePushNotifResponseCancelOrder = async (
+  orderDataFromJob, // Lebih spesifik namanya, ini adalah data yang diteruskan oleh Agenda job
+  io,
+  socket,
+  client, // ini sepertinya tidak digunakan di sini, tapi saya biarkan
+  agenda
+) => {
+  const { orderId: orderMongoId, responseType, adminId } = orderDataFromJob; // Ambil data dari object yang diteruskan Agenda
+
+  try {
+    // 1. Mengambil data order lengkap dari orderId (_id Mongoose)
+    let order = await Order.findOne({ orderId: orderMongoId }); // Menggunakan let karena akan diupdate
+
+    if (!order) {
+      console.warn(
+        `[PushNotif] Order with ID ${orderMongoId} not found. Cannot send notification.`
+      );
+      return; // Hentikan eksekusi jika order tidak ditemukan
+    }
+
+    // 2. Mengambil data user dari user ID di orderData
+    const user = await usersDB.findById(order.user); // order.user adalah ID pengguna
+
+    if (!user) {
+      console.warn(
+        `[PushNotif] User with ID ${order.user} for order ${orderMongoId} not found. Cannot send notification.`
+      );
+      return; // Hentikan eksekusi jika user tidak ditemukan
+    }
+
+    // --- Logic untuk Update Status Order dan Hapus agendaJobId ---
+    let newStatus;
+    let updateFields = {
+      $unset: { agendaJobId: "" }, // Hapus field agendaJobId
+    };
+
+    if (responseType === "approved") {
+      newStatus = "cancelled";
+      // Jika disetujui, tidak perlu previousStatus
+      updateFields.$set = { status: newStatus };
+    } else if (responseType === "rejected") {
+      // Jika ditolak, kembalikan ke previousStatus (asumsikan previousStatus ada di order object)
+      // Anda perlu memastikan 'previousStatus' ada di skema Order Anda
+      newStatus = order.previousStatus || "processing"; // Default ke 'processing' jika previousStatus tidak ada
+      updateFields.$set = { status: newStatus };
+    } else {
+      // Jika responseType tidak dikenal, bisa default ke 'cancel-requested' atau biarkan statusnya
+      console.warn(
+        `[PushNotif] Unknown responseType: ${responseType}. Order status not changed.`
+      );
+      newStatus = order.status; // Biarkan status tidak berubah
+    }
+
+    // Melakukan update pada order
+    // Gunakan findByIdAndUpdate untuk mendapatkan dokumen yang diperbarui
+    const updatedOrder = await Order.findByIdAndUpdate(
+      order._id,
+      updateFields,
+      { new: true } // Mengembalikan dokumen yang sudah diperbarui
+    );
+
+    // Pastikan update berhasil
+    if (!updatedOrder) {
+      console.error(`[PushNotif] Failed to update order ${order._id} status.`);
+      return;
+    }
+
+    // --- Variabel updatedOrders untuk dikirim ke GenAI atau respons lainnya ---
+    const updatedOrders = [updatedOrder.toObject()]; // Mengubah Mongoose document menjadi plain JS object
+    // Jika Anda punya lebih dari satu order yang diupdate dalam satu job,
+    // Anda bisa membuat array ini berisi semua order yang diupdate.
+    // Dalam kasus ini, karena hanya 1 order, kita buat array dengan 1 elemen.
+
+    // --- Logic untuk membuat dan mengirim notifikasi & interaksi GenAI ---
+    let notificationTitle = "";
+    let notificationBody = "";
+    let notificationIcon = "";
+    let responseInstructionParts = []; // Menggunakan array untuk parts GenAI
+
+    if (responseType === "approved") {
+      notificationTitle = "Pembatalan Pesanan Disetujui! ✅";
+      notificationBody = `Pesanan #${updatedOrder.orderId} Anda telah berhasil dibatalkan. Dana akan dikembalikan sesuai kebijakan.`;
+      notificationIcon = "order_cancel_approved_icon_url";
+
+      responseInstructionParts.push({
+        text: `Berikan informasi singkat pesanan tersebut telah berhasil dibatalkan sesuai dengan data yang diberikan seperti notifikasi. Fokus pada detail dari order yang dibatalkan.
+        
+        Sajikan informasi dalam element HTML dengan style inline CSS:
+        - Tanpa warna background dan tanpa border untuk div utama.
+        - Maksimal font-size: 14px.
+        - Jika status "cancelled", gunakan warna teks: oklch(57.7% 0.245 27.325).
+        - Untuk daftar, gunakan <ul style="list-style-type: disc; margin-left: 20px; padding: 0;">.
+        - Untuk daftar bersarang (anak), gunakan <ul style="list-style-type: circle; margin-left: 20px; padding: 0;">.
+        `,
+      });
+      // GenAI akan menerima data updatedOrder, jadi dia bisa membaca status 'cancelled'
+      // dan mengaplikasikan styling yang diminta.
+    } else if (responseType === "rejected") {
+      notificationTitle = "Pembatalan Pesanan Ditolak ❌";
+      notificationBody = `Pesanan #${updatedOrder.orderId} Anda tidak dapat dibatalkan saat ini. Silakan cek detail pesanan atau hubungi CS.`;
+      notificationIcon = "order_cancel_rejected_icon_url";
+
+      responseInstructionParts.push({
+        text: `Berikan informasi singkat bahwa permintaan pembatalan pesanan telah ditolak.
+        Sajikan informasi dalam format HTML dengan style inline CSS:
+        - Tanpa warna background dan tanpa border untuk div utama.
+        - Maksimal font-size: 14px.
+        `,
+      });
+    } else {
+      notificationTitle = "Update Pembatalan Pesanan";
+      notificationBody = `Status permintaan pembatalan pesanan #${updatedOrder.orderId} Anda telah diperbarui.`;
+      notificationIcon = "default_notification_icon_url";
+
+      responseInstructionParts.push({
+        text: `Berikan informasi singkat bahwa status permintaan pembatalan pesanan telah diperbarui.
+        Sajikan informasi dalam format HTML dengan style inline CSS:
+        - Tanpa warna background dan tanpa border untuk div utama.
+        - Maksimal font-size: 14px.
+        `,
+      });
+    }
+
+    // --- Memanggil GenAI dengan data order yang telah diperbarui ---
+    // Penting: contents harus array of Part. Jika Anda mengirim JSON string, itu salah.
+    // Gunakan functionResponse jika ini adalah respons dari tool yang dipanggil oleh model.
+    // Jika ini adalah input dari sistem untuk model agar menghasilkan teks, gunakan text.
+
+    // Asumsi: Anda ingin model AI untuk GENERATE TEKS RESPON berdasarkan updatedOrder
+    const content = await genAI.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [
+        {
+          role: "user", // AI sebagai asisten, user memberikan informasi
+          parts: [
+            ...responseInstructionParts,
+            {
+              text: `Data pesanan yang telah diperbarui: ${JSON.stringify(
+                updatedOrders
+              )}`,
+            },
+          ],
+        },
+      ],
+      // systemInstruction seharusnya juga berupa array of Parts.
+      // Jika Anda hanya punya satu instruksi, bisa langsung di `contents` dengan role 'user'
+      // atau di 'systemInstruction' dengan format yang benar.
+      // Untuk menjaga simplicity, saya pindahkan instruksi ke contents dengan role 'user'.
+      // config: {
+      //   systemInstruction: [responseInstruction], // responseInstruction harus dalam format { text: "..." }
+      // },
+    });
+
+    const objectAgendaId = new mongoose.Types.ObjectId(order.agendaJobId);
+    await agenda.cancel({ _id: objectAgendaId });
+
+    const aiResponse = content.text; // Ambil teks respons dari AI
+    console.log("AI Generated Response:", aiResponse);
+
+    // Data notifikasi yang akan dikirim ke klien melalui Socket.IO
+    const notificationPayload = {
+      title: notificationTitle,
+      body: notificationBody,
+      icon: notificationIcon,
+      type: "ORDER_CANCEL_RESPONSE", // Tipe notifikasi untuk identifikasi di frontend
+      orderId: updatedOrder.orderId,
+      status: updatedOrder.status, // Status order yang SUDAH diperbarui
+      timestamp: new Date().toISOString(),
+      aiMessage: aiResponse, // Tambahkan respons AI ke payload notifikasi
+    };
+  } catch (error) {
+    console.error(
+      `[PushNotif] Error handling push notification for order ${orderMongoId}:`,
+      error
+    );
+    // Anda mungkin ingin mencatat error ini lebih detail atau mencoba mekanisme retry
+  }
+};
 
 const handleSendMessageFromAI = async (
   generatedText,
@@ -1431,6 +1612,7 @@ const chatRoom = {
   handleGetSendMessage,
   markMessageAsRead,
   handleGetNewMessageForBot,
+  handlePushNotifResponseCancelOrder,
 };
 
 module.exports = {

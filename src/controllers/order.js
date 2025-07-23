@@ -17,7 +17,7 @@ const calculateOrderTotals = (cartItems) => {
 };
 
 exports.createJobForResponseReqCancelOrder = async (req, res, next) => {
-  const { orderId, responseType } = req.query; // Mengambil orderId dari query string
+  const { orderId, responseType, adminId } = req.query; // Mengambil orderId dari query string
 
   try {
     const agenda = req.app.locals.agenda; // Mengambil instance Agenda dari app.locals
@@ -58,7 +58,7 @@ exports.createJobForResponseReqCancelOrder = async (req, res, next) => {
     const job = await agenda.schedule(
       "in 5 seconds", // Jadwalkan 5 detik dari sekarang
       "responseCancelOrder", // Nama job yang akan dieksekusi
-      { orderId: order.orderId, responseType } // Data yang akan diteruskan ke job (gunakan _id Mongoose)
+      { orderId: order.orderId, responseType, adminId } // Data yang akan diteruskan ke job (gunakan _id Mongoose)
     );
 
     // Dapatkan ID job yang baru dibuat
