@@ -23,6 +23,7 @@ const {
   getConversationHistoryForGemini,
 } = require("../utils/gemini");
 const genAI = require("../services/gemini");
+const { templateSendMessage } = require("../helpers/sendMessage");
 
 dayjs.extend(isToday);
 dayjs.extend(isYesterday);
@@ -203,7 +204,21 @@ const handlePushNotifResponseCancelOrder = async (
     }
 
     // --- Variabel updatedOrders untuk dikirim ke GenAI atau respons lainnya ---
-    const updatedOrders = [updatedOrder.toObject()]; // Mengubah Mongoose document menjadi plain JS object
+    const updatedOrders = [updatedOrder.toObject()].map((order) => {
+      const status = () => {
+        if (order.status === "cancelled") {
+          return "Dibatalkan";
+        } else if (order.status === "processing") {
+          return "Diproses";
+        } else if (order.status === "shipped") {
+          return "Dikirim";
+        }
+      };
+      return {
+        ...order,
+        status: status(),
+      };
+    }); // Mengubah Mongoose document menjadi plain JS object
     // Jika Anda punya lebih dari satu order yang diupdate dalam satu job,
     // Anda bisa membuat array ini berisi semua order yang diupdate.
     // Dalam kasus ini, karena hanya 1 order, kita buat array dengan 1 elemen.
@@ -293,6 +308,93 @@ const handlePushNotifResponseCancelOrder = async (
 
     const aiResponse = content.text; // Ambil teks respons dari AI
     console.log("AI Generated Response:", aiResponse);
+
+    // implement send messages
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    const userIds = [adminId, user.id];
+    const chatsCurrently = await chatsDB.findOne({
+      userIds: { $size: 2, $all: userIds },
+    });
+
+    let currentChat = null;
+    if (!chatsCurrently) {
+      async function createChatroomAndChats() {
+        try {
+          const chatRoomId = generateRandomId();
+          const chatId = generateRandomId();
+          const creationDate = Date.now();
+
+          // if chat is empty
+          const newChats = new chatsDB({
+            chatId,
+            chatRoomId,
+            unreadCount: {
+              [`${userIds[0]}`]: 0,
+              [`${userIds[1]}`]: 0,
+            },
+            latestMessageTimestamp: 0,
+            chatCreationDate: creationDate,
+            userIds: userIds,
+          });
+
+          await newChats.save({ session });
+
+          await session.commitTransaction();
+          session.endSession();
+
+          return {
+            message: "Chat room data",
+            ...newChats?._doc,
+          };
+        } catch (error) {
+          await session.abortTransaction();
+          session.endSession();
+          return error;
+        }
+      }
+
+      const result = await createChatroomAndChats();
+      if (!result?.chatId) {
+        next(result);
+        return;
+      }
+      currentChat = result;
+    } else {
+      currentChat = chatsCurrently;
+      await session.abortTransaction();
+      session.endSession();
+    }
+
+    const chatRoomId = currentChat?.chatRoomId;
+    const chatId = currentChat?.chatId;
+
+    const senderUserId = adminId;
+    const recipientProfileId = user.id;
+
+    const latestMessageTimestamp = Date.now();
+    const messageId = generateRandomId(15);
+
+    await templateSendMessage({
+      chatRoomId,
+      chatId,
+      senderUserId,
+      recipientProfileId,
+      latestMessageTimestamp,
+      messageId,
+      status: "UNREAD",
+      messageType: "text",
+      textMessage: aiResponse,
+      orderData: {
+        type: "confirmCancelOrderData",
+        orders: updatedOrders,
+      },
+      role: "model",
+      client,
+      io,
+      recipientProfileId,
+    });
 
     // Data notifikasi yang akan dikirim ke klien melalui Socket.IO
     const notificationPayload = {
