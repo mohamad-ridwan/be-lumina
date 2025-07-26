@@ -2,6 +2,10 @@ const mongoose = require("mongoose");
 const Cart = require("../models/cart"); // Pastikan path ini benar ke model Cart Anda
 const Shoe = require("../models/shoes"); // Pastikan path ini benar ke model Shoe Anda
 const Order = require("../models/order"); // Pastikan path ini benar ke model Order Anda
+const {
+  agenda_name_responseCancelOrder,
+  agenda_name_paymentNotifResponse,
+} = require("../utils/agenda");
 
 // Helper function to calculate total prices from cart items
 // This can be reused if needed for other places, or kept inline for simplicity
@@ -14,6 +18,71 @@ const calculateOrderTotals = (cartItems) => {
   const shippingCost = 0; // Anda bisa atur ini dari config atau input
   const totalAmount = subtotal + shippingCost;
   return { subtotal, shippingCost, totalAmount };
+};
+
+exports.paymentOrder = async (req, res, next) => {
+  const { orderId } = req.query; // Mengambil orderId dari query string
+
+  try {
+    const agenda = req.app.locals.agenda;
+
+    // 1. Cari order berdasarkan orderId
+    // Kita akan mencari order yang statusnya 'pending' (menunggu pembayaran)
+    const order = await Order.findOne({
+      orderId: orderId,
+      status: "pending", // Hanya proses order yang statusnya masih "pending"
+    });
+
+    // 2. Jika order tidak ditemukan atau statusnya bukan 'pending'
+    if (!order) {
+      const existingOrder = await Order.findOne({ orderId: orderId }); // Cek apakah ordernya ada tapi statusnya beda
+      if (!existingOrder) {
+        return res.status(404).json({
+          success: false,
+          message: `Order with ID ${orderId} not found.`,
+        });
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: `Order with ID ${orderId} cannot be processed for payment. Current status is '${existingOrder.status}'. Only 'pending' orders can be updated to 'processing'.`,
+        });
+      }
+    }
+
+    // 4. Update status order menjadi "processing"
+    const updatedOrder = await Order.findOneAndUpdate(
+      { _id: order._id }, // Cari berdasarkan _id Mongoose dari order yang ditemukan
+      {
+        status: "processing", // Ubah status menjadi "processing"
+      },
+      { new: true } // Mengembalikan dokumen yang sudah diperbarui
+    );
+
+    // 5. Pastikan update berhasil
+    if (!updatedOrder) {
+      // Ini seharusnya tidak terjadi jika findOneAndUpdat di atas berhasil menemukan order,
+      // tetapi sebagai safety check.
+      return res.status(500).json({
+        success: false,
+        message: "Failed to update order status. Please try again.",
+      });
+    }
+
+    await agenda.schedule("in 1 seconds", agenda_name_paymentNotifResponse, {
+      orderId: order.orderId,
+    });
+
+    // 6. Kirim respons sukses dengan data order yang telah diperbarui
+    return res.status(200).json({
+      success: true,
+      message: `Payment confirmed for order ${orderId}. Order status updated to 'processing'.`,
+      data: updatedOrder,
+    });
+  } catch (error) {
+    console.error("Error in paymentOrder:", error);
+    // Menggunakan `next(error)` jika Anda memiliki middleware error handling terpusat
+    res.status(500).json({ success: false, error: "Server error" });
+  }
 };
 
 exports.createJobForResponseReqCancelOrder = async (req, res, next) => {
@@ -57,7 +126,7 @@ exports.createJobForResponseReqCancelOrder = async (req, res, next) => {
     // Pastikan nama job 'responseCancelOrder' sudah didefinisikan dan memiliki handler
     const job = await agenda.schedule(
       "in 5 seconds", // Jadwalkan 5 detik dari sekarang
-      "responseCancelOrder", // Nama job yang akan dieksekusi
+      agenda_name_responseCancelOrder, // Nama job yang akan dieksekusi
       { orderId: order.orderId, responseType, adminId } // Data yang akan diteruskan ke job (gunakan _id Mongoose)
     );
 

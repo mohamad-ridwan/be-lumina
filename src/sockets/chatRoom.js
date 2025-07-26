@@ -24,6 +24,10 @@ const {
 } = require("../utils/gemini");
 const genAI = require("../services/gemini");
 const { templateSendMessage } = require("../helpers/sendMessage");
+const {
+  agenda_name_sendMessageToCustomer,
+  agenda_name_paymentNotifResponse,
+} = require("../utils/agenda");
 
 dayjs.extend(isToday);
 dayjs.extend(isYesterday);
@@ -307,7 +311,10 @@ const handlePushNotifResponseCancelOrder = async (
     await agenda.cancel({ _id: objectAgendaId });
 
     const aiResponse = content.text; // Ambil teks respons dari AI
-    console.log("AI Generated Response:", aiResponse);
+    console.log(
+      "AI Generated Response 'Notif Response Cancel Order':",
+      aiResponse
+    );
 
     // implement send messages
     const session = await mongoose.startSession();
@@ -397,16 +404,16 @@ const handlePushNotifResponseCancelOrder = async (
     });
 
     // Data notifikasi yang akan dikirim ke klien melalui Socket.IO
-    const notificationPayload = {
-      title: notificationTitle,
-      body: notificationBody,
-      icon: notificationIcon,
-      type: "ORDER_CANCEL_RESPONSE", // Tipe notifikasi untuk identifikasi di frontend
-      orderId: updatedOrder.orderId,
-      status: updatedOrder.status, // Status order yang SUDAH diperbarui
-      timestamp: new Date().toISOString(),
-      aiMessage: aiResponse, // Tambahkan respons AI ke payload notifikasi
-    };
+    // const notificationPayload = {
+    //   title: notificationTitle,
+    //   body: notificationBody,
+    //   icon: notificationIcon,
+    //   type: "ORDER_CANCEL_RESPONSE", // Tipe notifikasi untuk identifikasi di frontend
+    //   orderId: updatedOrder.orderId,
+    //   status: updatedOrder.status, // Status order yang SUDAH diperbarui
+    //   timestamp: new Date().toISOString(),
+    //   aiMessage: aiResponse, // Tambahkan respons AI ke payload notifikasi
+    // };
   } catch (error) {
     console.error(
       `[PushNotif] Error handling push notification for order ${orderMongoId}:`,
@@ -684,7 +691,7 @@ const createScheduleAIMessage = async (message, io, socket, agenda, client) => {
 
   const schedule = await agenda.schedule(
     "in 5 seconds",
-    "sendMessageToCustomer",
+    agenda_name_sendMessageToCustomer,
     message
   );
   await client.set(
@@ -1709,12 +1716,183 @@ const handleGetSendMessage = async (message, io, socket, client, agenda) => {
   }
 };
 
+const handlePushNotifPaymentResponse = async (
+  { orderId, agenda_id },
+  io,
+  socket,
+  client,
+  agenda
+) => {
+  try {
+    const order = await Order.findOne({ orderId });
+
+    if (!order) {
+      console.log(
+        `Order not found with orderId "${orderId}" in push notif payment response cases`
+      );
+      return;
+    }
+    const user = await usersDB.findOne({ _id: order.user });
+    if (!user) {
+      console.log(
+        `User not found with _id "${order.user}" in push notif payment response cases `
+      );
+      return;
+    }
+
+    const instruction = {
+      text: `
+      AI wajib memberikan instruksi ini seperti layaknya deskripsi notifikasi untuk Pelanggan,
+
+      Berikan informasi singkat pesanan tersebut telah berhasil melakukan "Pembayaran" dan pesanan Anda sedang <span style="color: oklch(42.4% 0.199 265.638); font-size: 13px;">"Diproses"</span>.
+        
+        Gunakan informasi ini dengan style inline CSS:
+        - Tanpa warna background dan tanpa border untuk div utama.
+        - Maksimal font-size: 14px.
+        - Jika status "cancelled", gunakan warna teks: oklch(57.7% 0.245 27.325).
+        - Untuk daftar, gunakan <ul style="list-style-type: disc; margin-left: 20px; padding: 0;">.
+        - Untuk daftar bersarang (anak), gunakan <ul style="list-style-type: circle; margin-left: 20px; padding: 0;">.
+        
+        <br/><br/>
+        Berikan keterangan di akhir percakapan seperti :
+        Mohon menunggu kami akan memberitahukan Anda saat pesanan Anda kami kirim.
+        `,
+    };
+
+    const content = await genAI.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [
+        {
+          role: "user", // AI sebagai asisten, user memberikan informasi
+          parts: [
+            {
+              text: `Data pesanan yang telah "Diproses": ${JSON.stringify(
+                order._doc
+              )}`,
+            },
+          ],
+        },
+      ],
+      config: {
+        systemInstruction: [instruction],
+      },
+    });
+
+    const objectAgendaId = new mongoose.Types.ObjectId(agenda_id);
+    await agenda.cancel({ _id: objectAgendaId });
+
+    const aiResponse = content.text; // Ambil teks respons dari AI
+    console.log(
+      "AI Generated Response 'Push notif payment response':",
+      aiResponse
+    );
+
+    const admin = await usersDB.findOne({ role: "admin" });
+
+    // implement send messages
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    const adminId = admin.id;
+    const userId = user.id;
+
+    const userIds = [adminId, userId];
+    const chatsCurrently = await chatsDB.findOne({
+      userIds: { $size: 2, $all: userIds },
+    });
+
+    let currentChat = null;
+    if (!chatsCurrently) {
+      async function createChatroomAndChats() {
+        try {
+          const chatRoomId = generateRandomId();
+          const chatId = generateRandomId();
+          const creationDate = Date.now();
+
+          // if chat is empty
+          const newChats = new chatsDB({
+            chatId,
+            chatRoomId,
+            unreadCount: {
+              [`${userIds[0]}`]: 0,
+              [`${userIds[1]}`]: 0,
+            },
+            latestMessageTimestamp: 0,
+            chatCreationDate: creationDate,
+            userIds: userIds,
+          });
+
+          await newChats.save({ session });
+
+          await session.commitTransaction();
+          session.endSession();
+
+          return {
+            message: "Chat room data",
+            ...newChats?._doc,
+          };
+        } catch (error) {
+          await session.abortTransaction();
+          session.endSession();
+          return error;
+        }
+      }
+
+      const result = await createChatroomAndChats();
+      if (!result?.chatId) {
+        next(result);
+        return;
+      }
+      currentChat = result;
+    } else {
+      currentChat = chatsCurrently;
+      await session.abortTransaction();
+      session.endSession();
+    }
+
+    const chatRoomId = currentChat?.chatRoomId;
+    const chatId = currentChat?.chatId;
+
+    const senderUserId = adminId;
+    const recipientProfileId = userId;
+
+    const latestMessageTimestamp = Date.now();
+    const messageId = generateRandomId(15);
+
+    await templateSendMessage({
+      chatRoomId,
+      chatId,
+      senderUserId,
+      recipientProfileId,
+      latestMessageTimestamp,
+      messageId,
+      status: "UNREAD",
+      messageType: "text",
+      textMessage: aiResponse,
+      orderData: {
+        type: agenda_name_paymentNotifResponse,
+        orders: [
+          {
+            ...order._doc,
+            status: "Diproses",
+          },
+        ],
+      },
+      role: "model",
+      client,
+      io,
+      recipientProfileId,
+    });
+  } catch (error) {}
+};
+
 const chatRoom = {
   handleDisconnected,
   handleGetSendMessage,
   markMessageAsRead,
   handleGetNewMessageForBot,
   handlePushNotifResponseCancelOrder,
+  handlePushNotifPaymentResponse,
 };
 
 module.exports = {

@@ -12,6 +12,11 @@ const { usersSocket } = require("./src/sockets/users");
 const { chatsSocket } = require("./src/sockets/chats");
 const { Agenda } = require("@hokify/agenda");
 const { initializeEmbeddingPipeline } = require("./src/utils/embeddings");
+const {
+  agenda_name_sendMessageToCustomer,
+  agenda_name_responseCancelOrder,
+  agenda_name_paymentNotifResponse,
+} = require("./src/utils/agenda");
 
 const origin = [
   "https://lumina-id.web.app",
@@ -87,15 +92,27 @@ dbConnection()
       console.log("A user connected", socket.id);
       const socketId = socket.id;
 
-      agenda.define("sendMessageToCustomer", (data) => {
+      agenda.define(agenda_name_sendMessageToCustomer, (data) => {
         const message = data.attrs.data;
         chatRoom.handleGetNewMessageForBot(message, io, socket, client, agenda);
       });
 
-      agenda.define("responseCancelOrder", (data) => {
+      agenda.define(agenda_name_responseCancelOrder, (data) => {
         const order = data.attrs.data;
         chatRoom.handlePushNotifResponseCancelOrder(
           order,
+          io,
+          socket,
+          client,
+          agenda
+        );
+      });
+
+      agenda.define(agenda_name_paymentNotifResponse, (data) => {
+        const orderId = data.attrs.data?.orderId ?? null;
+        const _id = data.attrs?._id ?? null;
+        chatRoom.handlePushNotifPaymentResponse(
+          { orderId, agenda_id: _id },
           io,
           socket,
           client,

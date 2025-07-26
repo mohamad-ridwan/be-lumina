@@ -6,6 +6,7 @@ const {
   getOrdersByUserId,
   getRequestCancelOrder,
   createJobForResponseReqCancelOrder,
+  paymentOrder,
 } = require("../controllers/order");
 
 router.post("/create-order", createOrder);
@@ -16,5 +17,6 @@ router.post(
   "/add-job-response-cancel-order",
   createJobForResponseReqCancelOrder
 );
+router.post("/payment-order", paymentOrder);
 
 module.exports = router;
