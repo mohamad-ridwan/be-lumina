@@ -1,7 +1,6 @@
 const mongoose = require("mongoose");
 const chats = require("../models/chats");
 const chatRoom = require("../models/chatRoom");
-const usersDB = require("../models/users");
 const { HTTP_STATUS_CODE } = require("../constant");
 const { generateRandomId } = require("../helpers/generateRandomId");
 const Order = require("../models/order");
@@ -15,6 +14,7 @@ const {
   isUserInRoom,
 } = require("../helpers/general");
 const genAI = require("../services/gemini");
+const { templateSendMessage } = require("../helpers/sendMessage");
 
 exports.confirmCancelOrder = async (req, res) => {
   const { messageId, profileId, recipientId } = req.body;
@@ -181,159 +181,28 @@ Untuk list Anda bisa memberikan style <ul> element seperti :
     const chatRoomId = chatRoomCurrently?.chatRoomId;
     const chatId = chatRoomCurrently?.chatId;
 
-    const headerMessageToday = await getTodayHeader(chatId, chatRoomId);
+    const latestMessageTimestamp = Date.now();
+    const newMessageId = generateRandomId(15);
+    const recipientProfileId = profileId;
 
-    let timeId;
-    let headerMessage;
-    let headerId;
-    let latestMessageTimestamp = Date.now();
-
-    if (!headerMessageToday) {
-      // ❌ Belum ada header → buat header baru
-      timeId = generateRandomId(15);
-      headerId = generateRandomId(15);
-
-      headerMessage = new chatRoom({
-        chatId,
-        chatRoomId,
-        messageId: headerId,
-        isHeader: true,
-        senderUserId: senderUserId,
-        latestMessageTimestamp: latestMessageTimestamp,
-        timeId,
-      });
-      await headerMessage.save();
-    } else {
-      timeId = headerMessageToday.timeId;
-      headerId = headerMessageToday.messageId;
-    }
-
-    const chatRoomData = {
-      chatId,
+    await templateSendMessage({
       chatRoomId,
-      messageId: generateRandomId(15),
-      senderUserId: senderUserId,
+      chatId,
+      senderUserId,
+      recipientProfileId,
+      latestMessageTimestamp,
+      messageId: newMessageId,
+      status: "UNREAD",
       messageType: "text",
       textMessage: content.text,
-      latestMessageTimestamp: latestMessageTimestamp,
-      status: "UNREAD",
-      timeId,
+      orderData: {
+        type: "confirmCancelOrderData",
+        orders: updatedOrders,
+      },
       role: "model",
-    };
-
-    chatRoomData.orderData = {
-      type: "confirmCancelOrderData",
-      orders: updatedOrders,
-    };
-
-    const newChatRoom = new chatRoom(chatRoomData);
-    await newChatRoom.save();
-
-    // Update unread count
-    const chatsCurrently = await chats.findOne({ chatRoomId, chatId });
-    const secondUserId = Object.keys(chatsCurrently?.unreadCount || {}).find(
-      (id) => id !== senderUserId
-    );
-    const currentUnreadCount = chatsCurrently?.unreadCount?.[secondUserId] || 0;
-
-    const isSecondUserInRoom = await isUserInRoom(
-      chatId,
-      chatRoomId,
-      secondUserId,
-      client
-    );
-
-    const newUnreadCount = {
-      [senderUserId]: 0,
-      [secondUserId]: isSecondUserInRoom ? 0 : currentUnreadCount + 1,
-    };
-
-    // Update latestMessage sebagai array
-    let updatedLatestMessages = Array.isArray(chatsCurrently.latestMessage)
-      ? [...chatsCurrently.latestMessage]
-      : [];
-
-    const latestMessageWithUserId1 = {
-      ...chatRoomData,
-      productData: null,
-      orderData: chatRoomData.orderData,
-      userId: chatsCurrently.userIds[0],
-      timeId,
-    };
-    const latestMessageWithUserId2 = {
-      ...chatRoomData,
-      productData: null,
-      orderData: chatRoomData.orderData,
-      userId: chatsCurrently.userIds[1],
-      timeId,
-    };
-
-    const existingIndexUserId1 = updatedLatestMessages.findIndex(
-      (item) => item.userId === latestMessageWithUserId1.userId
-    );
-    const existingIndexUserId2 = updatedLatestMessages.findIndex(
-      (item) => item.userId === latestMessageWithUserId2.userId
-    );
-
-    if (existingIndexUserId1 !== -1) {
-      updatedLatestMessages[existingIndexUserId1] = latestMessageWithUserId1;
-    } else {
-      updatedLatestMessages.push(latestMessageWithUserId1);
-    }
-    if (existingIndexUserId2 !== -1) {
-      updatedLatestMessages[existingIndexUserId2] = latestMessageWithUserId2;
-    } else {
-      updatedLatestMessages.push(latestMessageWithUserId2);
-    }
-
-    updatedLatestMessages = updatedLatestMessages.filter(
-      (item) => item?.userId
-    );
-
-    await chats.updateOne(
-      { chatRoomId, chatId },
-      {
-        unreadCount: newUnreadCount,
-        latestMessage: updatedLatestMessages,
-      },
-      { new: true }
-    );
-    const senderUserProfile = await usersDB.findOne({ id: senderUserId });
-
-    if (headerMessage?.messageId) {
-      io.emit("newMessage", {
-        chatId,
-        chatRoomId,
-        eventType: "send-message",
-        recipientProfileId: profileId,
-        timeId,
-        messageId: headerMessage.messageId,
-        isHeader: true,
-        latestMessageTimestamp: headerMessage.latestMessageTimestamp,
-        isFromMedia: null,
-        senderUserId: senderUserId,
-      });
-    }
-
-    io.emit("newMessage", {
-      chatId,
-      chatRoomId,
-      eventType: "send-message",
-      username: senderUserProfile?.username,
-      image: senderUserProfile?.image,
-      imgCropped: senderUserProfile?.imgCropped,
-      thumbnail: senderUserProfile?.thumbnail,
-      latestMessage: updatedLatestMessages,
-      unreadCount: newUnreadCount,
-      isFromMedia: null,
-      timeId,
-      headerId,
-      recipientProfileId: profileId,
-      senderUserId: senderUserId,
-      confirmCancelOrder: {
-        messageId,
-        isConfirmed: true,
-      },
+      client,
+      io,
+      recipientProfileId,
     });
 
     return res.json({
