@@ -690,7 +690,7 @@ const createScheduleAIMessage = async (message, io, socket, agenda, client) => {
   }
 
   const schedule = await agenda.schedule(
-    "in 5 seconds",
+    "in 1 seconds",
     agenda_name_sendMessageToCustomer,
     message
   );
