@@ -169,6 +169,7 @@ exports.getRequestCancelOrder = async (req, res, next) => {
     // 3. Lakukan query dengan skip dan limit
     const orders = await Order.find({
       status: "cancel-requested",
+      previousStatus: "shipped",
       agendaJobId: { $exists: false },
     })
       .skip(skip) // Lewati dokumen sesuai perhitungan
@@ -179,6 +180,7 @@ exports.getRequestCancelOrder = async (req, res, next) => {
     // Ini penting untuk frontend agar bisa membangun kontrol paginasi (misal: total halaman)
     const totalOrders = await Order.countDocuments({
       status: "cancel-requested",
+      previousStatus: "shipped",
       agendaJobId: { $exists: false },
     });
 

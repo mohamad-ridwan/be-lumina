@@ -16,6 +16,7 @@ const {
   agenda_name_sendMessageToCustomer,
   agenda_name_responseCancelOrder,
   agenda_name_paymentNotifResponse,
+  agenda_name_automaticOrderCancelOfProcessingStatus,
 } = require("./src/utils/agenda");
 
 const origin = [
@@ -119,6 +120,21 @@ dbConnection()
           agenda
         );
       });
+
+      agenda.define(
+        agenda_name_automaticOrderCancelOfProcessingStatus,
+        (data) => {
+          const orderId = data.attrs.data?.orderId ?? null;
+          const _id = data.attrs?._id ?? null;
+          chatRoom.handleAutomaticCancelOrderOfProcessingStatus(
+            { orderId, agenda_id: _id },
+            io,
+            socket,
+            client,
+            agenda
+          );
+        }
+      );
 
       app.locals.agenda = agenda;
 

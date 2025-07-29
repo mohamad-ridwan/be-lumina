@@ -27,7 +27,11 @@ const { templateSendMessage } = require("../helpers/sendMessage");
 const {
   agenda_name_sendMessageToCustomer,
   agenda_name_paymentNotifResponse,
+  agenda_name_automaticOrderCancelOfProcessingStatus,
 } = require("../utils/agenda");
+const {
+  automatedCancelOrderOfProcessingStatusTools,
+} = require("../tools/order");
 
 dayjs.extend(isToday);
 dayjs.extend(isYesterday);
@@ -244,7 +248,6 @@ const handlePushNotifResponseCancelOrder = async (
         Sajikan informasi dalam element HTML dengan style inline CSS:
         - Tanpa warna background dan tanpa border untuk div utama.
         - Maksimal font-size: 14px.
-        - Jika status "cancelled", gunakan warna teks: oklch(57.7% 0.245 27.325).
         - Untuk daftar, gunakan <ul style="list-style-type: disc; margin-left: 20px; padding: 0;">.
         - Untuk daftar bersarang (anak), gunakan <ul style="list-style-type: circle; margin-left: 20px; padding: 0;">.
         `,
@@ -1883,7 +1886,339 @@ const handlePushNotifPaymentResponse = async (
       io,
       recipientProfileId,
     });
-  } catch (error) {}
+  } catch (error) {
+    console.log("Error push notify payment response : ", error);
+  }
+};
+
+const handleAutomaticCancelOrderOfProcessingStatus = async (
+  { orderId: orderPublicId, agenda_id }, // Rename orderId to orderPublicId to avoid confusion with MongoDB _id
+  io,
+  socket, // Ini sepertinya tidak digunakan di sini, tapi saya biarkan
+  client, // Ini sepertinya tidak digunakan di sini, tapi saya biarkan
+  agenda
+) => {
+  let responseMessage = ""; // Variabel untuk menyimpan pesan respons
+
+  try {
+    const order = await Order.findOne({ orderId: orderPublicId });
+
+    if (!order) {
+      console.log(
+        `Order not found with orderId "${orderPublicId}" in automatic cancel order processing status handler.`
+      );
+      responseMessage = `Order with ID ${orderPublicId} not found.`;
+      // Anda mungkin ingin mengirim notifikasi admin di sini
+      return; // Hentikan eksekusi
+    }
+
+    const user = await usersDB.findById(order.user); // Use findById as order.user is likely a MongoDB _id
+    if (!user) {
+      console.log(
+        `User not found with _id "${order.user}" for order "${orderPublicId}" in automatic cancel order processing status handler.`
+      );
+      responseMessage = `User for order ${orderPublicId} not found.`;
+      // Anda mungkin ingin mengirim notifikasi admin di sini
+      return; // Hentikan eksekusi
+    }
+
+    // Hitung waktu sejak order berstatus "processing"
+    // Asumsi 'processedAt' adalah field timestamp saat order menjadi 'processing'
+    // Jika tidak ada, Anda bisa menggunakan 'updatedAt' atau 'orderedAt' dan menghitung selisihnya
+    const timeSinceProcessedMinutes = order.processedAt
+      ? Math.floor((new Date() - order.processedAt) / (1000 * 60))
+      : Math.floor((new Date() - order.createdAt) / (1000 * 60)); // Fallback jika processedAt tidak ada
+
+    // Alasan pelanggan diasumsikan ada di field order.customerReason atau sejenisnya
+    const customerReason =
+      order.cancelReason || "Tidak ada alasan spesifik diberikan";
+
+    const instruction = {
+      text: `Anda adalah sistem otomatis untuk validasi kelayakan pembatalan pesanan pelanggan. Tugas Anda adalah menentukan apakah suatu pesanan memenuhi syarat untuk dibatalkan berdasarkan alasan yang diberikan pelanggan dan waktu sejak pesanan tersebut berstatus "Diproses"`,
+    };
+
+    const suggestedPrompt = {
+      text: `Untuk melakukan validasi, ikuti langkah-langkah berikut:
+
+      1. **Periksa Alasan Pelanggan:**
+         - Jika alasan pelanggan yaitu terindentifikasi spam seperti kalimat yang tidak jelas dan tidak dapat dipahami, pesanan TIDAK DAPAT dibatalkan. (Gunakan rejectionType: "spam_reason")
+         - Jika alasan pelanggan adalah "Produk tidak cocok" atau "Salah memilih produk", pesanan DAPAT dibatalkan.
+         - Jika alasan pelanggan berbeda dari yang disebutkan di atas, Anda harus meminta klarifikasi lebih lanjut. (Gunakan rejectionType: "clarification_needed" dan sertakan detail klarifikasi)
+         - Jika alasan pelanggan berupa laporan bahwa pesanan tersebut memiliki arti melaporkan terjadi adanya spam seperti contoh : Spam (Pesanan tidak saya buat). maka pesanan DAPAT dibatalkan.
+
+      2. **Periksa Waktu Sejak Pesanan Diproses:**
+         - Jika waktu sejak pesanan berstatus "Diproses" lebih dari 30 menit, pesanan TIDAK DAPAT dibatalkan. (Gunakan rejectionType: "time_limit_exceeded")
+         - Jika waktu sejak pesanan berstatus "Diproses" kurang dari atau sama dengan 30 menit, lanjutkan ke langkah berikutnya.
+
+      3. **Output:**
+         - Jika pesanan dapat dibatalkan (alasan valid dan waktu <= 30 menit), panggil fungsi \`confirmCancellation\` dengan rincian pesanan.
+         - Jika pesanan tidak dapat dibatalkan (alasan 'Spam' ATAU waktu > 30 menit ATAU alasan tidak jelas), panggil fungsi \`rejectCancellation\` dengan rincian pesanan dan tipe penolakan yang sesuai.
+
+      Berikut adalah informasi pesanan:
+      * Order ID: ${order.orderId}
+      * Alasan Pelanggan: ${customerReason}
+      * Waktu Sejak Pesanan Diproses: ${timeSinceProcessedMinutes} menit
+      * Data Order: ${JSON.stringify(order)}
+      `,
+    };
+
+    const validateOrder = await genAI.models.generateContent({
+      model: "gemini-2.5-flash", // Menggunakan model yang mendukung function calling
+      contents: [
+        {
+          role: "user",
+          parts: [suggestedPrompt],
+        },
+      ],
+      config: {
+        tools: [
+          {
+            functionDeclarations:
+              automatedCancelOrderOfProcessingStatusTools.functionDeclarations,
+          },
+        ],
+        systemInstruction: [instruction],
+      },
+    });
+
+    const aiValidateOrderResponse = validateOrder.text; // Ambil teks respons dari AI (jika tidak ada function call)
+    console.log(
+      "AI Generated Raw Response 'Automatic cancel order processing status response TEXT':",
+      aiValidateOrderResponse
+    );
+
+    let updatedOrder = null; // Variable untuk menyimpan order yang diupdate
+
+    if (validateOrder.functionCalls && validateOrder.functionCalls.length > 0) {
+      const functionCall = validateOrder.functionCalls[0];
+      const functionName = functionCall.name;
+      const functionArgs = functionCall.args;
+
+      console.log(
+        `AI called function: ${functionName} with args:`,
+        functionArgs
+      );
+
+      if (functionName === "confirmCancellation") {
+        // Logika untuk mengupdate status menjadi "cancelled"
+        updatedOrder = await Order.findByIdAndUpdate(
+          order._id,
+          {
+            $set: { status: "cancelled", cancelledAt: new Date() },
+            $unset: { agendaJobId: "" }, // Hapus agendaJobId setelah job selesai
+          },
+          { new: true }
+        );
+        responseMessage = `
+        Pembatalan Pesanan Disetujui! ✅
+        
+        Pembatalan pesanan #${order.orderId} disetujui. Status diubah menjadi 'cancelled'.`;
+
+        // Panggil fungsi `confirmCancellation` lokal untuk konsol log atau return detail
+        // confirmCancellation(order.orderId, customerReason, timeSinceProcessedMinutes);
+      } else if (functionName === "rejectCancellation") {
+        // Logika untuk mengupdate status berdasarkan "previousStatus"
+        let newStatus = order.previousStatus || "processing"; // Default ke 'processing' jika previousStatus tidak ada
+
+        updatedOrder = await Order.findByIdAndUpdate(
+          order._id,
+          {
+            $set: { status: newStatus },
+            $unset: { agendaJobId: "" }, // Hapus agendaJobId setelah job selesai
+          },
+          { new: true }
+        );
+
+        // Panggil fungsi `rejectCancellation` lokal untuk konsol log atau return detail
+        // rejectCancellation(order.orderId, customerReason, timeSinceProcessedMinutes, functionArgs.rejectionType, functionArgs.clarificationDetail);
+
+        if (functionArgs.rejectionType === "clarification_needed") {
+          responseMessage = `
+          Pembatalan Pesanan Ditolak ❌
+
+          Permintaan pembatalan pesanan #${
+            order.orderId
+          } dengan klarifikasi sistem: ${
+            functionArgs.clarificationDetail || "Alasan tidak jelas."
+          } Status dikembalikan ke '${newStatus}'.`;
+        } else {
+          responseMessage = `
+            Pembatalan Pesanan Ditolak ❌
+
+            Permintaan pembatalan pesanan #${order.orderId} ditolak. Status dikembalikan ke '${newStatus}'. Alasan: ${functionArgs.rejectionType}.`;
+        }
+      } else {
+        // Fallback jika AI memanggil fungsi yang tidak dikenal (seharusnya tidak terjadi jika tools didefinisikan dengan baik)
+        console.warn(
+          `AI called unknown function: ${functionName}. No order status update performed.`
+        );
+        responseMessage = `Terjadi kesalahan dalam pemrosesan pembatalan order ${order.orderId}.`;
+      }
+
+      console.log(`Order ${order.orderId} updated successfully.`);
+      console.log(
+        `New Order Status: ${updatedOrder ? updatedOrder.status : order.status}`
+      );
+
+      const userConfirmContent = await genAI.models.generateContent({
+        model: "gemini-2.5-flash", // Menggunakan model yang mendukung function calling
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: responseMessage },
+              {
+                text: `Ini adalah data ordernya: ${JSON.stringify(
+                  updatedOrder.toObject()
+                )}`,
+              },
+            ],
+          },
+        ],
+        config: {
+          systemInstruction: [
+            {
+              text: `Anda adalah sistem yang memenuhi response dari model bahwa pesanan tersebut berhasil "Dibatalkan" atau statusnya di lanjutkan dalam proses sebelumnya yaitu "Diproses" karena alasan customer tidak sesuai dengan ketentuan persyaratan kami.`,
+            },
+            {
+              text: `Gunakan informasi ini dengan style inline CSS:
+        - Tanpa warna background dan tanpa border untuk div utama.
+        - Jika status "Diproses", gunakan <span style="color: oklch(42.4% 0.199 265.638); font-size: 13px;">"Diproses"</span>.
+        - Jika status "Dibatalkan", <span style="color: oklch(57.7% 0.245 27.325)">"Dibatalkan"</span>.
+        - Maksimal font-size: 14px.
+        - Jika status "cancelled", gunakan warna teks: oklch(57.7% 0.245 27.325).
+        - Untuk daftar, gunakan <ul style="list-style-type: disc; margin-left: 20px; padding: 0;">.
+        - Untuk daftar bersarang (anak), gunakan <ul style="list-style-type: circle; margin-left: 20px; padding: 0;">.`,
+            },
+          ],
+        },
+      });
+      const aiUserConfirmContentResponse = userConfirmContent.text;
+
+      console.log(
+        `[PushNotif] Notification sent to user ${user._id} for order ${order.orderId}.`
+      );
+
+      const admin = await usersDB.findOne({ role: "admin" });
+
+      // implement send messages
+      const session = await mongoose.startSession();
+      session.startTransaction();
+
+      const adminId = admin.id;
+      const userId = user.id;
+
+      const userIds = [adminId, userId];
+      const chatsCurrently = await chatsDB.findOne({
+        userIds: { $size: 2, $all: userIds },
+      });
+
+      let currentChat = null;
+      if (!chatsCurrently) {
+        async function createChatroomAndChats() {
+          try {
+            const chatRoomId = generateRandomId();
+            const chatId = generateRandomId();
+            const creationDate = Date.now();
+
+            // if chat is empty
+            const newChats = new chatsDB({
+              chatId,
+              chatRoomId,
+              unreadCount: {
+                [`${userIds[0]}`]: 0,
+                [`${userIds[1]}`]: 0,
+              },
+              latestMessageTimestamp: 0,
+              chatCreationDate: creationDate,
+              userIds: userIds,
+            });
+
+            await newChats.save({ session });
+
+            await session.commitTransaction();
+            session.endSession();
+
+            return {
+              message: "Chat room data",
+              ...newChats?._doc,
+            };
+          } catch (error) {
+            await session.abortTransaction();
+            session.endSession();
+            return error;
+          }
+        }
+
+        const result = await createChatroomAndChats();
+        if (!result?.chatId) {
+          next(result);
+          return;
+        }
+        currentChat = result;
+      } else {
+        currentChat = chatsCurrently;
+        await session.abortTransaction();
+        session.endSession();
+      }
+
+      const chatRoomId = currentChat?.chatRoomId;
+      const chatId = currentChat?.chatId;
+
+      const senderUserId = adminId;
+      const recipientProfileId = userId;
+
+      const latestMessageTimestamp = Date.now();
+      const messageId = generateRandomId(15);
+
+      await templateSendMessage({
+        chatRoomId,
+        chatId,
+        senderUserId,
+        recipientProfileId,
+        latestMessageTimestamp,
+        messageId,
+        status: "UNREAD",
+        messageType: "text",
+        textMessage: aiUserConfirmContentResponse,
+        orderData: {
+          type: agenda_name_automaticOrderCancelOfProcessingStatus,
+          orders: [
+            {
+              ...updatedOrder.toObject(),
+              status:
+                updatedOrder.status === "processing"
+                  ? "Diproses"
+                  : "Dibatalkan",
+            },
+          ],
+        },
+        role: "model",
+        client,
+        io,
+        recipientProfileId,
+      });
+
+      const objectAgendaId = new mongoose.Types.ObjectId(agenda_id);
+      await agenda.cancel({ _id: objectAgendaId });
+    } else {
+      // Jika AI tidak memanggil fungsi, berarti AI tidak dapat membuat keputusan berdasarkan prompt.
+      // Ini bisa terjadi jika prompt tidak cukup jelas atau data tidak sesuai.
+      const objectAgendaId = new mongoose.Types.ObjectId(agenda_id);
+      await agenda.cancel({ _id: objectAgendaId });
+
+      responseMessage = `Sistem tidak dapat mengotomatiskan keputusan pembatalan pesanan #${order.orderId} saat ini. functionCall : ${validateOrder.functionCalls}`;
+      console.log("No functionCalls :", responseMessage);
+    }
+  } catch (error) {
+    const objectAgendaId = new mongoose.Types.ObjectId(agenda_id);
+    await agenda.cancel({ _id: objectAgendaId });
+    console.error(
+      "Error in handleAutomaticCancelOrderOfProcessingStatus:",
+      error
+    );
+    responseMessage = `Terjadi kesalahan internal saat memproses pembatalan pesanan #${orderPublicId}.`;
+  }
 };
 
 const chatRoom = {
@@ -1893,6 +2228,7 @@ const chatRoom = {
   handleGetNewMessageForBot,
   handlePushNotifResponseCancelOrder,
   handlePushNotifPaymentResponse,
+  handleAutomaticCancelOrderOfProcessingStatus,
 };
 
 module.exports = {

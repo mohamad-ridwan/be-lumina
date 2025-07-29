@@ -117,6 +117,9 @@ const orderSchema = new Schema(
       trim: true,
       default: null,
     },
+    cancelReason: {
+      type: String,
+    },
   },
   { timestamps: true } // createdAt dan updatedAt otomatis oleh Mongoose
 );

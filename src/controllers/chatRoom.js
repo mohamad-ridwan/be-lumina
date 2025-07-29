@@ -11,13 +11,17 @@ const {
 const { getSortTimestampAggregationField } = require("../helpers/general");
 const genAI = require("../services/gemini");
 const { templateSendMessage } = require("../helpers/sendMessage");
+const {
+  agenda_name_automaticOrderCancelOfProcessingStatus,
+} = require("../utils/agenda");
 
 exports.confirmCancelOrder = async (req, res) => {
-  const { messageId, profileId, recipientId } = req.body;
+  const { messageId, profileId, recipientId, cancelReason } = req.body;
 
   const senderUserId = recipientId;
   const io = req.app.locals.io; // Mengakses instance Socket.IO dari app.locals
   const client = req.app.locals.redisClient;
+  const agenda = req.app.locals.agenda;
 
   try {
     const chatRoomCurrently = await chatRoom.findOne({
@@ -82,7 +86,7 @@ exports.confirmCancelOrder = async (req, res) => {
       const order = ordersMap.get(orderId);
 
       if (order) {
-        let updateData = {};
+        let updateData = { cancelReason };
         if (order.status === "pending") {
           // Jika statusnya 'pending' (Menunggu Pembayaran)
           updateData.status = "cancelled";
@@ -180,6 +184,18 @@ Untuk list Anda bisa memberikan style <ul> element seperti :
     const latestMessageTimestamp = Date.now();
     const newMessageId = generateRandomId(15);
     const recipientProfileId = profileId;
+
+    updatedOrders.forEach(async (order) => {
+      if (order?.previousStatus === "processing") {
+        await agenda.schedule(
+          "in 1 seconds",
+          agenda_name_automaticOrderCancelOfProcessingStatus,
+          {
+            orderId: order.orderId,
+          }
+        );
+      }
+    });
 
     await templateSendMessage({
       chatRoomId,
