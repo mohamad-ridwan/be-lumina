@@ -398,6 +398,7 @@ const processNewMessageWithAI = async (
       config: {
         tools: [{ functionDeclarations: tools }],
         thinkingConfig: {
+          thinkingBudget: 1024,
           includeThoughts: true,
         },
         systemInstruction: {
