@@ -63,6 +63,14 @@ const chatRoom = new Schema(
     document: {
       type: Object,
     },
+    functionCall: {
+      type: Array,
+      default: null,
+    },
+    functionResponse: {
+      type: Array,
+      default: null,
+    },
     completionTimestamp: { type: String, default: null }, // Atau Number jika Anda ingin menyimpannya sebagai Number
     completionTimeId: { type: String, default: null },
   },

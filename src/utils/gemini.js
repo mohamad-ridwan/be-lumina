@@ -1,4 +1,6 @@
 const chatRoomDB = require("../models/chatRoom");
+const Category = require("../models/category");
+const Brand = require("../models/brand");
 const toolsDB = require("../models/tools");
 const genAI = require("../services/gemini");
 // const availableTools = require("../tools/productTools");
@@ -157,51 +159,33 @@ const getConversationHistoryForGemini = async (message, io, socket, client) => {
         },
       },
       { $sort: { sortTimestamp: -1 } }, // Urutkan berdasarkan sortTimestamp yang baru dibuat
-      { $limit: 10 },
+      { $limit: 20 },
     ]);
 
     if (messages.length === 0) {
       return [];
     }
 
-    const formattedHisory = messages.map((msg) => {
-      const productDataCurrently =
-        msg?.productData?.length > 0 ? msg.productData : [];
-      let function_response = undefined;
-      if (productDataCurrently.length > 0 && msg.role === "model") {
-        function_response = {
-          name: "searchShoes",
-          response: { productData: productDataCurrently },
-        };
-      } else if (msg.role === "model") {
-        function_response = {
-          name: "searchShoes",
-          response: { productData: [] },
-        };
-      }
-      let parts = [
-        {
-          text: msg.textMessage,
-        },
-      ];
+    const formattedHisory = messages
+      .sort((a, b) => a.sortTimestamp - b.sortTimestamp)
+      .map((msg) => {
+        let parts = [{ text: msg.textMessage }];
+        if (
+          msg.role === "model" &&
+          msg?.functionCall &&
+          msg?.functionResponse
+        ) {
+          parts.push({
+            functionCalls: msg.functionCall[0],
+            functionResponse: msg?.functionResponse[0],
+          });
+        }
 
-      if (function_response) {
-        parts.push({
-          function_response: function_response,
-        });
-      }
-      return {
-        role: msg.role,
-        parts: [
-          {
-            text: msg.textMessage,
-            function_response: function_response,
-          },
-        ],
-      };
-    });
-
-    console.log("Formatted history for Gemini:", formattedHisory);
+        return {
+          role: msg.role,
+          parts,
+        };
+      });
 
     return formattedHisory;
   } catch (error) {
@@ -293,7 +277,10 @@ const setProductDataForFrontend = (functionCallResult, functionName) => {
 // `;
 
 const siText1 = {
-  text: `Anda adalah asisten layanan pelanggan (CS) untuk 'Lumina', toko sepatu online. Tugas utama Anda adalah membantu pelanggan dengan pertanyaan terkait stok produk, harga, informasi pesanan (status, pelacakan, pengembalian), dan kebijakan toko. Tanggapi dengan nada ramah, membantu, dan informatif. Jika Anda tidak memiliki informasi yang spesifik (misalnya, nomor pesanan tertentu atau detail akun), instruksikan pelanggan untuk memeriksa email konfirmasi mereka atau menghubungi dukungan manusia.`,
+  text: `Anda adalah asisten layanan pelanggan (CS) untuk 'Lumina', toko sepatu online. Tugas utama Anda adalah membantu pelanggan dengan pertanyaan terkait stok produk, harga, informasi pesanan (status, pelacakan, pengembalian), dan kebijakan toko. Tanggapi dengan nada ramah, membantu, dan informatif. Jika Anda tidak memiliki informasi yang spesifik (misalnya, nomor pesanan tertentu atau detail akun), instruksikan pelanggan untuk memeriksa email konfirmasi mereka atau menghubungi dukungan manusia.
+  
+  ** Anda hanya dapat mengatasi layanan customer dalam solusi pencarian sepatu, dan Cancel order otomatis.
+  `,
 };
 const siText2 = {
   text: `Anda adalah asisten pencarian sepatu yang ahli. Tugas Anda adalah menggunakan alat pencarian canggih untuk menemukan produk sepatu yang paling sesuai dengan kebutuhan pengguna. Alat ini juga dapat memberikan solusi matematika untuk harga atau jumlah produk sesuai pertanyaan atau kebutuhan pengguna.`,
@@ -381,8 +368,16 @@ const processNewMessageWithAI = async (
   const collectedProductIds = new Set();
   const collectedOrderIds = new Set();
 
+  let userQuestions = message.latestMessage.textMessage;
+
+  let functionCallForHistory = [];
+  let functionResponseForHistory = [];
+
   try {
     const tools = await toolsDB.find();
+    const category = await Category.find();
+    const brands = await Brand.find();
+
     const chat = genAI.chats.create({
       model: "gemini-2.5-flash",
       // config: {
@@ -399,11 +394,11 @@ const processNewMessageWithAI = async (
     });
 
     const response = await chat.sendMessage({
-      message: message.latestMessage.textMessage,
+      message: userQuestions,
       config: {
         tools: [{ functionDeclarations: tools }],
         thinkingConfig: {
-          thinkingBudget: 1024,
+          includeThoughts: true,
         },
         systemInstruction: {
           parts: [
@@ -414,6 +409,60 @@ const processNewMessageWithAI = async (
             siText5,
             orderStatusInstruction,
             confirmCancelOrderInstruction,
+            {
+              text: "Anda adalah asisten yang cerdas dan komunikatif. Prioritaskan untuk terlibat dalam dialog yang natural dan membantu.",
+            },
+            {
+              text: `Jika pelanggan mencari sepatu jangan langsung mengembalikan fungsi sebelum data spesifik terpenuhi. Anda wajib memberikan klarifikasi spesifik kriteria sepatu untuk mengarahkan pelanggan dalam tujuan dengan ramah dan sopan.
+              
+              Contoh untuk mengarahkan yang diinginkan pelanggan:
+
+              - Untuk kegiatan/aktivitas apa?
+              - Cocoknya warna apa?
+              - Ukuran sepatunya berapa?
+              - Rentang/kisaran harga sepatu
+              - Sedang nyari yang populer atau tidak
+              - Bahan sepatunya mau yang seperti apa?
+              - Suka pilihan dengan "Berkategori"? kami memiliki kategori sepatu : ${JSON.stringify(
+                category.map((ctg) => ctg.name).join(", ")
+              )}
+              - Suka sepatu "Branded"? kami memiliki brand : ${JSON.stringify(
+                brands.map((brand) => brand.name).join(", ")
+              )} 
+              `,
+            },
+            {
+              text: `Untuk memastikan kriteria sepatu pelanggan, Anda WAJIB mendapatkan informasi kriteria tersebut, berikut informasi :
+            
+              - Warna sepatu
+              - Ukuran sepatu
+              - Kisaran harga
+
+              Dengan informasi ini Anda dapat melanjutkan memanggil fungsi yang sesuai parameter jika ini sudah terpenuhi. Jika belum Anda WAJIB mengarahkan kembali pelanggan dengan kebutuhan tersebut dengan ramah dan sopan.
+            `,
+            },
+            {
+              text: "Panggil fungsi hanya ketika Anda yakin telah memahami niat pengguna dan memiliki semua parameter yang diperlukan atau relevan.",
+            },
+            {
+              text: "Jika pelanggan bertanya mengenai ukuran sepatu seperti merujuk pada suatu makna contoh: (Usia, Bapak, Ibu, Anak, Kakek, Nenek). berikan ukuran tersebut sebagai angka yang valid",
+            },
+            {
+              text: `Jika pertanyaan mengandung makna lebih dari 1 object, tambahkan evaluasi pertanyaan supaya mendapatkan lebih dari 1 informasi atau object (Jangan gabungkan makna object dalam satu "parameter").`,
+            },
+            {
+              text: `Berikan informasi teks pada konteks sepatu yang dapat mudah dibaca, jika Anda ingin berikan UI Anda WAJIB memberikan style inline CSS dan maksimal font-size: 14px
+              
+              Contoh :
+              
+              untuk list ini Anda wajib untuk tidak memberikan warna background dan border atau apapun itu seperti style card.
+
+Untuk list Anda bisa memberikan style <ul> element seperti :
+    <ul style="list-style-type: disc; margin-left: 20px; padding: 0;"></ul>
+
+    Jika memiliki list pada anaknya bisa menggunakan "list-style-type: circle;" pada <ul style="list-style-type: circle; margin-left: 20px; padding: 0;"> element anaknya.
+              `,
+            },
           ],
           role: "model",
         },
@@ -422,12 +471,21 @@ const processNewMessageWithAI = async (
 
     console.log("Gemini requested function call(s):", response.functionCalls);
 
+    let functionCalls = [];
+    if (response.functionCalls && response.functionCalls.length > 0) {
+      functionCalls = response.functionCalls;
+      functionCallForHistory = response.functionCalls;
+      console.log("FUNCTION CALLS : ", response.functionCalls);
+    }
+
+    const mainResponseText = response.text;
+
     let indexCount = 0;
 
-    if (response.functionCalls && response.functionCalls.length > 0) {
+    if (functionCalls.length > 0) {
       const functionCallResultsForGemini = [];
 
-      for (const call of response.functionCalls) {
+      for (const call of functionCalls) {
         const functionName = call.name;
         const functionArgs = { ...call.args }; // Salin argumen
         const geminiResult = { shoes: [] };
@@ -504,6 +562,14 @@ const processNewMessageWithAI = async (
       }));
       console.log("tools response parts: ", toolResponseParts);
 
+      if (functionCallResultsForGemini.length > 0) {
+        functionResponseForHistory = functionCallResultsForGemini.filter(
+          (item) =>
+            item?.response?.productData?.length > 0 ||
+            item?.response?.requestCancelOrderData?.length > 0
+        );
+      }
+
       const toolResponseResult = await chat.sendMessage({
         message: toolResponseParts,
         config: {
@@ -539,21 +605,24 @@ const processNewMessageWithAI = async (
           client,
           agenda,
           newMessageId,
-          productData: accumulatedProductsForFrontend, // Kirimkan data produk unik
+          // productData: accumulatedProductsForFrontend,
+          productData: [],
           orderData: {
             loading: false,
             type: typeOrder,
             orders: orderForFrontendData,
             isConfirmed: false,
           }, // Kirimkan data order unik
-        }
+        },
+        functionCallForHistory,
+        functionResponseForHistory
       );
 
       return combinedResponseText;
     } else {
       console.log("single response without function calls:");
       await sendMessageCallback(
-        response.text,
+        mainResponseText,
         message,
         latestMessageTimestamp,
         {
@@ -566,7 +635,7 @@ const processNewMessageWithAI = async (
           orderData: {},
         }
       );
-      return response.text;
+      return mainResponseText;
     }
   } catch (error) {
     console.error("Error processing new message with AI:", error);

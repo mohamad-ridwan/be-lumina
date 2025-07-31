@@ -430,7 +430,9 @@ const handleSendMessageFromAI = async (
   generatedText,
   message,
   latestMessageTimestamp,
-  { io, socket, client, agenda, newMessageId, productData, orderData }
+  { io, socket, client, agenda, newMessageId, productData, orderData },
+  functionCallForHistory,
+  functionResponseForHistory
 ) => {
   const { latestMessage, isNeedHeaderDate, recipientProfileId, role } = message;
 
@@ -466,10 +468,19 @@ const handleSendMessageFromAI = async (
   });
 
   if (!isAvailableMessage?._id) {
-    await sendMessage(newMessageForUser, io, socket, client, agenda, {
-      productData,
-      orderData,
-    });
+    await sendMessage(
+      newMessageForUser,
+      io,
+      socket,
+      client,
+      agenda,
+      {
+        productData,
+        orderData,
+      },
+      functionCallForHistory,
+      functionResponseForHistory
+    );
   } else {
     isAvailableMessage.textMessage =
       generatedText?.length > 0
@@ -480,6 +491,13 @@ const handleSendMessageFromAI = async (
     }
     if (orderData?.length > 0) {
       isAvailableMessage.orderData = orderData;
+    }
+    if (
+      functionCallForHistory?.length > 0 &&
+      functionResponseForHistory?.length > 0
+    ) {
+      isAvailableMessage.functionCall = functionCallForHistory;
+      isAvailableMessage.functionResponse = functionResponseForHistory;
     }
     await isAvailableMessage.save();
     // await chatRoomDB.findOneAndUpdate(
@@ -605,13 +623,17 @@ const handleGetNewMessageForBot = async (
       responseText,
       message,
       latestMessageTimestamp,
-      { io, socket, client, agenda, newMessageId, productData, orderData }
+      { io, socket, client, agenda, newMessageId, productData, orderData },
+      functionCallForHistory,
+      functionResponseForHistory
     ) => {
       const result = await handleSendMessageFromAI(
         responseText,
         message,
         latestMessageTimestamp,
-        { io, socket, client, agenda, newMessageId, productData, orderData }
+        { io, socket, client, agenda, newMessageId, productData, orderData },
+        functionCallForHistory,
+        functionResponseForHistory
       );
       return result;
     },
@@ -709,7 +731,9 @@ const sendMessage = async (
   socket,
   client,
   agenda,
-  productData
+  productData,
+  functionCallForHistory,
+  functionResponseForHistory
 ) => {
   const { latestMessage, isNeedHeaderDate, recipientProfileId } = message;
 
@@ -775,6 +799,14 @@ const sendMessage = async (
   }
   if (productData?.orderData?.orders?.length > 0) {
     chatRoomData.orderData = productData.orderData;
+  }
+  if (
+    functionCallForHistory?.length > 0 &&
+    functionResponseForHistory?.length > 0 &&
+    message?.role === "model"
+  ) {
+    chatRoomData.functionCall = functionCallForHistory;
+    chatRoomData.functionResponse = functionResponseForHistory;
   }
   if (message?.role === "model") {
     chatRoomData.role = "model";
