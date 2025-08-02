@@ -11,7 +11,10 @@ const {
   checkSemanticMatch,
 } = require("../../utils/embeddings");
 const { refinementDataResult } = require("../../helpers/iterative-refinement");
-const { createRegexObjectFromFilters } = require("../../helpers/general");
+const {
+  createRegexObjectFromFilters,
+  formatVariantFiltersSearchIndex,
+} = require("../../helpers/general");
 // const genAI = require("../gemini");
 
 // async function getEmbedding(text) {
@@ -138,22 +141,27 @@ const searchShoes = async ({
     isPopular,
   });
 
-  let finalQuestion = `${userIntent}`;
+  let finalQuestion = `**${userIntent}**`;
 
   if (minPrice) {
-    finalQuestion += `, (Minimal harga sepatu : ${minPrice})`;
+    finalQuestion += `
+    **minimal harga : ${minPrice}.**`;
   }
   if (maxPrice) {
-    finalQuestion += `, (Maksimal harga sepatu: ${maxPrice})`;
+    finalQuestion += `
+    **maksimal harga: ${maxPrice}.**`;
   }
   if (brand) {
-    finalQuestion += `, (brand: ${brand})`;
+    finalQuestion += `
+    **brand: ${brand}.**`;
   }
   if (category) {
-    finalQuestion += `, (kategori: ${category})`;
+    finalQuestion += `
+    **kategori: ${category}.**`;
   }
   if (variantFilters) {
-    finalQuestion += `, (variants: ${JSON.stringify(variantFilters)})`;
+    finalQuestion += `    
+    **${formatVariantFiltersSearchIndex(variantFilters)}**`;
   }
 
   let finalSearchQuery = `${userIntent}`;
@@ -161,6 +169,8 @@ const searchShoes = async ({
   // if (Object.keys(variantFilters)?.length > 0) {
   //   finalSearchQuery += ` ${formatVariantFiltersSearchIndex(variantFilters)})`;
   // }
+
+  console.log("USER INTENT : ", finalQuestion);
 
   const queryEmbedding = await getEmbedding(finalQuestion);
   if (!queryEmbedding) {
@@ -196,7 +206,7 @@ const searchShoes = async ({
   const categoryMap = new Map(
     (await Category.find()).map((c) => [
       c._id.toString(),
-      { name: c.name, isPopular: c.isPopular },
+      { name: c.name, isPopular: c.isPopular, description: c.description },
     ])
   );
 
@@ -340,16 +350,16 @@ const searchShoes = async ({
     .limit(limit)
     .lean();
 
-  let finalShoeResults = [];
-  if (candidateShoes.length > 0) {
-    const candidateIds = candidateShoes.map((shoe) => shoe._id);
-    finalShoeResults = await Shoe.find(
-      { _id: { $in: candidateIds }, $text: { $search: userIntent } },
-      { score: { $meta: "textScore" } }
-    )
-      .sort({ score: { $meta: "textScore" } })
-      .lean();
-  }
+  let finalShoeResults = candidateShoes;
+  // if (candidateShoes.length > 0) {
+  //   const candidateIds = candidateShoes.map((shoe) => shoe._id);
+  //   finalShoeResults = await Shoe.find(
+  //     { _id: { $in: candidateIds }, $text: { $search: userIntent } },
+  //     { score: { $meta: "textScore" } }
+  //   )
+  //     .sort({ score: { $meta: "textScore" } })
+  //     .lean();
+  // }
   console.log("Mongoose initial query:", JSON.stringify(initialDbQuery));
   console.log("GET SHOE DATA : ", finalShoeResults);
 
@@ -377,34 +387,71 @@ const searchShoes = async ({
     if (!shoe?.description_embedding) {
       let variantDescriptionText = "";
       if (shoe.variants && shoe.variants.length > 0) {
-        const allOptionValues = new Set();
+        // Array untuk menampung string deskripsi setiap varian
+        const allVariantDescriptions = [];
+
+        // 1. Iterasi setiap objek varian
         for (const variant of shoe.variants) {
+          const variantParts = [];
+
+          // 2. Iterasi properti dinamis di dalam optionValues
           for (const key in variant.optionValues) {
-            allOptionValues.add(variant.optionValues[key]);
+            if (
+              Object.prototype.hasOwnProperty.call(variant.optionValues, key)
+            ) {
+              const value = variant.optionValues[key];
+
+              // Normalisasi teks untuk key dan value
+              const normalizedKey = normalizeTextForSearch(key);
+              const normalizedValue = normalizeTextForSearch(value);
+
+              // Tambahkan ke array dalam format 'key: value'
+              variantParts.push(`${normalizedKey}: '${normalizedValue}'`);
+            }
+          }
+
+          // 3. Gabungkan bagian-bagian varian menjadi satu string
+          if (variantParts.length > 0) {
+            allVariantDescriptions.push(`${variantParts.join(", ")}`);
           }
         }
-        variantDescriptionText = Array.from(allOptionValues)
-          .map((v) => normalizeTextForSearch(v))
-          .join(", ");
+
+        // 4. Gabungkan semua deskripsi varian menjadi satu string
+        variantDescriptionText = allVariantDescriptions.join(" | ");
       }
 
-      const combinedTextForScore = normalizeTextForSearch(
-        `Nama: ${shoe.name}. Deskripsi: ${
-          shoe.description
-        }. Brand: ${brandMap.get(
-          shoe.brand.toString()
-        )}. Kategori: ${shoe.category
-          .map((id) => JSON.stringify(categoryMap.get(id.toString())))
-          .join(
-            ", "
-          )}. Varian: ${variantDescriptionText}. Main Price (Jika tidak memiliki varian): ${
-          shoe.price
-        }. Main Stock (Jika tidak memiliki varian): ${shoe.stock}`
-      );
+      // const combinedTextForScore = normalizeTextForSearch(
+      //   `Nama: ${shoe.name}. Deskripsi: ${
+      //     shoe.description
+      //   }. Brand: ${brandMap.get(
+      //     shoe.brand.toString()
+      //   )}. Kategori: ${shoe.category
+      //     .map((id) => JSON.stringify(categoryMap.get(id.toString())))
+      //     .join(
+      //       ", "
+      //     )}. Varian: ${variantDescriptionText}. Main Price (Jika tidak memiliki varian): ${
+      //     shoe.price
+      //   }. Main Stock (Jika tidak memiliki varian): ${shoe.stock}`
+      // );
 
-      const refinementResult = await getEmbedding(combinedTextForScore);
+      const combinedTextForScore = `**${shoe.name}**.
+        **${shoe.description}**. 
+        **brand: ${brandMap.get(shoe.brand.toString())}**. 
+        **${shoe.category
+          .map(
+            (id) =>
+              `kategori: ${categoryMap.get(id.toString()).name}, ${
+                categoryMap.get(id.toString()).description
+              }`
+          )
+          .join(" | ")}**.
+          **${variantDescriptionText}**`;
 
-      shoe.description_embedding = refinementResult;
+      console.log("PRODUCT INTENT : ", combinedTextForScore);
+
+      const productEmbedding = await getEmbedding(combinedTextForScore);
+
+      shoe.description_embedding = productEmbedding;
     }
 
     if (shoe?.description_embedding) {
@@ -412,8 +459,10 @@ const searchShoes = async ({
         queryEmbedding,
         shoe.description_embedding
       );
-      console.log("SIMILARITY : ", similarity);
-      shoesWithScores.push({ shoe, similarity });
+      console.log("SIMILARITY : ", similarity, Number(similarity.toFixed(3)));
+      if (Number(similarity.toFixed(3)) >= 0.7) {
+        shoesWithScores.push({ shoe, similarity });
+      }
     }
   }
 

@@ -22,6 +22,7 @@ async function initializeEmbeddingPipeline() {
       extractor = await pipeline(
         "feature-extraction",
         "mixedbread-ai/mxbai-embed-large-v1"
+        // "Xenova/all-MiniLM-L6-v2"
       );
       console.log("Pipeline embedding siap digunakan.");
     } catch (error) {
@@ -61,7 +62,8 @@ async function getEmbedding(text) {
 
     // Output dari pipeline adalah objek dengan properti 'data' yang berisi Float32Array.
     // Ubah ke array JavaScript biasa agar lebih mudah diolah jika diperlukan.
-    return Array.from(output.data);
+    // return Array.from(output.data);
+    return output.data;
   } catch (error) {
     console.error(
       "Error generating embedding with @huggingface/transformers:",
