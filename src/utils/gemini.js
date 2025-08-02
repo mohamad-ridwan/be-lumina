@@ -379,6 +379,7 @@ const processNewMessageWithAI = async (
     const brands = await Brand.find();
 
     const chat = genAI.chats.create({
+      // model: "gemini-2.5-flash",
       model: "gemini-2.5-flash",
       // config: {
       //   tools: [{ functionDeclarations: tools }],
@@ -397,9 +398,9 @@ const processNewMessageWithAI = async (
       message: userQuestions,
       config: {
         tools: [{ functionDeclarations: tools }],
+        temperature: 1,
         thinkingConfig: {
           thinkingBudget: 1024,
-          includeThoughts: true,
         },
         systemInstruction: {
           parts: [
@@ -606,8 +607,7 @@ Untuk list Anda bisa memberikan style <ul> element seperti :
           client,
           agenda,
           newMessageId,
-          // productData: accumulatedProductsForFrontend,
-          productData: [],
+          productData: accumulatedProductsForFrontend,
           orderData: {
             loading: false,
             type: typeOrder,

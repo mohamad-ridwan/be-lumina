@@ -630,6 +630,38 @@ const findLatestMessageForUser = async (
   }
 };
 
+const formatVariantFiltersSearchIndex = (filters) => {
+  // 1. Dapatkan array dari pasangan key-value
+  const entries = Object.entries(filters);
+
+  // 2. Map setiap pasangan menjadi string yang diformat
+  const formattedStrings = entries.map(([key, value]) => {
+    // Gabungkan semua nilai dalam array 'value' menjadi string
+    const valuesString = Array.isArray(value) ? value.join(", ") : value;
+
+    // Kembalikan string dengan format "key: value, value"
+    return `${key}: ${valuesString}`;
+  });
+
+  // 3. Gabungkan semua string yang sudah diformat
+  return formattedStrings.join(", ");
+};
+
+const createRegexObjectFromFilters = (filters) => {
+  const regexFilters = {};
+
+  // Iterasi melalui setiap pasangan kunci-nilai di objek filter
+  for (const [key, value] of Object.entries(filters)) {
+    // Ubah setiap item dalam array 'value' menjadi RegExp
+    const regexArray = value.map((item) => new RegExp(String(item), "i"));
+
+    // Tambahkan pasangan kunci-nilai baru ke objek regexFilters
+    regexFilters[key] = regexArray;
+  }
+
+  return regexFilters;
+};
+
 module.exports = {
   formatDate,
   generateBase64ThumbnailFromUrl,
@@ -642,4 +674,6 @@ module.exports = {
   findLatestMessageForUser,
   getSortTimestampAggregationField,
   existingBotReplyMessageJob,
+  formatVariantFiltersSearchIndex,
+  createRegexObjectFromFilters,
 };
