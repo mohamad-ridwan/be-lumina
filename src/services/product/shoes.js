@@ -142,37 +142,6 @@ const searchShoes = async ({
     isPopular,
   });
 
-  let finalQuestion = `**${userIntent}**`;
-
-  if (minPrice) {
-    finalQuestion += `
-    **minimal harga : ${minPrice}.**`;
-  }
-  if (maxPrice) {
-    finalQuestion += `
-    **maksimal harga: ${maxPrice}.**`;
-  }
-  if (brand) {
-    finalQuestion += `
-    **brand: ${brand}.**`;
-  }
-  if (category) {
-    finalQuestion += `
-    **kategori: ${category}.**`;
-  }
-  if (variantFilters) {
-    finalQuestion += `    
-    **${formatVariantFiltersSearchIndex(variantFilters)}**`;
-  }
-
-  let finalSearchQuery = `${userIntent}`;
-
-  // if (Object.keys(variantFilters)?.length > 0) {
-  //   finalSearchQuery += ` ${formatVariantFiltersSearchIndex(variantFilters)})`;
-  // }
-
-  console.log("USER INTENT : ", finalQuestion);
-
   const userIntentEmbedding = await getEmbedding(userIntent);
   if (!userIntentEmbedding) {
     console.error("ERROR: Failed to generate embedding for query.");
@@ -521,21 +490,27 @@ const searchShoes = async ({
           hasMatchingVariant = shoe.variants.some((variant) => {
             let has_variant_1_match = null;
             variant_value_1.forEach((variant_arg) => {
-              if (!has_variant_1_match) {
+              if (
+                !has_variant_1_match &&
+                variant.optionValues[variant_name_1]
+              ) {
                 has_variant_1_match = variant.optionValues[variant_name_1]
                   .toLowerCase()
                   .trim()
-                  .includes(variant_arg);
+                  .includes(variant_arg.toLowerCase().trim());
               }
             });
             let has_variant_2_match = null;
             if (variant.optionValues[variant_name_2]) {
               variant_value_2.forEach((variant_arg) => {
-                if (!has_variant_2_match) {
+                if (
+                  !has_variant_2_match &&
+                  variant.optionValues[variant_name_2]
+                ) {
                   has_variant_2_match = variant.optionValues[variant_name_2]
                     .toLowerCase()
                     .trim()
-                    .includes(variant_arg);
+                    .includes(variant_arg.toLowerCase().trim());
                 }
               });
             }
