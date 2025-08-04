@@ -28,6 +28,7 @@ const {
   CSParameterValidation,
   CSProductRecommendation,
 } = require("./instructions/assistans");
+const { seasonCurrently } = require("./instructions/seasons");
 
 const getConversationHistoryForGemini = async (message, io, socket, client) => {
   try {
@@ -243,6 +244,9 @@ const processNewMessageWithAI = async (
         systemInstruction: {
           parts: [
             CSAssistans,
+            // SEASONS
+            seasonCurrently,
+            // END SEASONS
             ui_list_instruction,
             orderStatusInstruction,
             confirmCancelOrderInstruction,
