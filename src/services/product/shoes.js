@@ -533,6 +533,17 @@ const searchShoes = async ({
 
       let brandScore = 0;
 
+      if (
+        shoe.brand.some((id) =>
+          brandMap
+            .get(id.toString())
+            .name.toLowerCase()
+            .includes(brand.toLowerCase())
+        )
+      ) {
+        brandScore = 1;
+      }
+
       const finalScore =
         semanticScore * weights.semantic +
         categoryScore * weights.category +
