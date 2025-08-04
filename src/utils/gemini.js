@@ -26,6 +26,7 @@ const {
   CSFunctionValidation,
   CSUserProductAudience,
   CSParameterValidation,
+  CSProductRecommendation,
 } = require("./instructions/assistans");
 
 const getConversationHistoryForGemini = async (message, io, socket, client) => {
@@ -247,6 +248,7 @@ const processNewMessageWithAI = async (
             confirmCancelOrderInstruction,
             CSCommunication,
             CSProductQuestions(category, brands),
+            CSProductRecommendation(category, brands),
             CSProductCriteria,
             CSFunctionValidation,
             CSUserProductAudience,

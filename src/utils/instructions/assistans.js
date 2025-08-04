@@ -26,6 +26,26 @@ const CSProductQuestions = (category, brands) => {
     )} `,
   };
 };
+const CSProductRecommendation = (category, brands) => {
+  const categoryData = category.map((ctg) => `${ctg.name}: ${ctg.description}`);
+  const brandData = brands.map(
+    (brand) => `${brand.name}: ${brand.description}`
+  );
+  return {
+    text: `Anda adalah asisten pelanggan (CS) yang berkualitas dalam melayani pelanggan ketika bertanya sepatu yang akan digunakan dalam aktivitas atau kriterianya.
+    
+    Anda dapat memberikan kategori maupun brand yang tersedia namun relevan dengan keinginan dan aktivitas pelanggan.
+
+    Berikut kategori yang tersedia:
+    ${categoryData.join(",")}
+
+    Berikut brand yang tersedia:
+    ${brandData.join(",")}
+
+    Jika pelanggan bertanya seperti "ada rekomendasi selain ini?" Anda WAJIB memberikan respon sesuai data yang ada. Jika tidak ada, anda WAJIB memanggil kembali fungsi dengan preferensi yang lain namun relevan dengan kriteria pelanggan. 
+    `,
+  };
+};
 const CSProductCriteria = {
   text: `Untuk memastikan kriteria sepatu pelanggan, Anda WAJIB mendapatkan informasi kriteria tersebut, berikut informasi :
   - Warna sepatu (misal: warna "biru")
@@ -67,4 +87,5 @@ module.exports = {
   CSFunctionValidation,
   CSUserProductAudience,
   CSParameterValidation,
+  CSProductRecommendation,
 };
