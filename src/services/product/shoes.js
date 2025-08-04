@@ -460,6 +460,7 @@ const searchShoes = async ({
       let categoryScore = 0;
 
       if (
+        category &&
         shoe.category.some((id) =>
           categoryMap
             .get(id.toString())
@@ -534,12 +535,11 @@ const searchShoes = async ({
       let brandScore = 0;
 
       if (
-        shoe.brand.some((id) =>
-          brandMap
-            .get(id.toString())
-            .name.toLowerCase()
-            .includes(brand.toLowerCase())
-        )
+        brand &&
+        brandMap
+          .get(shoe.brand.toString())
+          .toLowerCase()
+          .includes(brand.toLowerCase())
       ) {
         brandScore = 1;
       }
