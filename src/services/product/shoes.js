@@ -14,6 +14,7 @@ const { refinementDataResult } = require("../../helpers/iterative-refinement");
 const {
   createRegexObjectFromFilters,
   formatVariantFiltersSearchIndex,
+  matchVariantsInNameAdvanced,
 } = require("../../helpers/general");
 // const genAI = require("../gemini");
 
@@ -172,8 +173,8 @@ const searchShoes = async ({
 
   console.log("USER INTENT : ", finalQuestion);
 
-  const queryEmbedding = await getEmbedding(finalQuestion);
-  if (!queryEmbedding) {
+  const userIntentEmbedding = await getEmbedding(userIntent);
+  if (!userIntentEmbedding) {
     console.error("ERROR: Failed to generate embedding for query.");
     return { error: "Failed to generate embedding for query." };
   }
@@ -289,10 +290,32 @@ const searchShoes = async ({
 
   if (Object.keys(variantFilters)?.length > 0) {
     const variantMatchCriteria = {};
+
+    // Iterasi melalui setiap filter varian
     for (const [key, value] of Object.entries(variantFilters)) {
-      const regexValue = value.map((item) => new RegExp(`^${item}$`, "i"));
+      // Array untuk menampung semua pola regex
+      const regexPatterns = [];
+
+      // 1. Iterasi setiap item dalam array 'value'
+      for (const item of value) {
+        // 2. Pecah item menjadi kata-kata (token)
+        // Misalnya, "putih/hijau" akan menjadi ["putih", "hijau"]
+        const tokens = String(item)
+          .split(/[\s\/-]/)
+          .filter((token) => token.length > 0);
+
+        // 3. Buat pola regex untuk setiap token
+        // Gunakan '\b' untuk mencari kecocokan kata, bukan substring
+        const regexFromTokens = tokens.map(
+          (token) => new RegExp(`\\b${token}\\b`, "i")
+        );
+
+        regexPatterns.push(...regexFromTokens);
+      }
+
+      // 4. Gabungkan semua pola regex menjadi satu query $in
       variantMatchCriteria[`optionValues.${key}`] = {
-        $in: regexValue,
+        $in: regexPatterns.length > 0 ? regexPatterns : value,
         $exists: true,
       };
     }
@@ -369,6 +392,13 @@ const searchShoes = async ({
 
   const shoesWithScores = [];
 
+  const weights = {
+    semantic: 0.6,
+    category: 0.15,
+    variant: 0.15,
+    brand: 0.1,
+  };
+
   for (const shoe of finalShoeResults) {
     // let currentVariantAttributesText = "";
     // if (shoe.variantAttributes && shoe.variantAttributes.length > 0) {
@@ -384,7 +414,7 @@ const searchShoes = async ({
 
     // IMPLEMENT ITERATIVE IMPROVEMENT : SELF-REFINEMENT
 
-    if (!shoe?.description_embedding) {
+    if (!shoe?.score_embedding) {
       let variantDescriptionText = "";
       if (shoe.variants && shoe.variants.length > 0) {
         // Array untuk menampung string deskripsi setiap varian
@@ -434,39 +464,128 @@ const searchShoes = async ({
       //   }. Main Stock (Jika tidak memiliki varian): ${shoe.stock}`
       // );
 
-      const combinedTextForScore = `**${shoe.name}**.
-        **${shoe.description}**. 
-        **brand: ${brandMap.get(shoe.brand.toString())}**. 
-        **${shoe.category
-          .map(
-            (id) =>
-              `kategori: ${categoryMap.get(id.toString()).name}, ${
-                categoryMap.get(id.toString()).description
-              }`
-          )
-          .join(" | ")}**.
-          **${variantDescriptionText}**`;
+      // const combinedTextForScore = `**${shoe.name}**.
+      //   **${shoe.description}**.
+      //   **brand: ${brandMap.get(shoe.brand.toString())}**.
+      //   **${shoe.category
+      //     .map(
+      //       (id) =>
+      //         `kategori: ${categoryMap.get(id.toString()).name}, ${
+      //           categoryMap.get(id.toString()).description
+      //         }`
+      //     )
+      //     .join(" | ")}**.
+      //     **${variantDescriptionText}**`;
 
-      console.log("PRODUCT INTENT : ", combinedTextForScore);
+      // console.log("PRODUCT INTENT : ", combinedTextForScore);
 
-      const productEmbedding = await getEmbedding(combinedTextForScore);
+      // const productEmbedding = await getEmbedding(combinedTextForScore);
 
-      shoe.description_embedding = productEmbedding;
+      const productText = `${shoe.name}. ${shoe.description}`;
+      const productEmbedding = await getEmbedding(productText);
+      const semanticScore = cosineSimilarity(
+        userIntentEmbedding,
+        productEmbedding
+      );
+
+      let categoryScore = 0;
+
+      if (
+        shoe.category.some((id) =>
+          categoryMap
+            .get(id.toString())
+            .name.toLowerCase()
+            .includes(category.toLowerCase())
+        )
+      ) {
+        categoryScore = 1;
+      }
+
+      let variantScore = 0;
+
+      if (Object.keys(variantFilters)?.length > 0) {
+        const variant_args = Object.entries(variantFilters);
+
+        let variant_name_1 = variant_args[0][0];
+        let variant_name_2 = null;
+        let variant_value_1 = variant_args[0][1];
+        let variant_value_2 = null;
+        if (variant_args.length === 2) {
+          variant_name_2 = variant_args[1][0];
+          variant_value_2 = variant_args[1][1];
+        }
+
+        let hasMatchingVariant = null;
+
+        if (shoe.variants.length > 0) {
+          hasMatchingVariant = shoe.variants.some((variant) => {
+            let has_variant_1_match = null;
+            variant_value_1.forEach((variant_arg) => {
+              if (!has_variant_1_match) {
+                has_variant_1_match = variant.optionValues[variant_name_1]
+                  .toLowerCase()
+                  .trim()
+                  .includes(variant_arg);
+              }
+            });
+            let has_variant_2_match = null;
+            if (variant.optionValues[variant_name_2]) {
+              variant_value_2.forEach((variant_arg) => {
+                if (!has_variant_2_match) {
+                  has_variant_2_match = variant.optionValues[variant_name_2]
+                    .toLowerCase()
+                    .trim()
+                    .includes(variant_arg);
+                }
+              });
+            }
+            if (variant.optionValues[variant_name_2]) {
+              return has_variant_1_match && has_variant_2_match;
+            }
+            return has_variant_1_match;
+          });
+        } else {
+          hasMatchingVariant = matchVariantsInNameAdvanced(
+            shoe.name,
+            variantFilters
+          );
+        }
+
+        if (hasMatchingVariant) {
+          variantScore = 1;
+        }
+      }
+
+      let brandScore = 0;
+
+      const finalScore =
+        semanticScore * weights.semantic +
+        categoryScore * weights.category +
+        variantScore * weights.variant +
+        brandScore * weights.brand;
+
+      shoe.score_embedding = finalScore;
+      shoe.debug = {
+        semanticScore,
+        categoryScore,
+        variantScore,
+        brandScore,
+      };
     }
 
-    if (shoe?.description_embedding) {
-      const similarity = cosineSimilarity(
-        queryEmbedding,
-        shoe.description_embedding
-      );
-      console.log("SIMILARITY : ", similarity, Number(similarity.toFixed(3)));
-      if (Number(similarity.toFixed(3)) >= 0.7) {
-        shoesWithScores.push({ shoe, similarity });
+    if (shoe?.score_embedding) {
+      // const similarity = cosineSimilarity(
+      //   userIntentEmbedding,
+      //   shoe.score_embedding
+      // );
+      console.log("FINAL SCORE : ", shoe.debug, shoe.score_embedding);
+      if (shoe.score_embedding >= 0.4) {
+        shoesWithScores.push({ shoe, score_embedding: shoe.score_embedding });
       }
     }
   }
 
-  shoesWithScores.sort((a, b) => b.similarity - a.similarity);
+  shoesWithScores.sort((a, b) => b.score_embedding - a.score_embedding);
 
   const rawProductsForFrontend = [];
 

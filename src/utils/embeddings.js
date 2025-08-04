@@ -21,8 +21,8 @@ async function initializeEmbeddingPipeline() {
       // 'mixedbread-ai/mxbai-embed-large-v1' adalah pilihan yang bagus.
       extractor = await pipeline(
         "feature-extraction",
-        "mixedbread-ai/mxbai-embed-large-v1"
-        // "Xenova/all-MiniLM-L6-v2"
+        // "mixedbread-ai/mxbai-embed-large-v1"
+        "Xenova/all-MiniLM-L6-v2"
       );
       console.log("Pipeline embedding siap digunakan.");
     } catch (error) {

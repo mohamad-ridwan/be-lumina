@@ -662,6 +662,81 @@ const createRegexObjectFromFilters = (filters) => {
   return regexFilters;
 };
 
+function matchVariantsInNameAdvanced(productName, userVariantFilters) {
+  // 1. Normalize and extract variants from the product name.
+  // This is a more complex tokenization step to handle ranges and lists.
+  const normalizedProductName = productName.toLowerCase();
+
+  // Regex to find content inside parentheses (e.g., '(39-45 / putih, hitam)')
+  const variantTextMatch = normalizedProductName.match(/\((.*?)\)/);
+
+  if (!variantTextMatch) {
+    // If no variants are found in parentheses, we can't match.
+    return 0;
+  }
+
+  const productVariantTokens = variantTextMatch[1]
+    .split("/")
+    .flatMap((part) => part.split(",").map((s) => s.trim()))
+    .filter((token) => token.length > 0);
+
+  // 2. Initialize counters for dynamic matching.
+  let totalFilters = 0;
+  let matchedFilters = 0;
+
+  // 3. Dynamically iterate through each user-defined filter.
+  for (const filterKey in userVariantFilters) {
+    const userValues = userVariantFilters[filterKey];
+
+    if (userValues && userValues.length > 0) {
+      totalFilters++;
+      const normalizedUserValues = userValues.map((value) =>
+        String(value).toLowerCase()
+      );
+
+      let isFilterMatched = false;
+
+      // 4. Match user values against product tokens.
+      for (const userValue of normalizedUserValues) {
+        for (const productToken of productVariantTokens) {
+          // Case 1: Simple token match (e.g., 'hitam' matches 'hitam')
+          if (productToken === userValue) {
+            isFilterMatched = true;
+            break;
+          }
+
+          // Case 2: Range match (e.g., '39-45' matches '42')
+          const rangeMatch = productToken.match(/^(\d+)-(\d+)$/);
+          if (rangeMatch) {
+            const start = parseInt(rangeMatch[1], 10);
+            const end = parseInt(rangeMatch[2], 10);
+            const userValueNum = parseInt(userValue, 10);
+            if (
+              !isNaN(userValueNum) &&
+              userValueNum >= start &&
+              userValueNum <= end
+            ) {
+              isFilterMatched = true;
+              break;
+            }
+          }
+        }
+        if (isFilterMatched) break;
+      }
+
+      if (isFilterMatched) {
+        matchedFilters++;
+      }
+    }
+  }
+
+  // 5. Return a binary score based on whether all filters were matched (AND logic).
+  if (totalFilters === 0) {
+    return 0;
+  }
+  return matchedFilters === totalFilters ? 1 : 0;
+}
+
 module.exports = {
   formatDate,
   generateBase64ThumbnailFromUrl,
@@ -676,4 +751,5 @@ module.exports = {
   existingBotReplyMessageJob,
   formatVariantFiltersSearchIndex,
   createRegexObjectFromFilters,
+  matchVariantsInNameAdvanced,
 };
