@@ -179,63 +179,71 @@ const searchShoes = async ({
   const categoryMap = new Map(
     (await Category.find()).map((c) => [
       c._id.toString(),
-      { name: c.name, isPopular: c.isPopular, description: c.description },
+      {
+        _id: c._id,
+        name: c.name,
+        isPopular: c.isPopular,
+        description: c.description,
+      },
     ])
   );
 
   // Menambahkan filter category jika tersedia
-  if (category || isPopular) {
+  if (category || isPopular !== undefined) {
     const matchedCategoryIds = new Set();
 
-    if (category) {
-      const normalizedQueryCategory = normalizeTextForSearch(category);
+    // Fase 1: Cari kategori yang cocok dengan kriteria `isPopular` (jika ada)
+    let candidateCategories = Array.from(categoryMap.values());
+    if (isPopular !== undefined) {
+      candidateCategories = candidateCategories.filter(
+        (cat) => cat.isPopular === isPopular
+      );
+    }
 
-      for (const [categoryId, categoryInfo] of categoryMap.entries()) {
+    // Fase 2: Filter kandidat kategori berdasarkan array `category`
+    if (category && category.length > 0) {
+      const normalizedQueryCategories = category.map((cat) =>
+        normalizeTextForSearch(cat)
+      );
+
+      // Lakukan pencocokan semantik di sini
+      for (const categoryInfo of candidateCategories) {
         const normalizedCategoryName = normalizeTextForSearch(
           categoryInfo.name
         );
 
-        // Lakukan pencocokan semantik antara query 'category' dengan nama kategori yang ada
-        // dan periksa juga isPopular jika ditentukan
-        let semantic1 = { name: normalizedQueryCategory };
-        let semantic2 = { name: normalizedCategoryName };
-        if (isPopular) {
-          semantic1.isPopular = true;
-          semantic2.isPopular = true;
-        }
-        const validSemantic = await checkSemanticMatch(
-          `(name: ${semantic1.name}${
-            semantic1.isPopular ? ", isPopular: true" : ""
-          })`,
-          `(name : ${semantic2.name})${
-            semantic2.isPopular ? ", isPopular: true" : ""
-          })`,
-          0.7
-        );
-        if (
-          validSemantic &&
-          (isPopular === undefined || categoryInfo.isPopular === isPopular)
-        ) {
-          matchedCategoryIds.add(categoryId);
-        }
-      }
+        // Periksa apakah nama kategori cocok dengan salah satu query
+        for (const queryCat of normalizedQueryCategories) {
+          let semantic1 = { name: queryCat };
+          let semantic2 = { name: normalizedCategoryName };
+          if (isPopular) {
+            semantic1.isPopular = true;
+            semantic2.isPopular = true;
+          }
 
-      if (matchedCategoryIds.size === 0 && isPopular !== undefined) {
-        for (const [categoryId, categoryInfo] of categoryMap.entries()) {
-          if (categoryInfo.isPopular === isPopular) {
-            matchedCategoryIds.add(categoryId);
+          const validSemantic = await checkSemanticMatch(
+            `(name: ${semantic1.name}${
+              semantic1.isPopular ? ", isPopular: true" : ""
+            })`,
+            `(name : ${semantic2.name})${
+              semantic2.isPopular ? ", isPopular: true" : ""
+            })`,
+            0.7
+          );
+          if (validSemantic) {
+            matchedCategoryIds.add(categoryInfo._id);
+            break; // Keluar dari perulangan inner jika sudah cocok
           }
         }
       }
-    } else if (isPopular !== undefined) {
-      // Jika 'category' tidak ada, tapi 'isPopular' ditentukan
-      for (const [categoryId, categoryInfo] of categoryMap.entries()) {
-        if (categoryInfo.isPopular === isPopular) {
-          matchedCategoryIds.add(categoryId);
-        }
+    } else {
+      // Jika tidak ada query kategori, gunakan semua kandidat dari Fase 1
+      for (const categoryInfo of candidateCategories) {
+        matchedCategoryIds.add(categoryInfo._id);
       }
     }
 
+    // Tambahkan query ke initialDbQuery jika ada ID yang cocok
     if (matchedCategoryIds.size > 0) {
       initialDbQuery.category = { $in: Array.from(matchedCategoryIds) };
     }
@@ -483,14 +491,36 @@ const searchShoes = async ({
 
       if (
         category &&
-        shoe.category.some((id) =>
-          categoryMap
-            .get(id.toString())
-            .name.toLowerCase()
-            .includes(category.toLowerCase())
-        )
+        Array.isArray(category) &&
+        category.length > 0 &&
+        shoe.category &&
+        shoe.category.length > 0
       ) {
-        categoryScore = 1;
+        // Iterasi setiap item di dalam array `category` dari input user
+        for (const queryCategory of category) {
+          const normalizedQueryCategory = queryCategory.toLowerCase();
+
+          // Iterasi melalui array category yang ada di dokumen shoe
+          for (const categoryId of shoe.category) {
+            const categoryInfo = categoryMap.get(categoryId.toString());
+
+            // Periksa apakah categoryInfo ada dan namanya cocok
+            if (categoryInfo) {
+              const normalizedCategoryName = categoryInfo.name.toLowerCase();
+
+              // Jika nama kategori di database mengandung string dari query
+              if (normalizedCategoryName.includes(normalizedQueryCategory)) {
+                categoryScore = 1;
+                break; // Hentikan loop segera setelah kecocokan ditemukan
+              }
+            }
+          }
+
+          // Jika skor sudah ditemukan (1), hentikan perulangan luar juga
+          if (categoryScore === 1) {
+            break;
+          }
+        }
       }
 
       let variantScore = 0;
