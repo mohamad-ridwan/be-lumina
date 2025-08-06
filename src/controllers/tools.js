@@ -29,7 +29,7 @@ exports.getTools = async (req, res, next) => {
 exports.addTools = async (req, res, next) => {
   try {
     // Ambil data untuk satu tool dari body request
-    const { name, description, parameters } = req.body;
+    const { name, description, parameters, role } = req.body;
 
     // --- Validasi Dasar ---
     if (!name || typeof name !== "string" || name.trim() === "") {
@@ -65,6 +65,7 @@ exports.addTools = async (req, res, next) => {
     // --- Buat instance Tools baru ---
     const newTool = new toolsDB({
       name: name,
+      role,
       description: description,
       parameters: parameters,
     });

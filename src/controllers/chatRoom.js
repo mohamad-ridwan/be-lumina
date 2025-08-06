@@ -14,6 +14,98 @@ const { templateSendMessage } = require("../helpers/sendMessage");
 const {
   agenda_name_automaticOrderCancelOfProcessingStatus,
 } = require("../utils/agenda");
+const { generateQuestionsToBubbleMessages } = require("../utils/gemini");
+
+exports.loadingBubbleMessages = async (req, res) => {
+  const { chatId, loading } = req.body;
+
+  // Validasi dasar untuk memastikan parameter yang diperlukan ada
+  if (!chatId || typeof loading === "undefined") {
+    return res.status(400).json({
+      success: false,
+      message: "Parameter 'chatId' dan 'loading' diperlukan.",
+      data: null,
+    });
+  }
+
+  try {
+    // Cari dan perbarui dokumen chat berdasarkan chatId
+    const updatedChat = await chats.findOneAndUpdate(
+      { chatId: chatId },
+      { loadingBubbleMessages: loading },
+      { new: true } // Mengembalikan dokumen yang sudah diperbarui
+    );
+
+    // Jika dokumen tidak ditemukan, kirim respons 404
+    if (!updatedChat) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat tidak ditemukan.",
+        data: null,
+      });
+    }
+
+    // Kirim respons sukses dengan data loading yang diperbarui
+    return res.status(200).json({
+      success: true,
+      message: "Status loading bubble messages berhasil diperbarui.",
+      data: {
+        loadingBubbleMessages: updatedChat.loadingBubbleMessages,
+      },
+    });
+  } catch (error) {
+    console.error(
+      "Error saat memperbarui status loading bubble messages:",
+      error
+    );
+    return res.status(500).json({
+      success: false,
+      message: "Terjadi kesalahan server saat memproses permintaan.",
+      data: null,
+    });
+  }
+};
+
+exports.getBubbleMessages = async (req, res) => {
+  const { senderUserId, recipientProfileId, chatRoomId, chatId } = req.query;
+
+  try {
+    const bubbleMessages = await generateQuestionsToBubbleMessages({
+      senderUserId,
+      recipientProfileId,
+      chatRoomId,
+      chatId,
+    });
+
+    // Jika bubbleMessages tidak ada atau kosong, kirim array kosong.
+    // Jika ada, kirim array yang berisi pesan-pesan tersebut.
+    if (!bubbleMessages || bubbleMessages.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          messages: [],
+        },
+        message: "Tidak ada bubble messages yang ditemukan.",
+      });
+    }
+
+    // Kirim respons sukses dengan array bubble messages yang ditemukan
+    return res.status(200).json({
+      success: true,
+      data: {
+        messages: bubbleMessages,
+      },
+      message: "Bubble messages berhasil diambil.",
+    });
+  } catch (error) {
+    console.error("Error saat mengambil bubble messages:", error);
+    return res.status(500).json({
+      success: false,
+      data: null,
+      message: "Terjadi kesalahan saat memproses permintaan.",
+    });
+  }
+};
 
 exports.confirmCancelOrder = async (req, res) => {
   const { messageId, profileId, recipientId, cancelReason } = req.body;
@@ -810,6 +902,8 @@ exports.getMessagesPagination = async (req, res, next) => {
       ],
     };
 
+    let loadingBubbleMessages = null;
+
     // --- LOGIC BARU UNTUK MENENTUKAN sortTimestamp ---
     const getSortTimestampField = () => {
       return {
@@ -864,6 +958,8 @@ exports.getMessagesPagination = async (req, res, next) => {
         { $sort: { sortTimestamp: -1, isHeader: 1 } }, // Urutkan berdasarkan sortTimestamp yang baru dibuat
         { $limit: 20 },
       ]);
+      const chatsCurrently = await chats.findOne({ chatId });
+      loadingBubbleMessages = chatsCurrently.loadingBubbleMessages;
 
       // ==== Cek apakah semua item adalah header ====
       const headers = messages.filter((msg) => msg.isHeader === true);
@@ -895,6 +991,7 @@ exports.getMessagesPagination = async (req, res, next) => {
           isFirstMessage,
           messages: [],
           totalMessages: 0,
+          loadingBubbleMessages,
         });
       } else {
         const messageNonHeaders = messages.filter((msg) => !msg?.isHeader);
@@ -919,6 +1016,7 @@ exports.getMessagesPagination = async (req, res, next) => {
           isFirstMessage,
           messages: messagesCurrently,
           totalMessages: messagesCurrently.length,
+          loadingBubbleMessages,
         });
       }
     }

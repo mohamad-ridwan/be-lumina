@@ -29,6 +29,13 @@ const {
   CSProductRecommendation,
 } = require("./instructions/assistans");
 const { seasonCurrently } = require("./instructions/seasons");
+const {
+  bubbleMessageAssistans,
+  CSBubbleMessageAssistans,
+  CSBubbleMessageShoeAssistans,
+  CSBubbleMessageShoeClarification,
+  CSBubbleMessageProductRecommendation,
+} = require("./instructions/bubble-messages");
 
 const getConversationHistoryForGemini = async (message, io, socket, client) => {
   try {
@@ -213,7 +220,7 @@ const processNewMessageWithAI = async (
   let currentFunctionName = null;
 
   try {
-    const tools = await toolsDB.find();
+    const tools = await toolsDB.find({ role: "assistans" });
     const category = await Category.find();
     const brands = await Brand.find();
 
@@ -489,4 +496,78 @@ const processNewMessageWithAI = async (
   }
 };
 
-module.exports = { getConversationHistoryForGemini, processNewMessageWithAI };
+const generateQuestionsToBubbleMessages = async (
+  senderUserId,
+  recipientProfileId,
+  chatRoomId,
+  chatId
+) => {
+  try {
+    let history = [];
+    const latestMessage = {
+      senderUserId,
+      chatRoomId,
+      chatId,
+    };
+    const getHistory = await getConversationHistoryForGemini({
+      latestMessage,
+      recipientProfileId,
+    });
+    history = getHistory ?? [];
+
+    const category = await Category.find();
+    const brands = await Brand.find();
+
+    const chat = genAI.chats.create({
+      model: "gemini-2.5-flash",
+      history,
+    });
+
+    const tools = await toolsDB.find({ role: "bubble-messages" });
+
+    const response = await chat.sendMessage({
+      message: `Anda adalah asisten AI yang bertugas untuk membuat daftar pertanyaan yang relevan terhadap history percakapan. Anda WAJIB memberikan rekomendasi KONTEKS pertanyaan untuk rekomendasi yang sesuai history dari "model" maupun "user" saat ini`,
+      config: {
+        tools: [{ functionDeclarations: tools }],
+        temperature: 1,
+        thinkingConfig: {
+          thinkingBudget: 1024,
+        },
+        systemInstruction: {
+          parts: [
+            CSBubbleMessageAssistans,
+            // SEASONS
+            seasonCurrently,
+            // END SEASONS
+            bubbleMessageAssistans,
+            CSBubbleMessageShoeAssistans,
+            CSBubbleMessageShoeClarification,
+            CSBubbleMessageProductRecommendation(category, brands),
+          ],
+          role: "model",
+        },
+      },
+    });
+
+    let bubbleMessageQuestions = [];
+    if (response.functionCalls && response.functionCalls.length > 0) {
+      for (const call of response.functionCalls) {
+        const functionArgs = { ...call.args }; // Salin argumen
+
+        if (functionArgs?.questions?.length > 0) {
+          bubbleMessageQuestions = functionArgs.questions;
+        }
+      }
+    }
+    return bubbleMessageQuestions;
+  } catch (error) {
+    console.log("ERROR generate questions for bubble messages: ", error);
+    return [];
+  }
+};
+
+module.exports = {
+  getConversationHistoryForGemini,
+  processNewMessageWithAI,
+  generateQuestionsToBubbleMessages,
+};

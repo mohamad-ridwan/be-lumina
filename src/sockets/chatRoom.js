@@ -547,6 +547,7 @@ const handleSendMessageFromAI = async (
       { chatRoomId, chatId },
       {
         latestMessage: updatedLatestMessages,
+        loadingBubbleMessages: false,
       }
     );
 
@@ -878,14 +879,18 @@ const sendMessage = async (
 
   updatedLatestMessages = updatedLatestMessages.filter((item) => item?.userId);
 
-  await chatsDB.updateOne(
-    { chatRoomId, chatId },
-    {
-      unreadCount: newUnreadCount,
-      latestMessage: updatedLatestMessages,
-    },
-    { new: true }
-  );
+  let updateChatParams = {
+    unreadCount: newUnreadCount,
+    latestMessage: updatedLatestMessages,
+  };
+
+  if (message?.role === "model") {
+    updateChatParams.loadingBubbleMessages = false;
+  }
+
+  await chatsDB.updateOne({ chatRoomId, chatId }, updateChatParams, {
+    new: true,
+  });
 
   const senderUserId = updatedLatestMessages.find(
     (msg) => msg.userId !== recipientProfileId

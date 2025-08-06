@@ -15,6 +15,7 @@ const {
   createRegexObjectFromFilters,
   formatVariantFiltersSearchIndex,
   matchVariantsInNameAdvanced,
+  createMaterialRegex,
 } = require("../../helpers/general");
 // const genAI = require("../gemini");
 
@@ -118,6 +119,7 @@ const searchShoes = async ({
   userIntent,
   minPrice,
   maxPrice,
+  material,
   brand,
   category,
   variantFilters = {},
@@ -132,6 +134,7 @@ const searchShoes = async ({
     userIntent,
     minPrice,
     maxPrice,
+    material,
     brand,
     category,
     variantFilters,
@@ -334,6 +337,19 @@ const searchShoes = async ({
     }
   }
 
+  // INPUT MATERIAL ON DESCRIPTION
+  if (material) {
+    const descriptionQuery = {};
+    const materialRegexes = createMaterialRegex(material);
+    descriptionQuery.description = { $in: materialRegexes };
+
+    if (initialDbQuery.$and) {
+      initialDbQuery.$and = [...initialDbQuery.$and, descriptionQuery];
+    } else {
+      initialDbQuery.$and = [descriptionQuery];
+    }
+  }
+
   const candidateShoes = await Shoe.find(
     { ...initialDbQuery },
     { score: { $meta: "textScore" } }
@@ -365,6 +381,7 @@ const searchShoes = async ({
     semantic: 0.6,
     category: 0.15,
     variant: 0.15,
+    material: 0.15,
     brand: 0.1,
   };
 
@@ -456,6 +473,11 @@ const searchShoes = async ({
         userIntentEmbedding,
         productEmbedding
       );
+      let materialScore = 0;
+      if (material) {
+        const materialEmbedding = await getEmbedding(material);
+        materialScore = cosineSimilarity(materialEmbedding, productEmbedding);
+      }
 
       let categoryScore = 0;
 
@@ -546,6 +568,7 @@ const searchShoes = async ({
 
       const finalScore =
         semanticScore * weights.semantic +
+        materialScore * weights.material +
         categoryScore * weights.category +
         variantScore * weights.variant +
         brandScore * weights.brand;
@@ -553,6 +576,7 @@ const searchShoes = async ({
       shoe.score_embedding = finalScore;
       shoe.debug = {
         semanticScore,
+        materialScore,
         categoryScore,
         variantScore,
         brandScore,

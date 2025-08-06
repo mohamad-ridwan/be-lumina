@@ -28,6 +28,10 @@ const chats = new Schema(
     userIds: {
       type: Array,
     },
+    loadingBubbleMessages: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamp: true,

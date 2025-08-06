@@ -10,6 +10,11 @@ const tools = new Schema(
       trim: true,
       unique: true, // Opsional: Pastikan nama fungsi unik di dalam array atau koleksi
     },
+    role: {
+      type: String,
+      enum: ["assistans", "bubble-messages"],
+      required: true,
+    },
     description: {
       type: String,
       required: true,

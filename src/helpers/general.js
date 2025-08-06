@@ -737,6 +737,21 @@ function matchVariantsInNameAdvanced(productName, userVariantFilters) {
   return matchedFilters === totalFilters ? 1 : 0;
 }
 
+const createMaterialRegex = (input) => {
+  if (!input || input.trim() === "") {
+    return [];
+  }
+
+  // Pecah string input menjadi kata-kata (tokens)
+  const tokens = input
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token.length > 0);
+
+  // Buat objek RegExp untuk setiap token
+  return tokens.map((token) => new RegExp(`\\b${token}\\b`, "i"));
+};
+
 module.exports = {
   formatDate,
   generateBase64ThumbnailFromUrl,
@@ -752,4 +767,5 @@ module.exports = {
   formatVariantFiltersSearchIndex,
   createRegexObjectFromFilters,
   matchVariantsInNameAdvanced,
+  createMaterialRegex,
 };

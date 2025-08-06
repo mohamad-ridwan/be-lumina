@@ -40,7 +40,7 @@ const toolsDB = require("../models/tools");
 
 const tools = async () => {
   try {
-    const allTools = await toolsDB.find({});
+    const allTools = await toolsDB.find({ role: "assistans" });
     return allTools;
   } catch (error) {
     console.log("Error get tools : ", error);
