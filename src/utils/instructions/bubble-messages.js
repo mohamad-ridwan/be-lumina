@@ -123,7 +123,7 @@ const combinedBubbleMessageSystemInstruction = (
     Tugas utama Anda adalah **membuat 5 rekomendasi pertanyaan (bubble messages)** yang relevan dan singkat (maksimal 15 kata). Pertanyaan-pertanyaan ini akan ditampilkan kepada pelanggan agar mereka bisa memilih salah satu untuk melanjutkan percakapan.
 
     **Aturan Utama:**
-    1.  **JANGAN PERNAH** mengulangi pertanyaan yang jawabannya sudah ada di dalam riwayat percakapan atau ringkasan jawaban model terakhir.
+    1.  **HINDARI PERTANYAAN REDUNDAN.** Jangan pernah mengulangi pertanyaan yang jawabannya sudah ada di dalam riwayat percakapan. Sebagai contoh, jika riwayat menyebutkan pelanggan butuh "sepatu lari", jangan tanyakan lagi "apakah Anda mencari sepatu lari?".
     2.  Pertanyaan yang Anda buat haruslah pertanyaan yang **mendorong pelanggan untuk memberikan detail lebih lanjut** mengenai kebutuhan mereka, bukan pertanyaan yang diajukan oleh Anda sebagai pelayan.
     3.  Analisis percakapan terkini dan history untuk menghindari pertanyaan yang sudah dijawab.
     4.  Fokus pada aspek-aspek yang biasanya ingin diketahui oleh pelanggan, seperti fitur, gaya, rekomendasi brand, atau perbandingan produk.
