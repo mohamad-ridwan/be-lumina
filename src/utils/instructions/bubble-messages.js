@@ -97,7 +97,7 @@ const CSBubbleMessageProductRecommendation = (category, brands) => {
     Berikut brand yang tersedia:
     ${brandData.join(",")}
 
-    **Misalkan history percakapan TERBARU berupa pertanyaan pelanggan seperti "Mencari sepatu untuk sehari-hari" dan history dengan role model belum memiliki data tersebut, Anda WAJIB memberikan pertanyaan rekomendasi kategori dan brand yang relevan dengan "INTENT" pelanggan.
+    **Misalkan history percakapan TERBARU berupa pertanyaan pelanggan seperti "Mencari sepatu untuk sehari-hari" dan history dengan role model belum memiliki data tersebut, Anda bisa memberikan pertanyaan rekomendasi kategori dan brand yang relevan dengan "INTENT" pelanggan.
 
     Contoh pertanyaan:
     - Rekomendasi Sepatu "Casual" merek "Adidas" untuk terlihat keren saat nongkrong.
@@ -106,10 +106,157 @@ const CSBubbleMessageProductRecommendation = (category, brands) => {
     - Merek apa yang lagi trend?
 
     **PENTING, bahwa pertanyaan tersebut hanya contoh, berikan pertanyaan yang sesuai KONTEKS pertanyaan pelanggan saat ini dan history percakapan.
-    **PENTING, jika ingin memberikan pertanyaan mengenai tren berupa "Kategori" atau "Brand" Anda WAJIB memiliki wawasan di indonesia apa yang lagi tren dan sesuaikan dengan "Kategori" dan "Brand" yang ada di toko ini.
+    **PENTING, jika ingin memberikan pertanyaan mengenai tren berupa "Kategori" atau "Brand" Anda dapat memiliki wawasan di indonesia apa yang lagi tren dan sesuaikan dengan "Kategori" dan "Brand" yang ada di toko ini.
     `,
   };
 };
+
+const combinedBubbleMessageSystemInstruction = {
+  text: `
+  Anda adalah asisten AI layanan pelanggan untuk toko sepatu 'Lumina'. Tugas utama Anda adalah membantu pelanggan dengan memberikan **rekomendasi pertanyaan (bubble messages)** yang relevan.
+
+  **Tugas Utama Anda:**
+  1.  Analisis percakapan terkini dan history percakapan secara menyeluruh untuk memahami konteks, niat, dan kebutuhan pelanggan.
+  2.  Buatlah 5 pertanyaan singkat dan relevan (maksimal 20 kata per item) yang akan berfungsi sebagai bubble messages.
+  3.  Fokus utama pertanyaan adalah memandu pelanggan agar mendapatkan rekomendasi sepatu yang paling sesuai.
+
+  **Aturan Prioritas untuk Pertanyaan:**
+  - **Prioritas 1 (Konteks Percakapan):** Paling tidak 2 pertanyaan harus berhubungan langsung dengan jawaban AI sebelumnya (misalnya, menanyakan klarifikasi, feedback, atau detail lebih lanjut dari produk yang direkomendasikan).
+    * Contoh: Jika AI menyebutkan sepatu berbahan kanvas, pertanyaan bisa berupa: "Sepatu kanvas yang mudah dibersihkan" atau "Model sepatu kanvas untuk cuaca panas".
+  - **Prioritas 2 (Target Audiens):** Paling tidak 2 pertanyaan harus berkaitan dengan profil pelanggan (gender, usia, gaya hidup, atau kebutuhan spesifik).
+    * Contoh: "Sepatu untuk pria" atau "Sepatu casual untuk anak muda".
+  - **Prioritas 3 (Musim Kondisional):** Jika percakapan belum spesifik, masukkan 1 pertanyaan yang relevan dengan musim saat ini (musim kemarau). Jika percakapan sudah spesifik (misalnya, mencari sepatu bot), abaikan pertanyaan musim.
+    * Contoh: "Sepatu yang tidak bikin gerah."
+
+  **PENTING:**
+  - Selalu pastikan pertanyaan yang Anda buat adalah untuk memandu **pelanggan** bertanya, bukan pertanyaan dari Anda sebagai **pelayan**.
+  - Jangan memaksakan pertanyaan jika tidak ada data yang mendukung dalam percakapan. Jika pelanggan sudah menyebutkan merek dan warna, jangan tanyakan lagi.
+  - Saat ini, tren di Indonesia cenderung ke arah sepatu kasual dan sneakers yang nyaman untuk aktivitas sehari-hari.
+
+  ---
+
+  **Gaya Bahasa yang Benar (Pelanggan bertanya):**
+  - "Rekomendasi merek favorit."
+  - "Sepatu dengan kisaran harga terjangkau."
+  - "Model sepatu untuk lari atau santai."
+  - "Sepatu yang cocok untuk musim hujan."
+
+  **Gaya Bahasa yang Salah (Pelayan bertanya):**
+  - "Apakah ada merek favorit Anda?"
+  - "Kisaran harga yang diinginkan?"
+  - "Cari sepatu untuk lari atau santai?"
+  - "Apakah Anda butuh sepatu untuk musim hujan?"
+  `,
+};
+
+const conversationContext = {
+  topik: "sepatu lari pria",
+  fitur: ["adem", "tidak bikin gerah", "tahan lama"],
+  merek: ["Adidas", "Nike"],
+  pertanyaanTerakhir:
+    "Tolong rekomendasikan sepatu lari yang bagus untuk lari jarak jauh.",
+};
+
+const dynamicSystemInstruction = {
+  parts: [
+    {
+      text: `Anda adalah asisten AI yang bertugas membuat daftar pertanyaan relevan. Anda WAJIB menggunakan konteks berikut untuk memberikan rekomendasi:`,
+      role: "model",
+    },
+    {
+      text: `
+        ### KONTEKS PERCAKAPAN
+        - Topik: ${conversationContext.topik}
+        - Fitur Penting: ${conversationContext.fitur.join(", ")}
+        - Merek yang Diminati: ${conversationContext.merek.join(", ")}
+        - Pertanyaan User Terakhir: ${conversationContext.pertanyaanTerakhir}
+
+        ### ATURAN UTAMA
+        - Buatlah 5 pertanyaan singkat dan relevan.
+        - Pertanyaan harus menindaklanjuti konteks di atas.
+        - Hindari pertanyaan yang sudah jelas dari konteks.
+        - Contoh: jika user sudah menyebut "sepatu lari", jangan tanyakan lagi "apakah Anda mencari sepatu lari?".
+      `,
+      role: "user",
+    },
+  ],
+  role: "model",
+};
+
+function generateDynamicInstruction(conversationContext, category, brands) {
+  const context = `
+      ### KONTEKS PERCAKAPAN
+      - Topik Utama: ${conversationContext?.topik || "Tidak spesifik"}
+      - Niat Pelanggan: ${conversationContext?.user_intent || "Tidak spesifik"}
+      - Nama Sepatu yang Disebut: ${
+        conversationContext?.shoe_name?.length > 0
+          ? conversationContext?.shoe_name?.join(", ")
+          : "Tidak spesifik"
+      }
+      - Kategori: ${
+        conversationContext?.kategori?.length > 0
+          ? conversationContext?.kategori?.join(", ")
+          : "Tidak spesifik"
+      }
+      - Merek yang Diminati: ${
+        conversationContext?.brand?.length > 0
+          ? conversationContext?.brand?.join(", ")
+          : "Tidak spesifik"
+      }
+      - Fitur Penting: ${
+        conversationContext?.fitur?.length > 0
+          ? conversationContext?.fitur?.join(", ")
+          : "Tidak spesifik"
+      }
+      - Pilihan Warna: ${
+        conversationContext?.warna?.length > 0
+          ? conversationContext?.warna?.join(", ")
+          : "Tidak spesifik"
+      }
+      - Pilihan Ukuran: ${
+        conversationContext?.ukuran?.length > 0
+          ? conversationContext?.ukuran?.join(", ")
+          : "Tidak spesifik"
+      }
+      - Audiens: ${
+        conversationContext?.audiens?.length > 0
+          ? conversationContext?.audiens?.join(", ")
+          : "Tidak spesifik"
+      }
+      - Pertanyaan User Terakhir: ${
+        conversationContext?.last_user_question || "Tidak spesifik"
+      }
+    `;
+
+  return {
+    parts: [
+      combinedBubbleMessageSystemInstruction,
+      {
+        text: context,
+      },
+      CSBubbleMessageProductRecommendation(category, brands),
+    ],
+    role: "model",
+  };
+}
+
+async function getConversationContext(responseText) {
+  // Hapus markdown code block (```json) dan spasi ekstra
+  const cleanedText = responseText
+    .replace(/```json/g, "")
+    .replace(/```/g, "")
+    .trim();
+
+  try {
+    const context = JSON.parse(cleanedText);
+    return context;
+  } catch (error) {
+    console.error("Failed to parse JSON:", error);
+    // Jika masih gagal, mungkin ada format yang berbeda.
+    // Anda bisa mengembalikan nilai default atau mencoba penanganan error lainnya.
+    return { topik: null, merek: null, fitur: null };
+  }
+}
 
 module.exports = {
   bubbleMessageAssistans,
@@ -117,4 +264,9 @@ module.exports = {
   CSBubbleMessageShoeAssistans,
   CSBubbleMessageShoeClarification,
   CSBubbleMessageProductRecommendation,
+  combinedBubbleMessageSystemInstruction,
+  dynamicSystemInstruction,
+  generateDynamicInstruction,
+  conversationContext,
+  getConversationContext,
 };

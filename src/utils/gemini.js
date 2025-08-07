@@ -30,11 +30,8 @@ const {
 } = require("./instructions/assistans");
 const { seasonCurrently } = require("./instructions/seasons");
 const {
-  bubbleMessageAssistans,
-  CSBubbleMessageAssistans,
-  CSBubbleMessageShoeAssistans,
-  CSBubbleMessageShoeClarification,
-  CSBubbleMessageProductRecommendation,
+  generateDynamicInstruction,
+  getConversationContext,
 } = require("./instructions/bubble-messages");
 
 const getConversationHistoryForGemini = async (message, io, socket, client) => {
@@ -496,21 +493,21 @@ const processNewMessageWithAI = async (
   }
 };
 
-const generateQuestionsToBubbleMessages = async (
+const generateQuestionsToBubbleMessages = async ({
   senderUserId,
   recipientProfileId,
   chatRoomId,
-  chatId
-) => {
+  chatId,
+}) => {
   try {
     let history = [];
     const latestMessage = {
       senderUserId,
-      chatRoomId,
-      chatId,
     };
     const getHistory = await getConversationHistoryForGemini({
       latestMessage,
+      chatRoomId,
+      chatId,
       recipientProfileId,
     });
     history = getHistory ?? [];
@@ -519,33 +516,68 @@ const generateQuestionsToBubbleMessages = async (
     const brands = await Brand.find();
 
     const chat = genAI.chats.create({
-      model: "gemini-2.5-flash",
+      model: "gemini-2.5-flash-lite",
       history,
     });
 
     const tools = await toolsDB.find({ role: "bubble-messages" });
 
+    // analisis percakapan (topik)
+    const historyString = history
+      .map((h) => `${h?.role}: ${h?.parts?.[0]?.text}`)
+      .join("\n");
+
+    const extractionPrompt = `
+  Analisis riwayat percakapan berikut dan ekstrak informasi-informasi kunci ke dalam format JSON. Jika tidak ada informasi yang spesifik, gunakan "null".
+  
+  Riwayat Percakapan:
+  ${historyString}
+  
+  Format Output JSON:
+  {
+    "topik": "string | null",
+    "brand": "string[] | null",
+    "fitur": "string[] | null"
+    "warna": "string[] | null"
+    "ukuran": "string[] | null"
+    "audiens": "string[] | null"
+    "user_intent": "string | null"
+    "shoe_name": "string[] | null"
+    "kategori": "string[] | null"
+    "last_user_question": "string | null" 
+  }
+
+  Tolong pastikan output Anda HANYA berupa string JSON yang valid, tanpa ada teks penjelasan atau markdown code block
+`;
+
+    const contextResponse = await chat.sendMessage({
+      message: extractionPrompt,
+      config: {
+        // Nonaktifkan tool di sini karena tujuannya hanya ekstraksi teks
+        tools: [],
+      },
+    });
+
+    const conversationContext = await getConversationContext(
+      contextResponse.text
+    );
+    console.log("CONVERSATION CONTEXT DEBUG:", conversationContext);
+
+    const dynamicInstruction = generateDynamicInstruction(
+      conversationContext,
+      category,
+      brands
+    );
+
     const response = await chat.sendMessage({
-      message: `Anda adalah asisten AI yang bertugas untuk membuat daftar pertanyaan yang relevan terhadap history percakapan. Anda WAJIB memberikan rekomendasi KONTEKS pertanyaan untuk rekomendasi yang sesuai history dari "model" maupun "user" saat ini`,
+      message: `Berikan 5 pertanyaan rekomendasi`, // Prompt bisa lebih sederhana
       config: {
         tools: [{ functionDeclarations: tools }],
         temperature: 1,
         thinkingConfig: {
           thinkingBudget: 1024,
         },
-        systemInstruction: {
-          parts: [
-            CSBubbleMessageAssistans,
-            // SEASONS
-            seasonCurrently,
-            // END SEASONS
-            bubbleMessageAssistans,
-            CSBubbleMessageShoeAssistans,
-            CSBubbleMessageShoeClarification,
-            CSBubbleMessageProductRecommendation(category, brands),
-          ],
-          role: "model",
-        },
+        systemInstruction: dynamicInstruction,
       },
     });
 

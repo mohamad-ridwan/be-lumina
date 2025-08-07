@@ -117,6 +117,7 @@ const checkRefinementMatch = async (data1, data2, threshold) => {
 
 const searchShoes = async ({
   userIntent,
+  shoeNames,
   minPrice,
   maxPrice,
   material,
@@ -132,6 +133,7 @@ const searchShoes = async ({
   console.log("--- START searchShoes ---");
   console.log("Calling searchShoes with parameters:", {
     userIntent,
+    shoeNames,
     minPrice,
     maxPrice,
     material,
@@ -355,6 +357,36 @@ const searchShoes = async ({
       initialDbQuery.$and = [...initialDbQuery.$and, descriptionQuery];
     } else {
       initialDbQuery.$and = [descriptionQuery];
+    }
+  }
+
+  if (Array.isArray(shoeNames) && shoeNames.length > 0) {
+    // Buat array untuk menampung regex
+    const shoeNameRegexes = [];
+
+    // Iterasi setiap nama sepatu di array
+    for (const name of shoeNames) {
+      if (typeof name === "string" && name.trim().length > 0) {
+        // Buat regex yang mencocokkan seluruh frasa
+        // Gunakan regex yang fleksibel, tidak terikat pada awal/akhir string
+        // dan tidak sensitif huruf besar-kecil ('i')
+        shoeNameRegexes.push(new RegExp(name.trim(), "i"));
+      }
+    }
+
+    // Jika ada regex yang berhasil dibuat, tambahkan ke query
+    if (shoeNameRegexes.length > 0) {
+      const shoeNameQuery = {
+        // Gunakan $in untuk mencari kecocokan pada salah satu regex
+        name: { $in: shoeNameRegexes },
+      };
+
+      // Gabungkan ke initialDbQuery
+      if (initialDbQuery.$and) {
+        initialDbQuery.$and.push(shoeNameQuery);
+      } else {
+        initialDbQuery.$and = [shoeNameQuery];
+      }
     }
   }
 
