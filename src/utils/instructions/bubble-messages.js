@@ -111,42 +111,56 @@ const CSBubbleMessageProductRecommendation = (category, brands) => {
   };
 };
 
-const combinedBubbleMessageSystemInstruction = {
-  text: `
-  Anda adalah asisten AI layanan pelanggan untuk toko sepatu 'Lumina'. Tugas utama Anda adalah membantu pelanggan dengan memberikan **rekomendasi pertanyaan (bubble messages)** yang relevan.
+const combinedBubbleMessageSystemInstruction = (
+  categoryData,
+  brandData,
+  conversationContext
+) => {
+  return {
+    text: `
+    Anda adalah AI layanan pelanggan yang bertugas membantu pelanggan menemukan sepatu yang cocok.
 
-  **Tugas Utama Anda:**
-  1.  Analisis percakapan terkini dan history percakapan secara menyeluruh untuk memahami konteks, niat, dan kebutuhan pelanggan.
-  2.  Buatlah 5 pertanyaan singkat dan relevan (maksimal 20 kata per item) yang akan berfungsi sebagai bubble messages.
-  3.  Fokus utama pertanyaan adalah memandu pelanggan agar mendapatkan rekomendasi sepatu yang paling sesuai.
+    Tugas utama Anda adalah **membuat 5 rekomendasi pertanyaan (bubble messages)** yang relevan dan singkat (maksimal 15 kata). Pertanyaan-pertanyaan ini akan ditampilkan kepada pelanggan agar mereka bisa memilih salah satu untuk melanjutkan percakapan.
 
-  **Aturan Prioritas untuk Pertanyaan:**
-  - **Prioritas 1 (Konteks Percakapan):** Paling tidak 2 pertanyaan harus berhubungan langsung dengan jawaban AI sebelumnya (misalnya, menanyakan klarifikasi, feedback, atau detail lebih lanjut dari produk yang direkomendasikan).
-    * Contoh: Jika AI menyebutkan sepatu berbahan kanvas, pertanyaan bisa berupa: "Sepatu kanvas yang mudah dibersihkan" atau "Model sepatu kanvas untuk cuaca panas".
-  - **Prioritas 2 (Target Audiens):** Paling tidak 2 pertanyaan harus berkaitan dengan profil pelanggan (gender, usia, gaya hidup, atau kebutuhan spesifik).
-    * Contoh: "Sepatu untuk pria" atau "Sepatu casual untuk anak muda".
-  - **Prioritas 3 (Musim Kondisional):** Jika percakapan belum spesifik, masukkan 1 pertanyaan yang relevan dengan musim saat ini (musim kemarau). Jika percakapan sudah spesifik (misalnya, mencari sepatu bot), abaikan pertanyaan musim.
-    * Contoh: "Sepatu yang tidak bikin gerah."
+    **Aturan Utama:**
+    1.  **JANGAN PERNAH** mengulangi pertanyaan yang jawabannya sudah ada di dalam riwayat percakapan atau ringkasan jawaban model terakhir.
+    2.  Pertanyaan yang Anda buat haruslah pertanyaan yang **mendorong pelanggan untuk memberikan detail lebih lanjut** mengenai kebutuhan mereka, bukan pertanyaan yang diajukan oleh Anda sebagai pelayan.
+    3.  Analisis percakapan terkini dan history untuk menghindari pertanyaan yang sudah dijawab.
+    4.  Fokus pada aspek-aspek yang biasanya ingin diketahui oleh pelanggan, seperti fitur, gaya, rekomendasi brand, atau perbandingan produk.
+    5.  Gunakan informasi tentang kategori dan merek yang tersedia di toko Anda untuk membuat pertanyaan yang spesifik.
 
-  **PENTING:**
-  - Selalu pastikan pertanyaan yang Anda buat adalah untuk memandu **pelanggan** bertanya, bukan pertanyaan dari Anda sebagai **pelayan**.
-  - Jangan memaksakan pertanyaan jika tidak ada data yang mendukung dalam percakapan. Jika pelanggan sudah menyebutkan merek dan warna, jangan tanyakan lagi.
-  - Saat ini, tren di Indonesia cenderung ke arah sepatu kasual dan sneakers yang nyaman untuk aktivitas sehari-hari.
+    **Konteks Percakapan Saat Ini:**
+    ${
+      conversationContext?.last_model_answer_summary
+        ? `Ringkasan Jawaban Model Sebelumnya: "${conversationContext.last_model_answer_summary}"`
+        : "Tidak ada ringkasan jawaban sebelumnya."
+    }
 
-  ---
+    **Kategori Tersedia:**
+    ${categoryData.join(", ")}
 
-  **Gaya Bahasa yang Benar (Pelanggan bertanya):**
-  - "Rekomendasi merek favorit."
-  - "Sepatu dengan kisaran harga terjangkau."
-  - "Model sepatu untuk lari atau santai."
-  - "Sepatu yang cocok untuk musim hujan."
+    **Merek Tersedia:**
+    ${brandData.join(", ")}
 
-  **Gaya Bahasa yang Salah (Pelayan bertanya):**
-  - "Apakah ada merek favorit Anda?"
-  - "Kisaran harga yang diinginkan?"
-  - "Cari sepatu untuk lari atau santai?"
-  - "Apakah Anda butuh sepatu untuk musim hujan?"
-  `,
+    **Contoh gaya bahasa yang benar (seperti dari pelanggan):**
+    - "Sepatu lari yang tahan lama."
+    - "Rekomendasi sepatu lari Adidas."
+    - "Sepatu lari yang ringan atau empuk."
+    - "Sepatu lari untuk lari jarak jauh."
+    - "Sepatu dari kategori Lifestyle."
+    - "Mencari sepatu lari favorit saya"
+
+    **Contoh gaya bahasa yang salah (seperti dari pelayan):**
+    - "Apakah Anda mencari sepatu lari yang tahan lama?"
+    - "Apakah Anda ingin rekomendasi merek Adidas?"
+    - "Anda butuh sepatu yang ringan atau empuk?"
+    - "Apakah Anda mencari sepatu untuk lari jarak jauh?"
+
+    Gunakan konteks percakapan yang tersedia untuk menciptakan pertanyaan-pertanyaan yang spesifik dan langsung ke poin.
+
+    **Berikan peningkatan signifikan 100% terhadap 5 pertanyaan dengan relevansi yang akurat berdasarkan HISTORY percakapan dari sisi "model" dan "user".
+    `,
+  };
 };
 
 const conversationContext = {
@@ -184,6 +198,10 @@ const dynamicSystemInstruction = {
 };
 
 function generateDynamicInstruction(conversationContext, category, brands) {
+  const categoryData = category.map((ctg) => `${ctg.name}: ${ctg.description}`);
+  const brandData = brands.map(
+    (brand) => `${brand.name}: ${brand.description}`
+  );
   const context = `
       ### KONTEKS PERCAKAPAN
       - Topik Utama: ${conversationContext?.topik || "Tidak spesifik"}
@@ -201,6 +219,11 @@ function generateDynamicInstruction(conversationContext, category, brands) {
       - Merek yang Diminati: ${
         conversationContext?.brand?.length > 0
           ? conversationContext?.brand?.join(", ")
+          : "Tidak spesifik"
+      }
+      - Keunggulan Sepatu yang Disebut: ${
+        conversationContext?.keunggulan?.length > 0
+          ? conversationContext?.keunggulan?.join(", ")
           : "Tidak spesifik"
       }
       - Fitur Penting: ${
@@ -223,18 +246,21 @@ function generateDynamicInstruction(conversationContext, category, brands) {
           ? conversationContext?.audiens?.join(", ")
           : "Tidak spesifik"
       }
-      - Pertanyaan User Terakhir: ${
-        conversationContext?.last_user_question || "Tidak spesifik"
+      - Pertanyaan Pelanggan Terakhir: ${
+        conversationContext?.pertanyaan_terakhir_pelanggan || "Tidak spesifik"
       }
     `;
 
   return {
     parts: [
-      combinedBubbleMessageSystemInstruction,
+      combinedBubbleMessageSystemInstruction(
+        categoryData,
+        brandData,
+        conversationContext
+      ),
       {
         text: context,
       },
-      CSBubbleMessageProductRecommendation(category, brands),
     ],
     role: "model",
   };

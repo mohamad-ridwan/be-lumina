@@ -538,13 +538,15 @@ const generateQuestionsToBubbleMessages = async ({
     "topik": "string | null",
     "brand": "string[] | null",
     "fitur": "string[] | null"
+    "keunggulan": "string[] | null"
     "warna": "string[] | null"
     "ukuran": "string[] | null"
     "audiens": "string[] | null"
     "user_intent": "string | null"
     "shoe_name": "string[] | null"
     "kategori": "string[] | null"
-    "last_user_question": "string | null" 
+    "pertanyaan_terakhir_pelanggan": "string | null" 
+    "last_model_answer_summary": "string | null"
   }
 
   Tolong pastikan output Anda HANYA berupa string JSON yang valid, tanpa ada teks penjelasan atau markdown code block
@@ -570,7 +572,7 @@ const generateQuestionsToBubbleMessages = async ({
     );
 
     const response = await chat.sendMessage({
-      message: `Berikan 5 pertanyaan rekomendasi`, // Prompt bisa lebih sederhana
+      message: `Berikan 5 pertanyaan rekomendasi "Pelanggan" ke "Layanan" dalam melanjutkan percakapan dia. Pertanyaan ini akan di realisasikan sebagai pemilik pertanyaan "Pelanggan"`, // Prompt bisa lebih sederhana
       config: {
         tools: [{ functionDeclarations: tools }],
         temperature: 1,
