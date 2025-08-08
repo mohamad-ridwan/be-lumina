@@ -529,27 +529,33 @@ const generateQuestionsToBubbleMessages = async ({
 
     const extractionPrompt = `
   Analisis riwayat percakapan berikut dan ekstrak informasi-informasi kunci ke dalam format JSON. Jika tidak ada informasi yang spesifik, gunakan "null".
-  
+
   Riwayat Percakapan:
   ${historyString}
-  
+
   Format Output JSON:
   {
     "topik": "string | null",
-    "brand": "string[] | null",
-    "fitur": "string[] | null"
-    "keunggulan": "string[] | null"
-    "warna": "string[] | null"
-    "ukuran": "string[] | null"
-    "audiens": "string[] | null"
-    "user_intent": "string | null"
-    "shoe_name": "string[] | null"
-    "kategori": "string[] | null"
-    "pertanyaan_terakhir_pelanggan": "string | null" 
-    "last_model_answer_summary": "string | null"
+    "user_intent": "string | null",
+    "pertanyaan_terakhir_pelanggan": "string | null",
+    "last_model_answer_summary": "string | null",
+    "sepatu": [
+      {
+        "nama_sepatu": "string | null",
+        "brand": "string | null",
+        "kategori": "string[] | null",
+        "keunggulan": "string[] | null",
+        "fitur": "string[] | null",
+        "warna": "string[] | null",
+        "ukuran": "string[] | null",
+        "audiens": "string[] | null"
+      }
+    ]
   }
 
-  Tolong pastikan output Anda HANYA berupa string JSON yang valid, tanpa ada teks penjelasan atau markdown code block
+  Tolong pastikan output Anda HANYA berupa string JSON yang valid, tanpa ada teks penjelasan atau markdown code block.
+
+  JANGAN berikan data sepatu jika tidak ada data sepatu apapun dari riwayat percakapan yang disebutkan.
 `;
 
     const contextResponse = await chat.sendMessage({

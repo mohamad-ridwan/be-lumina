@@ -163,92 +163,56 @@ const combinedBubbleMessageSystemInstruction = (
   };
 };
 
-const conversationContext = {
-  topik: "sepatu lari pria",
-  fitur: ["adem", "tidak bikin gerah", "tahan lama"],
-  merek: ["Adidas", "Nike"],
-  pertanyaanTerakhir:
-    "Tolong rekomendasikan sepatu lari yang bagus untuk lari jarak jauh.",
-};
-
-const dynamicSystemInstruction = {
-  parts: [
-    {
-      text: `Anda adalah asisten AI yang bertugas membuat daftar pertanyaan relevan. Anda WAJIB menggunakan konteks berikut untuk memberikan rekomendasi:`,
-      role: "model",
-    },
-    {
-      text: `
-        ### KONTEKS PERCAKAPAN
-        - Topik: ${conversationContext.topik}
-        - Fitur Penting: ${conversationContext.fitur.join(", ")}
-        - Merek yang Diminati: ${conversationContext.merek.join(", ")}
-        - Pertanyaan User Terakhir: ${conversationContext.pertanyaanTerakhir}
-
-        ### ATURAN UTAMA
-        - Buatlah 5 pertanyaan singkat dan relevan.
-        - Pertanyaan harus menindaklanjuti konteks di atas.
-        - Hindari pertanyaan yang sudah jelas dari konteks.
-        - Contoh: jika user sudah menyebut "sepatu lari", jangan tanyakan lagi "apakah Anda mencari sepatu lari?".
-      `,
-      role: "user",
-    },
-  ],
-  role: "model",
-};
-
 function generateDynamicInstruction(conversationContext, category, brands) {
   const categoryData = category.map((ctg) => `${ctg.name}: ${ctg.description}`);
   const brandData = brands.map(
     (brand) => `${brand.name}: ${brand.description}`
   );
+
+  // Membangun konteks sepatu secara dinamis dari array
+  const sepatuContext =
+    conversationContext?.sepatu?.length > 0
+      ? conversationContext.sepatu
+          .map(
+            (s) => `
+      ---
+      - Nama Sepatu: ${s.nama_sepatu || "Tidak spesifik"}
+      - Brand: ${s.brand || "Tidak spesifik"}
+      - Kategori: ${
+        s.kategori?.length > 0 ? s.kategori.join(", ") : "Tidak spesifik"
+      }
+      - Keunggulan: ${
+        s.keunggulan?.length > 0 ? s.keunggulan.join(", ") : "Tidak spesifik"
+      }
+      - Fitur: ${s.fitur?.length > 0 ? s.fitur.join(", ") : "Tidak spesifik"}
+      - Warna: ${s.warna?.length > 0 ? s.warna.join(", ") : "Tidak spesifik"}
+      - Ukuran: ${s.ukuran?.length > 0 ? s.ukuran.join(", ") : "Tidak spesifik"}
+      - Audiens: ${
+        s.audiens?.length > 0 ? s.audiens.join(", ") : "Tidak spesifik"
+      }
+      ---
+    `
+          )
+          .join("")
+      : "Tidak ada data sepatu spesifik.";
+
   const context = `
       ### KONTEKS PERCAKAPAN
       - Topik Utama: ${conversationContext?.topik || "Tidak spesifik"}
       - Niat Pelanggan: ${conversationContext?.user_intent || "Tidak spesifik"}
-      - Nama Sepatu yang Disebut: ${
-        conversationContext?.shoe_name?.length > 0
-          ? conversationContext?.shoe_name?.join(", ")
-          : "Tidak spesifik"
-      }
-      - Kategori: ${
-        conversationContext?.kategori?.length > 0
-          ? conversationContext?.kategori?.join(", ")
-          : "Tidak spesifik"
-      }
-      - Merek yang Diminati: ${
-        conversationContext?.brand?.length > 0
-          ? conversationContext?.brand?.join(", ")
-          : "Tidak spesifik"
-      }
-      - Keunggulan Sepatu yang Disebut: ${
-        conversationContext?.keunggulan?.length > 0
-          ? conversationContext?.keunggulan?.join(", ")
-          : "Tidak spesifik"
-      }
-      - Fitur Penting: ${
-        conversationContext?.fitur?.length > 0
-          ? conversationContext?.fitur?.join(", ")
-          : "Tidak spesifik"
-      }
-      - Pilihan Warna: ${
-        conversationContext?.warna?.length > 0
-          ? conversationContext?.warna?.join(", ")
-          : "Tidak spesifik"
-      }
-      - Pilihan Ukuran: ${
-        conversationContext?.ukuran?.length > 0
-          ? conversationContext?.ukuran?.join(", ")
-          : "Tidak spesifik"
-      }
-      - Audiens: ${
-        conversationContext?.audiens?.length > 0
-          ? conversationContext?.audiens?.join(", ")
-          : "Tidak spesifik"
-      }
       - Pertanyaan Pelanggan Terakhir: ${
         conversationContext?.pertanyaan_terakhir_pelanggan || "Tidak spesifik"
       }
+      - Ringkasan Jawaban Model Sebelumnya: ${
+        conversationContext?.last_model_answer_summary || "Tidak spesifik"
+      }
+      
+      ### DATA SEPATU DALAM PERCAKAPAN
+      ${sepatuContext}
+
+      ### DATA TOKO TERSEDIA
+      - Kategori Tersedia: ${categoryData.join(", ")}
+      - Merek Tersedia: ${brandData.join(", ")}
     `;
 
   return {
@@ -291,8 +255,6 @@ module.exports = {
   CSBubbleMessageShoeClarification,
   CSBubbleMessageProductRecommendation,
   combinedBubbleMessageSystemInstruction,
-  dynamicSystemInstruction,
   generateDynamicInstruction,
-  conversationContext,
   getConversationContext,
 };
