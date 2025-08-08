@@ -523,15 +523,12 @@ const generateQuestionsToBubbleMessages = async ({
     const tools = await toolsDB.find({ role: "bubble-messages" });
 
     // analisis percakapan (topik)
-    const historyString = history
-      .map((h) => `${h?.role}: ${h?.parts?.[0]?.text}`)
-      .join("\n");
+    // const historyString = history
+    //   .map((h) => `${h?.role}: ${h?.parts?.[0]?.text}`)
+    //   .join("\n");
 
     const extractionPrompt = `
-  Analisis riwayat percakapan berikut dan ekstrak informasi-informasi kunci ke dalam format JSON. Jika tidak ada informasi yang spesifik, gunakan "null".
-
-  Riwayat Percakapan:
-  ${historyString}
+  Analisis riwayat percakapan dan ekstrak informasi-informasi kunci ke dalam format JSON. Jika tidak ada informasi yang spesifik, gunakan "null".
 
   Format Output JSON:
   {
@@ -555,7 +552,7 @@ const generateQuestionsToBubbleMessages = async ({
 
   Tolong pastikan output Anda HANYA berupa string JSON yang valid, tanpa ada teks penjelasan atau markdown code block.
 
-  JANGAN berikan data sepatu jika tidak ada data sepatu apapun dari riwayat percakapan yang disebutkan.
+  JANGAN berikan data sepatu jika tidak ada data sepatu apapun dari riwayat percakapan yang disebutkan, berikan saja array kosong.
 `;
 
     const contextResponse = await chat.sendMessage({
