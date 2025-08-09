@@ -752,6 +752,8 @@ const createMaterialRegex = (input) => {
   return tokens.map((token) => new RegExp(`\\b${token}\\b`, "i"));
 };
 
+const stripHtml = (html) => html.replace(/<[^>]*>?/gm, "");
+
 module.exports = {
   formatDate,
   generateBase64ThumbnailFromUrl,
@@ -768,4 +770,5 @@ module.exports = {
   createRegexObjectFromFilters,
   matchVariantsInNameAdvanced,
   createMaterialRegex,
+  stripHtml,
 };

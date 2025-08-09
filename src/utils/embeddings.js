@@ -63,7 +63,7 @@ async function getEmbedding(text) {
     // Output dari pipeline adalah objek dengan properti 'data' yang berisi Float32Array.
     // Ubah ke array JavaScript biasa agar lebih mudah diolah jika diperlukan.
     // return Array.from(output.data);
-    return output.data;
+    return Array.from(output.data);
   } catch (error) {
     console.error(
       "Error generating embedding with @huggingface/transformers:",

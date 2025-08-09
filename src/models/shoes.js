@@ -25,7 +25,6 @@ const shoesSchema = new Schema(
       required: true, // Deskripsi sangat penting untuk AI
       trim: true,
       minlength: 20, // Minimal panjang deskripsi untuk memastikan detail yang cukup
-      maxlength: 2000, // Maksimal panjang deskripsi
     },
     category: {
       type: [Schema.Types.ObjectId],
@@ -126,6 +125,9 @@ const shoesSchema = new Schema(
       type: Number,
       min: 0,
       max: 100,
+    },
+    embedding: {
+      type: Array,
     },
   },
   {

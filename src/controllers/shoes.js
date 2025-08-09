@@ -6,6 +6,86 @@ const Category = require("../models/category");
 const shoesDB = require("../models/shoes"); // Model Shoes Anda
 const LatestOffers = require("../models/latestOffers");
 const mongoose = require("mongoose"); // Diperlukan untuk ObjectId.isValid
+const { getEmbedding } = require("../utils/embeddings");
+const { stripHtml } = require("../helpers/general");
+
+exports.updateShoeEmbedding = async (req, res, next) => {
+  try {
+    const { id } = req.params; // Mengambil ID dari URL, misalnya '/shoes/:id/update-embedding'
+
+    // --- 1. Validasi ID Sepatu ---
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        message: "Validation Error: Invalid shoe ID.",
+      });
+    }
+
+    // --- 2. Cari Sepatu dan Lakukan Populate ---
+    // Penting: Kita perlu mem-populate semua data yang relevan untuk embedding
+    const shoe = await shoesDB
+      .findById(id)
+      .populate("brand", "name")
+      .populate("category", "name")
+      .populate("relatedOffers", "title");
+
+    if (!shoe) {
+      return res.status(404).json({
+        message: "Shoe not found.",
+      });
+    }
+
+    // --- 3. Kumpulkan Teks dan Buat Embedding Baru ---
+    let variantInfo = "";
+    if (shoe.variants && shoe.variants.length > 0) {
+      const variantDescriptions = shoe.variants.map((v) => {
+        const optionDetails = Object.entries(v.optionValues)
+          .map(([key, value]) => `${key}: ${value}`)
+          .join(", ");
+        return `Varian: ${optionDetails}. Harga: ${v.price}. Stok: ${v.stock}.`;
+      });
+      variantInfo = variantDescriptions.join(" ");
+    }
+
+    const brandName = shoe.brand ? shoe.brand.name : "";
+    const categoryNames = shoe.category.map((cat) => cat.name).join(", ");
+    const offerTitles = shoe.relatedOffers
+      ? shoe.relatedOffers.map((offer) => offer.title).join(", ")
+      : "";
+    const cleanedDescription = stripHtml(shoe.description);
+
+    const textToEmbed = `
+      Nama: ${shoe.name}.
+      Brand: ${brandName}.
+      Kategori: ${categoryNames}.
+      Penawaran: ${offerTitles}.
+      Deskripsi: ${cleanedDescription}.
+      Varian: ${variantInfo}.
+    `;
+
+    // Hasilkan embedding baru
+    const newEmbedding = await getEmbedding(textToEmbed);
+    if (!newEmbedding) {
+      console.error(
+        `Failed to generate new embedding for shoe ID: ${shoe._id}`
+      );
+      return res.status(500).json({
+        message: "Internal Server Error: Failed to generate new embedding.",
+      });
+    }
+
+    // --- 4. Simpan Embedding Baru ke Database ---
+    shoe.embedding = newEmbedding;
+    await shoe.save();
+
+    res.status(200).json({
+      message: "Shoe embedding updated successfully!",
+      shoeId: shoe._id,
+    });
+  } catch (error) {
+    console.error("Error updating shoe embedding:", error);
+    next(error);
+  }
+};
 
 exports.getShoe = async (req, res, next) => {
   try {
@@ -278,10 +358,13 @@ exports.addShoe = async (req, res, next) => {
       variants,
       label,
       newArrival,
-      relatedOffers, // <<< Tangkap field ini dari request body
+      relatedOffers,
+      isRefundable,
+      refundPercentage,
     } = req.body;
 
-    // --- Validasi Dasar (Selalu Wajib) ---
+    // --- Validasi Dasar (Kode yang sudah ada) ---
+    // ... (kode validasi yang sudah ada) ...
     if (!name || typeof name !== "string" || name.trim() === "") {
       return res.status(400).json({
         message:
@@ -289,9 +372,7 @@ exports.addShoe = async (req, res, next) => {
       });
     }
 
-    // Validasi untuk relatedOffers
     if (relatedOffers !== undefined) {
-      // Hanya validasi jika field ini ada di request
       if (!Array.isArray(relatedOffers)) {
         return res.status(400).json({
           message:
@@ -305,14 +386,11 @@ exports.addShoe = async (req, res, next) => {
           });
         }
       }
-      // Opsional: Cek apakah semua LatestOffer ID yang diberikan benar-benar ada di database
-      // Ini bisa overhead jika relatedOffers banyak, tapi menjamin integritas data
       if (relatedOffers.length > 0) {
         const existingOffers = await LatestOffers.find({
           _id: { $in: relatedOffers },
         });
         if (existingOffers.length !== relatedOffers.length) {
-          // Temukan ID yang tidak valid untuk pesan error yang lebih spesifik
           const foundIds = existingOffers.map((offer) => offer._id.toString());
           const invalidIds = relatedOffers.filter(
             (id) => !foundIds.includes(id)
@@ -399,7 +477,6 @@ exports.addShoe = async (req, res, next) => {
       });
     }
 
-    // --- Hitung SLUG di sini, SEBELUM membuat instance model ---
     const generatedSlug = name
       .toString()
       .toLowerCase()
@@ -417,7 +494,55 @@ exports.addShoe = async (req, res, next) => {
       finalSlug = `${finalSlug}-${Date.now()}`;
     }
 
-    // --- Siapkan objek data untuk model Mongoose ---
+    // --- LOGIKA BARU UNTUK MENGHASILKAN EMBEDDING ---
+
+    // 1. Dapatkan semua data teks yang relevan dari database.
+    const populatedBrand = await Brand.findById(brand);
+    const populatedCategories = await Category.find({ _id: { $in: category } });
+    const populatedOffers = await LatestOffers.find({
+      _id: { $in: relatedOffers || [] },
+    });
+
+    // 2. Kumpulkan informasi varian ke dalam satu string
+    let variantInfo = "";
+    const hasVariants = variantAttributes && variantAttributes.length > 0;
+    if (hasVariants && variants && variants.length > 0) {
+      // Buat deskripsi ringkas untuk setiap kombinasi varian
+      const variantDescriptions = variants.map((v) => {
+        // Gabungkan semua nilai opsi, contoh: "Warna: Putih, Ukuran: 40"
+        const optionDetails = Object.entries(v.optionValues)
+          .map(([key, value]) => `${key}: ${value}`)
+          .join(", ");
+        return `Varian: ${optionDetails}. Harga: ${v.price}. Stok: ${v.stock}.`;
+      });
+      variantInfo = variantDescriptions.join(" ");
+    }
+
+    // 3. Gabungkan semua teks dari berbagai field menjadi satu string.
+    const brandName = populatedBrand ? populatedBrand.name : "";
+    const categoryNames = populatedCategories.map((cat) => cat.name).join(", ");
+    const offerTitles = populatedOffers.map((offer) => offer.title).join(", ");
+    const cleanedDescription = stripHtml(description); // Hapus tag HTML
+
+    const textToEmbed = `
+      Nama: ${name}.
+      Brand: ${brandName}.
+      Kategori: ${categoryNames}.
+      Penawaran: ${offerTitles}.
+      Deskripsi: ${cleanedDescription}.
+      Varian: ${variantInfo}.
+    `;
+
+    // 4. Hasilkan embedding menggunakan fungsi `getEmbedding`.
+    const embedding = await getEmbedding(textToEmbed);
+    if (!embedding) {
+      console.error("Failed to generate embedding for the shoe.");
+      return res.status(500).json({
+        message: "Internal Server Error: Failed to generate embedding.",
+      });
+    }
+
+    // --- Siapkan objek data untuk model Mongoose, termasuk embedding ---
     const shoeData = {
       name: name.trim(),
       description: description.trim(),
@@ -428,12 +553,14 @@ exports.addShoe = async (req, res, next) => {
       price: price,
       label: label,
       newArrival: newArrival,
-      relatedOffers: relatedOffers || [], // <<< Tambahkan relatedOffers ke shoeData. Gunakan array kosong jika tidak ada di request.
+      relatedOffers: relatedOffers || [],
+      isRefundable: isRefundable,
+      refundPercentage: refundPercentage,
+      embedding: embedding, // <<< Tambahkan embedding ke data produk
     };
 
-    // --- Logika Validasi Kondisional Berdasarkan Keberadaan Varian ---
-    const hasVariants = variantAttributes && variantAttributes.length > 0;
-
+    // --- Logika Validasi Kondisional (Kode yang sudah ada) ---
+    // ... (sisa logika validasi dan penugasan varian) ...
     if (hasVariants) {
       if (!Array.isArray(variantAttributes) || variantAttributes.length === 0) {
         return res.status(400).json({
@@ -530,7 +657,6 @@ exports.addShoe = async (req, res, next) => {
         variants: formattedVariants,
       });
     } else {
-      // --- Skenario: Produk Tanpa Varian ---
       if (typeof stock !== "number" || stock < 0) {
         return res.status(400).json({
           message:
@@ -539,16 +665,16 @@ exports.addShoe = async (req, res, next) => {
       }
       Object.assign(shoeData, { stock });
     }
+    // --- Akhir dari Logika Validasi Kondisional ---
 
     const newShoe = new shoesDB(shoeData);
     const savedShoe = await newShoe.save();
 
-    // Populate relatedOffers juga saat mengembalikan sepatu yang disimpan
     const populatedShoe = await shoesDB
       .findById(savedShoe._id)
       .populate("brand", "name slug logoUrl")
       .populate("category", "name slug")
-      .populate("relatedOffers", "title slug imageUrl"); // <<< POPULATE relatedOffers
+      .populate("relatedOffers", "title slug imageUrl");
 
     res.status(201).json({
       message: "Shoe added successfully!",
@@ -556,7 +682,6 @@ exports.addShoe = async (req, res, next) => {
     });
   } catch (error) {
     console.error("Error adding shoe:", error);
-
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((err) => err.message);
       return res.status(400).json({
@@ -571,7 +696,6 @@ exports.addShoe = async (req, res, next) => {
         message: `Conflict: '${value}' already exists for field '${field}'.`,
       });
     }
-
     next(error);
   }
 };

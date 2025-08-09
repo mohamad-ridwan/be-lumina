@@ -222,18 +222,7 @@ const processNewMessageWithAI = async (
     const brands = await Brand.find();
 
     const chat = genAI.chats.create({
-      // model: "gemini-2.5-flash",
       model: "gemini-2.5-flash",
-      // config: {
-      //   tools: [{ functionDeclarations: tools }],
-      //   thinkingConfig: {
-      //     thinkingBudget: 1024,
-      //   },
-      //   systemInstruction: {
-      //     parts: [siText1, siText2, siText3, siText4, siText5],
-      //     role: "model",
-      //   },
-      // },
       history: formattedHisory?.length > 0 ? formattedHisory : undefined,
     });
 
