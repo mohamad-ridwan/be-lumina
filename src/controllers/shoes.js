@@ -65,108 +65,132 @@ exports.updateManyShoeVariants = async (req, res) => {
   }
 };
 
-exports.updateShoeEmbedding = async (req, res, next) => {
-  try {
-    const { id } = req.params;
+const updateSingleShoeEmbedding = async (shoeId) => {
+  const shoe = await shoesDB
+    .findById(shoeId)
+    .populate("brand", "name")
+    .populate("category", "name")
+    .populate("relatedOffers", "title");
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        message: "Validation Error: Invalid shoe ID.",
-      });
-    }
+  if (!shoe) {
+    console.warn(`Peringatan: Sepatu dengan ID ${shoeId} tidak ditemukan.`);
+    return null;
+  }
 
-    const shoe = await shoesDB
-      .findById(id)
-      .populate("brand", "name")
-      .populate("category", "name")
-      .populate("relatedOffers", "title");
+  // --- Logika untuk membuat string variantInfo yang diringkas ---
+  let variantInfo = "";
+  if (shoe.variants && shoe.variants.length > 0) {
+    const uniqueOptionValues = new Map();
 
-    if (!shoe) {
-      return res.status(404).json({
-        message: "Shoe not found.",
-      });
-    }
+    for (const variant of shoe.variants) {
+      if (variant.optionValues && !Array.isArray(variant.optionValues)) {
+        variant.optionValues = Object.entries(variant.optionValues).map(
+          ([key, value]) => ({ key, value })
+        );
+      }
 
-    let variantInfo = "";
-    if (shoe.variants && shoe.variants.length > 0) {
-      const uniqueOptionValues = new Map();
-
-      // 1. Kumpulkan semua nilai unik dari setiap atribut varian
-      for (const variant of shoe.variants) {
-        // Lakukan konversi format lama ke baru di sini
-        if (variant.optionValues && !Array.isArray(variant.optionValues)) {
-          variant.optionValues = Object.entries(variant.optionValues).map(
-            ([key, value]) => ({ key, value })
-          );
-        }
-
-        // Simpan nilai ke dalam Map
-        if (variant.optionValues && Array.isArray(variant.optionValues)) {
-          for (const option of variant.optionValues) {
-            if (!uniqueOptionValues.has(option.key)) {
-              uniqueOptionValues.set(option.key, new Set());
-            }
-            uniqueOptionValues.get(option.key).add(option.value);
+      if (variant.optionValues && Array.isArray(variant.optionValues)) {
+        for (const option of variant.optionValues) {
+          if (!uniqueOptionValues.has(option.key)) {
+            uniqueOptionValues.set(option.key, new Set());
           }
+          uniqueOptionValues.get(option.key).add(option.value);
         }
       }
-
-      // 2. Buat string deskripsi dari Map yang berisi nilai-nilai unik
-      const variantParts = [];
-      for (const [key, values] of uniqueOptionValues.entries()) {
-        variantParts.push(`${key}: ${Array.from(values).join(", ")}`);
-      }
-
-      // 3. Gabungkan semua bagian menjadi satu string tunggal
-      if (variantParts.length > 0) {
-        variantInfo = variantParts.join(", ") + ".";
-      }
     }
 
-    // Contoh Hasil Output:
-    // Ukuran: 42, 43, 44, Warna: Biru Laut, Hijau.
-
-    const brandName = shoe.brand ? shoe.brand.name : "";
-    const categoryNames = shoe.category.map((cat) => cat.name).join(", ");
-    const offerTitles = shoe.relatedOffers
-      ? shoe.relatedOffers.map((offer) => offer.title).join(", ")
-      : "";
-    const cleanedDescription = stripHtml(shoe.description);
-    const compactedDescription = cleanedDescription.replace(/\s+/g, " ").trim();
-
-    let textToEmbed = `
-      Nama: ${shoe.name}.
-      Brand: ${brandName}.
-      Kategori: ${categoryNames}.
-      Penawaran: ${offerTitles}.
-      Deskripsi: ${compactedDescription}.
-    `;
-    if (variantInfo.trim()) {
-      textToEmbed += ` Attribut Varian: ${variantInfo}`;
+    const variantParts = [];
+    for (const [key, values] of uniqueOptionValues.entries()) {
+      variantParts.push(`${key}: ${Array.from(values).join(", ")}`);
     }
-    console.log("TEXT TO EMBED : ", textToEmbed);
 
-    const newEmbedding = await getEmbedding(textToEmbed);
-    if (!newEmbedding) {
-      console.error(
-        `Gagal membuat embedding baru untuk sepatu ID: ${shoe._id}`
-      );
-      return res.status(500).json({
-        message: "Internal Server Error: Gagal membuat embedding baru.",
+    if (variantParts.length > 0) {
+      variantInfo = variantParts.join(", ") + ".";
+    }
+  }
+
+  const brandName = shoe.brand ? shoe.brand.name : "";
+  const categoryNames = shoe.category.map((cat) => cat.name).join(", ");
+  const offerTitles = shoe.relatedOffers
+    ? shoe.relatedOffers.map((offer) => offer.title).join(", ")
+    : "";
+  const cleanedDescription = stripHtml(shoe.description);
+  const compactedDescription = cleanedDescription.replace(/\s+/g, " ").trim();
+
+  let textToEmbed = `
+    Nama: ${shoe.name}.
+    Brand: ${brandName}.
+    Kategori: ${categoryNames}.
+    Penawaran: ${offerTitles}.
+    Deskripsi: ${compactedDescription}.
+  `;
+  if (variantInfo.trim()) {
+    textToEmbed += ` Attribut Varian: ${variantInfo}`;
+  }
+
+  console.log(`[ID: ${shoeId}] TEXT TO EMBED: ${textToEmbed}`);
+
+  const newEmbedding = await getEmbedding(textToEmbed);
+  if (!newEmbedding) {
+    console.error(`Gagal membuat embedding baru untuk sepatu ID: ${shoeId}`);
+    return null;
+  }
+
+  shoe.embedding = newEmbedding;
+  await shoe.save();
+
+  return shoeId;
+};
+
+// --- Fungsi utama untuk API endpoint ---
+exports.updateManyShoesEmbedding = async (req, res, next) => {
+  try {
+    const { ids } = req.body; // Menerima array ID dari body
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({
+        message:
+          "Validation Error: 'ids' harus berupa array yang tidak kosong.",
       });
     }
 
-    // --- Menyimpan Perubahan ---
-    // Simpan embedding baru DAN data `optionValues` yang sudah dimigrasi
-    shoe.embedding = newEmbedding;
-    await shoe.save();
+    const invalidIds = ids.filter((id) => !mongoose.Types.ObjectId.isValid(id));
+    if (invalidIds.length > 0) {
+      return res.status(400).json({
+        message: `Validation Error: Beberapa ID tidak valid: ${invalidIds.join(
+          ", "
+        )}`,
+      });
+    }
+
+    console.log(`Memulai pembaruan embedding untuk ${ids.length} sepatu...`);
+    const successfulUpdates = [];
+    const failedUpdates = [];
+
+    // Gunakan Promise.all untuk menjalankan pembaruan secara paralel
+    const updatePromises = ids.map((id) =>
+      updateSingleShoeEmbedding(id).then((result) => {
+        if (result) {
+          successfulUpdates.push(result);
+        } else {
+          failedUpdates.push(id);
+        }
+      })
+    );
+
+    await Promise.all(updatePromises);
+
+    console.log(
+      `Pembaruan selesai. Berhasil: ${successfulUpdates.length}, Gagal: ${failedUpdates.length}`
+    );
 
     res.status(200).json({
-      message: "Embedding dan format varian berhasil diperbarui!",
-      shoeId: shoe._id,
+      message: `Pembaruan embedding selesai. Berhasil: ${successfulUpdates.length}, Gagal: ${failedUpdates.length}.`,
+      successfulUpdates,
+      failedUpdates,
     });
   } catch (error) {
-    console.error("Kesalahan saat memperbarui embedding sepatu:", error);
+    console.error("Kesalahan saat memperbarui embedding banyak sepatu:", error);
     next(error);
   }
 };

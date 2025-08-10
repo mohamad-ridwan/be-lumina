@@ -3,13 +3,13 @@ const router = require("express").Router();
 const {
   addShoe,
   getShoe,
-  updateShoeEmbedding,
+  updateManyShoesEmbedding,
   updateManyShoeVariants,
 } = require("../controllers/shoes");
 
 router.get("/", getShoe);
 router.get("/:id", getShoe);
-router.post("/update-embedding/:id", updateShoeEmbedding);
+router.post("/update-embeddings", updateManyShoesEmbedding);
 router.post("/update-variants", updateManyShoeVariants);
 router.get("/slug/:slug", getShoe);
 router.get("/category/:category", getShoe);
