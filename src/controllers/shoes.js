@@ -89,34 +89,42 @@ exports.updateShoeEmbedding = async (req, res, next) => {
 
     let variantInfo = "";
     if (shoe.variants && shoe.variants.length > 0) {
-      const variantDescriptions = shoe.variants.map((v) => {
-        let optionDetailsString = "";
+      const uniqueOptionValues = new Map();
 
-        // --- LOGIKA UTAMA MIGRASI DATA ---
-        // Periksa apakah format lama (object)
-        if (v.optionValues && !Array.isArray(v.optionValues)) {
-          console.log(
-            `Mengkonversi format varian untuk sepatu ID: ${shoe._id}`
-          );
-          // Konversi objek ke array of objects
-          v.optionValues = Object.entries(v.optionValues).map(
+      // 1. Kumpulkan semua nilai unik dari setiap atribut varian
+      for (const variant of shoe.variants) {
+        // Lakukan konversi format lama ke baru di sini
+        if (variant.optionValues && !Array.isArray(variant.optionValues)) {
+          variant.optionValues = Object.entries(variant.optionValues).map(
             ([key, value]) => ({ key, value })
           );
-          // Karena kita memodifikasi objek Mongoose, perubahan ini akan tersimpan
-          // saat shoe.save() dipanggil nanti.
         }
 
-        // --- PROSES PEMBUATAN STRING DARI optionValues (sudah pasti array) ---
-        if (v.optionValues && Array.isArray(v.optionValues)) {
-          optionDetailsString = v.optionValues
-            .map((option) => `${option.key}: ${option.value}`)
-            .join(", ");
+        // Simpan nilai ke dalam Map
+        if (variant.optionValues && Array.isArray(variant.optionValues)) {
+          for (const option of variant.optionValues) {
+            if (!uniqueOptionValues.has(option.key)) {
+              uniqueOptionValues.set(option.key, new Set());
+            }
+            uniqueOptionValues.get(option.key).add(option.value);
+          }
         }
+      }
 
-        return `${optionDetailsString}.`;
-      });
-      variantInfo = variantDescriptions.join(" ");
+      // 2. Buat string deskripsi dari Map yang berisi nilai-nilai unik
+      const variantParts = [];
+      for (const [key, values] of uniqueOptionValues.entries()) {
+        variantParts.push(`${key}: ${Array.from(values).join(", ")}`);
+      }
+
+      // 3. Gabungkan semua bagian menjadi satu string tunggal
+      if (variantParts.length > 0) {
+        variantInfo = variantParts.join(", ") + ".";
+      }
     }
+
+    // Contoh Hasil Output:
+    // Ukuran: 42, 43, 44, Warna: Biru Laut, Hijau.
 
     const brandName = shoe.brand ? shoe.brand.name : "";
     const categoryNames = shoe.category.map((cat) => cat.name).join(", ");
@@ -124,15 +132,18 @@ exports.updateShoeEmbedding = async (req, res, next) => {
       ? shoe.relatedOffers.map((offer) => offer.title).join(", ")
       : "";
     const cleanedDescription = stripHtml(shoe.description);
+    const compactedDescription = cleanedDescription.replace(/\s+/g, " ").trim();
 
-    const textToEmbed = `
+    let textToEmbed = `
       Nama: ${shoe.name}.
       Brand: ${brandName}.
       Kategori: ${categoryNames}.
       Penawaran: ${offerTitles}.
-      Deskripsi: ${cleanedDescription}.
-      Attribut Varian: ${variantInfo}.
+      Deskripsi: ${compactedDescription}.
     `;
+    if (variantInfo.trim()) {
+      textToEmbed += ` Attribut Varian: ${variantInfo}`;
+    }
     console.log("TEXT TO EMBED : ", textToEmbed);
 
     const newEmbedding = await getEmbedding(textToEmbed);

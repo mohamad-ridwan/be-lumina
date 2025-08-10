@@ -78,7 +78,9 @@ const searchShoes = async ({
 
   console.log("USER INTENT TEXT TO EMBED : ", userIntentToEmbed);
 
-  const userIntentEmbedding = await getEmbedding(userIntentToEmbed);
+  const userIntentEmbedding = await getEmbedding(
+    "sepatu kasual, tahan air, sol karet, warna hitam, ukuran 42"
+  );
   if (!userIntentEmbedding) {
     console.error("ERROR: Failed to generate embedding for query.");
     return { error: "Failed to generate embedding for query." };
