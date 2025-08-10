@@ -96,7 +96,15 @@ const shoesSchema = new Schema(
     variants: {
       type: [
         {
-          optionValues: { type: Map, of: String, required: true },
+          optionValues: {
+            type: [
+              {
+                key: { type: String, required: true },
+                value: { type: String, required: true },
+              },
+            ],
+            required: true,
+          },
           price: { type: Number, required: true, min: 0 },
           stock: { type: Number, required: true, min: 0, default: 0 },
           sku: { type: String, unique: true, sparse: true },

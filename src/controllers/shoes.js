@@ -9,19 +9,72 @@ const mongoose = require("mongoose"); // Diperlukan untuk ObjectId.isValid
 const { getEmbedding } = require("../utils/embeddings");
 const { stripHtml } = require("../helpers/general");
 
+exports.updateManyShoeVariants = async (req, res) => {
+  try {
+    const { products } = req.body; // Ambil array products dari body
+
+    // 1. Validasi Input
+    if (!products || !Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Array 'products' tidak valid atau kosong.",
+      });
+    }
+
+    // 2. Siapkan Operasi Pembaruan Massal
+    const bulkOperations = products.map((product) => {
+      // Pastikan setiap objek produk memiliki _id dan variants
+      if (!product._id || !product.variants) {
+        throw new Error(
+          "Setiap objek produk harus memiliki '_id' dan 'variants'."
+        );
+      }
+      return {
+        updateOne: {
+          filter: { _id: product._id },
+          update: { $set: { variants: product.variants } },
+        },
+      };
+    });
+
+    // 3. Jalankan Operasi Pembaruan Massal
+    const updateResult = await shoesDB.bulkWrite(bulkOperations);
+
+    // 4. Tangani Hasil Pembaruan
+    if (updateResult.modifiedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Tidak ada sepatu yang ditemukan atau diperbarui.",
+        data: updateResult,
+      });
+    }
+
+    // 5. Kirim Respons Sukses
+    return res.status(200).json({
+      success: true,
+      message: `${updateResult.modifiedCount} sepatu berhasil diperbarui.`,
+      data: updateResult,
+    });
+  } catch (error) {
+    console.error("Error saat memperbarui varian sepatu:", error);
+    return res.status(500).json({
+      success: false,
+      message:
+        error.message || "Terjadi kesalahan server saat memproses permintaan.",
+    });
+  }
+};
+
 exports.updateShoeEmbedding = async (req, res, next) => {
   try {
-    const { id } = req.params; // Mengambil ID dari URL, misalnya '/shoes/:id/update-embedding'
+    const { id } = req.params;
 
-    // --- 1. Validasi ID Sepatu ---
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         message: "Validation Error: Invalid shoe ID.",
       });
     }
 
-    // --- 2. Cari Sepatu dan Lakukan Populate ---
-    // Penting: Kita perlu mem-populate semua data yang relevan untuk embedding
     const shoe = await shoesDB
       .findById(id)
       .populate("brand", "name")
@@ -34,14 +87,33 @@ exports.updateShoeEmbedding = async (req, res, next) => {
       });
     }
 
-    // --- 3. Kumpulkan Teks dan Buat Embedding Baru ---
     let variantInfo = "";
     if (shoe.variants && shoe.variants.length > 0) {
       const variantDescriptions = shoe.variants.map((v) => {
-        const optionDetails = Object.entries(v.optionValues)
-          .map(([key, value]) => `${key}: ${value}`)
-          .join(", ");
-        return `Varian: ${optionDetails}. Harga: ${v.price}. Stok: ${v.stock}.`;
+        let optionDetailsString = "";
+
+        // --- LOGIKA UTAMA MIGRASI DATA ---
+        // Periksa apakah format lama (object)
+        if (v.optionValues && !Array.isArray(v.optionValues)) {
+          console.log(
+            `Mengkonversi format varian untuk sepatu ID: ${shoe._id}`
+          );
+          // Konversi objek ke array of objects
+          v.optionValues = Object.entries(v.optionValues).map(
+            ([key, value]) => ({ key, value })
+          );
+          // Karena kita memodifikasi objek Mongoose, perubahan ini akan tersimpan
+          // saat shoe.save() dipanggil nanti.
+        }
+
+        // --- PROSES PEMBUATAN STRING DARI optionValues (sudah pasti array) ---
+        if (v.optionValues && Array.isArray(v.optionValues)) {
+          optionDetailsString = v.optionValues
+            .map((option) => `${option.key}: ${option.value}`)
+            .join(", ");
+        }
+
+        return `Varian: ${optionDetailsString}. Harga: ${v.price}. Stok: ${v.stock}.`;
       });
       variantInfo = variantDescriptions.join(" ");
     }
@@ -62,27 +134,27 @@ exports.updateShoeEmbedding = async (req, res, next) => {
       Varian: ${variantInfo}.
     `;
 
-    // Hasilkan embedding baru
     const newEmbedding = await getEmbedding(textToEmbed);
     if (!newEmbedding) {
       console.error(
-        `Failed to generate new embedding for shoe ID: ${shoe._id}`
+        `Gagal membuat embedding baru untuk sepatu ID: ${shoe._id}`
       );
       return res.status(500).json({
-        message: "Internal Server Error: Failed to generate new embedding.",
+        message: "Internal Server Error: Gagal membuat embedding baru.",
       });
     }
 
-    // --- 4. Simpan Embedding Baru ke Database ---
+    // --- Menyimpan Perubahan ---
+    // Simpan embedding baru DAN data `optionValues` yang sudah dimigrasi
     shoe.embedding = newEmbedding;
     await shoe.save();
 
     res.status(200).json({
-      message: "Shoe embedding updated successfully!",
+      message: "Embedding dan format varian berhasil diperbarui!",
       shoeId: shoe._id,
     });
   } catch (error) {
-    console.error("Error updating shoe embedding:", error);
+    console.error("Kesalahan saat memperbarui embedding sepatu:", error);
     next(error);
   }
 };

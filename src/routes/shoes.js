@@ -4,11 +4,13 @@ const {
   addShoe,
   getShoe,
   updateShoeEmbedding,
+  updateManyShoeVariants,
 } = require("../controllers/shoes");
 
 router.get("/", getShoe);
 router.get("/:id", getShoe);
 router.post("/update-embedding/:id", updateShoeEmbedding);
+router.post("/update-variants", updateManyShoeVariants);
 router.get("/slug/:slug", getShoe);
 router.get("/category/:category", getShoe);
 router.post("/add", addShoe);
