@@ -52,9 +52,25 @@ const getAndFormatCartData = async (userId) => {
         if (selectedVariant.imageUrl) {
           itemImage = selectedVariant.imageUrl;
         }
-        variantOptionValues = Object.fromEntries(
-          Object.entries(selectedVariant.optionValues)
-        );
+
+        // --- Perbaikan Logika di sini ---
+        if (
+          selectedVariant.optionValues &&
+          Array.isArray(selectedVariant.optionValues)
+        ) {
+          // Menggunakan reduce untuk mengubah array menjadi objek
+          variantOptionValues = selectedVariant.optionValues.reduce(
+            (obj, option) => {
+              obj[option.key] = option.value;
+              return obj;
+            },
+            {}
+          );
+        } else if (selectedVariant.optionValues) {
+          // Jika sudah dalam bentuk objek (fallback), gunakan langsung
+          variantOptionValues = selectedVariant.optionValues;
+        }
+
         variantSku = selectedVariant.sku;
       } else {
         // Varian tidak ditemukan, fallback ke stok utama sepatu
