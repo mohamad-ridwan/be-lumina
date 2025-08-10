@@ -350,19 +350,7 @@ exports.getOrderDetail = async (req, res, next) => {
     }
 
     // 2. Find the Order by orderId
-    // We use .lean() for faster retrieval if we're not modifying the document
-    const order = await Order.findOne({ orderId: orderId })
-      // Optionally populate the 'shoe' reference inside items array
-      // This is useful if you want to display current product info alongside the snapshot
-      // but remember that the 'items' array already contains snapshot data (name, price, image, variant details)
-      // so populating 'shoe' might only be needed for current product status or latest image/name.
-      // For a demo, the snapshot might be enough.
-      // .populate({
-      //   path: 'items.shoe',
-      //   model: 'Shoe', // Ensure this matches your Shoe model name
-      //   select: 'name slug image' // Select only necessary fields if populating
-      // })
-      .lean();
+    const order = await Order.findOne({ orderId: orderId }).lean();
 
     // 3. Handle Order Not Found
     if (!order) {
@@ -372,8 +360,34 @@ exports.getOrderDetail = async (req, res, next) => {
       });
     }
 
-    // 4. Send Success Response
-    // The response structure is made similar to createOrder's success response
+    // 4. Proses pemformatan ulang items
+    const formattedItems = order.items.map((item) => {
+      // Pastikan item memiliki objek variant dan array optionValues
+      if (item.variant && Array.isArray(item.variant.optionValues)) {
+        // Gunakan reduce untuk mengubah array optionValues menjadi objek
+        const formattedOptionValues = item.variant.optionValues.reduce(
+          (obj, option) => {
+            if (option.key && option.value) {
+              obj[option.key] = option.value;
+            }
+            return obj;
+          },
+          {}
+        );
+
+        // Kembalikan item dengan optionValues yang sudah diformat
+        return {
+          ...item,
+          variant: {
+            ...item.variant,
+            optionValues: formattedOptionValues,
+          },
+        };
+      }
+      return item; // Kembalikan item tanpa perubahan jika tidak ada array optionValues
+    });
+
+    // 5. Send Success Response dengan items yang sudah diformat
     res.status(200).json({
       success: true,
       message: "Order details retrieved successfully.",
@@ -382,21 +396,20 @@ exports.getOrderDetail = async (req, res, next) => {
         orderId: order.orderId,
         publicOrderUrl: order.publicOrderUrl,
         totalAmount: order.totalAmount,
-        subtotal: order.subtotal, // Include subtotal
-        shippingCost: order.shippingCost, // Include shippingCost
+        subtotal: order.subtotal,
+        shippingCost: order.shippingCost,
         status: order.status,
         orderedAt: order.orderedAt,
         shippingAddress: order.shippingAddress,
-        items: order.items, // The items array with its snapshot data
+        items: formattedItems, // Gunakan items yang sudah diformat di sini
         paymentMethod: order.paymentMethod,
         notes: order.notes,
-        createdAt: order.createdAt, // Include timestamps
-        updatedAt: order.updatedAt, // Include timestamps
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt,
       },
     });
   } catch (error) {
     console.error("Error getting order details:", error);
-    // Handle CastError if _id was used instead of orderId, or other potential Mongoose errors
     if (error.name === "CastError") {
       return res.status(400).json({
         success: false,
