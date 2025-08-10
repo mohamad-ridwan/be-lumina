@@ -292,7 +292,7 @@ exports.getShoe = async (req, res, next) => {
         .lean();
     }
 
-    // --- Proses Pemformatan Hasil untuk Setiap Sepatu (tetap sama) ---
+    // --- Proses Pemformatan Hasil untuk Setiap Sepatu ---
     const formattedShoes = shoes.map((shoe) => {
       let formattedCategories = [];
       let mainCategories = [];
@@ -344,13 +344,15 @@ exports.getShoe = async (req, res, next) => {
         });
       }
 
+      // --- LOGIKA VARIAN YANG DIPERBARUI ---
       if (shoe.variants && Array.isArray(shoe.variants)) {
         shoe.variants = shoe.variants.map((variant) => {
-          if (variant.optionValues instanceof Map) {
-            return {
-              ...variant,
-              optionValues: Object.fromEntries(variant.optionValues),
-            };
+          if (variant.optionValues && Array.isArray(variant.optionValues)) {
+            // Gunakan `reduce` untuk mengubah array menjadi objek
+            variant.optionValues = variant.optionValues.reduce((obj, item) => {
+              obj[item.key] = item.value;
+              return obj;
+            }, {});
           }
           return variant;
         });
