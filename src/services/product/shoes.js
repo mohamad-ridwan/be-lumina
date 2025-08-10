@@ -37,34 +37,60 @@ const searchShoes = async ({
     isPopular,
   });
 
-  const userIntentEmbedding = await getEmbedding(userIntent);
+  let userIntentToEmbed = "";
+
+  if (userIntent && material) {
+    userIntentToEmbed += `Deskripsi: ${userIntent}, Material ${material}. `;
+  } else {
+    userIntentToEmbed += `Deskripsi: ${userIntent}. `;
+  }
+  if (brand) {
+    userIntentToEmbed += `Brand: ${brand}. `;
+  }
+  if (category) {
+    userIntentToEmbed += `Kategori: ${category.join(", ")}. `;
+  }
+  // Perbaikan untuk menambahkan filter varian
+  if (variantFilters && Object.keys(variantFilters).length > 0) {
+    // Buat array untuk menampung string deskripsi varian
+    const variantDescriptionParts = [];
+
+    // Iterasi setiap atribut varian (misal: "Warna", "Ukuran")
+    for (const [attributeName, attributeValues] of Object.entries(
+      variantFilters
+    )) {
+      if (Array.isArray(attributeValues) && attributeValues.length > 0) {
+        // Gabungkan nama atribut dan nilainya
+        // Contoh: "Warna: hitam"
+        variantDescriptionParts.push(
+          `${attributeName}: ${attributeValues.join(", ")}`
+        );
+      }
+    }
+
+    // Jika ada bagian varian yang berhasil dibuat, tambahkan ke string utama
+    if (variantDescriptionParts.length > 0) {
+      userIntentToEmbed += `Attribut Varian: ${variantDescriptionParts.join(
+        ", "
+      )}.`;
+    }
+  }
+
+  console.log("USER INTENT TEXT TO EMBED : ", userIntentToEmbed);
+
+  const userIntentEmbedding = await getEmbedding(userIntentToEmbed);
   if (!userIntentEmbedding) {
     console.error("ERROR: Failed to generate embedding for query.");
     return { error: "Failed to generate embedding for query." };
   }
 
-  // --- Bangun Filter Query Lainnya ---
-  const filters = {};
+  // --- Tahap 1: Bangun Filter Query untuk Vector Search (filter sederhana) ---
+  const vectorSearchFilters = [];
 
   if (Array.isArray(excludeIds) && excludeIds.length > 0) {
-    filters._id = {
-      $nin: excludeIds.map((id) => new mongoose.Types.ObjectId(id)),
-    };
-  }
-
-  if (newArrival !== undefined) {
-    filters.newArrival = newArrival;
-  }
-
-  if (minPrice !== undefined || maxPrice !== undefined) {
-    const priceQuery = {};
-    if (minPrice !== undefined) priceQuery.$gte = minPrice;
-    if (maxPrice !== undefined) priceQuery.$lte = maxPrice;
-
-    filters.$or = [
-      { price: priceQuery, variants: { $exists: false } },
-      { "variants.price": priceQuery, variants: { $exists: true } },
-    ];
+    vectorSearchFilters.push({
+      _id: { $nin: excludeIds.map((id) => new mongoose.Types.ObjectId(id)) },
+    });
   }
 
   if (brand) {
@@ -72,7 +98,7 @@ const searchShoes = async ({
       name: { $regex: new RegExp(brand, "i") },
     });
     if (brandDoc) {
-      filters.brand = brandDoc._id;
+      vectorSearchFilters.push({ brand: { $eq: brandDoc._id } });
     }
   }
 
@@ -81,41 +107,72 @@ const searchShoes = async ({
       name: { $regex: new RegExp(category, "i") },
     });
     if (categoryDoc) {
-      filters.category = categoryDoc._id;
+      vectorSearchFilters.push({ category: { $eq: categoryDoc._id } });
     }
   }
 
-  // --- PERBAIKAN LOGIKA: FILTER VARIAN ---
-  // Kita akan menggunakan string biasa, bukan RegExp.
+  // Masukkan filter harga dasar (price di level atas)
+  if (minPrice !== undefined || maxPrice !== undefined) {
+    const priceQuery = {};
+    if (minPrice !== undefined) priceQuery.$gte = minPrice;
+    if (maxPrice !== undefined) priceQuery.$lte = maxPrice;
+    vectorSearchFilters.push({ price: priceQuery });
+  }
+
+  let vectorSearchFilterObject = {};
+  if (vectorSearchFilters.length > 0) {
+    vectorSearchFilterObject = { $and: vectorSearchFilters };
+  }
+
+  // --- Tahap 2: Bangun Kriteria Filter untuk Tahap Aggregation lanjutan ($match) ---
+  const postVectorSearchFilters = { $and: [] };
+
+  // Filter harga yang lebih kompleks (price di variants)
+  if (minPrice !== undefined || maxPrice !== undefined) {
+    const priceQuery = {};
+    if (minPrice !== undefined) priceQuery.$gte = minPrice;
+    if (maxPrice !== undefined) priceQuery.$lte = maxPrice;
+
+    // Perbaikan: gunakan $or untuk mencari harga di root atau di variants
+    postVectorSearchFilters.$and.push({
+      $or: [{ price: priceQuery }, { "variants.price": priceQuery }],
+    });
+  }
+  // Filter varian menggunakan $elemMatch
   if (variantFilters && Object.keys(variantFilters).length > 0) {
-    const variantMatch = { $and: [] };
+    // 1. Iterasi setiap filter varian dari input
     for (const [attributeName, attributeValues] of Object.entries(
       variantFilters
     )) {
       if (Array.isArray(attributeValues) && attributeValues.length > 0) {
-        // PERBAIKAN DI SINI: Gunakan string biasa, bukan RegExp
-        variantMatch.$and.push({
-          [`variants.optionValues.${attributeName}`]: { $in: attributeValues },
+        // 2. Buat objek kriteria untuk setiap attributeName
+        postVectorSearchFilters.$and.push({
+          "variants.optionValues": {
+            $elemMatch: {
+              key: attributeName,
+              value: { $in: attributeValues },
+            },
+          },
         });
       }
     }
-    if (variantMatch.$and.length > 0) {
-      filters.$and = [...(filters.$and || []), variantMatch];
-    }
   }
 
-  // --- Gabungkan semua ke dalam agregasi `$vectorSearch` ---
+  // --- Gabungkan semua ke dalam agregasi pipeline ---
   const pipeline = [
     {
       $vectorSearch: {
         index: "embedding",
         path: "embedding",
         queryVector: userIntentEmbedding,
-        numCandidates: 100,
+        numCandidates: 200,
         limit: limit,
-        filter: filters,
+        filter: vectorSearchFilterObject,
       },
     },
+    postVectorSearchFilters.length > 0
+      ? { $match: postVectorSearchFilters }
+      : null,
     {
       $lookup: {
         from: "brands",
@@ -136,6 +193,9 @@ const searchShoes = async ({
       },
     },
     {
+      $unwind: { path: "$category", preserveNullAndEmptyArrays: true },
+    },
+    {
       $project: {
         _id: 1,
         score: { $meta: "vectorSearchScore" },
@@ -146,21 +206,46 @@ const searchShoes = async ({
         price: 1,
         variants: 1,
         stock: 1,
-        slug: 1,
+      },
+    },
+    {
+      $group: {
+        _id: "$_id",
+        score: { $first: "$score" },
+        name: { $first: "$name" },
+        brand: { $first: "$brand" },
+        category: { $push: "$category" },
+        description: { $first: "$description" },
+        price: { $first: "$price" },
+        variants: { $first: "$variants" },
+        stock: { $first: "$stock" },
       },
     },
     {
       $sort: { score: -1 },
     },
-  ];
+    {
+      $limit: limit,
+    },
+  ].filter(Boolean); // Hapus stage null jika tidak ada filter lanjutan
+
+  console.log(
+    "Final vectorSearchFilterObject:",
+    JSON.stringify(vectorSearchFilterObject, null, 2)
+  );
+  console.log(
+    "POST VECTOR : ",
+    JSON.stringify(postVectorSearchFilters, null, 2)
+  );
 
   const shoes = await Shoe.aggregate(pipeline).exec();
+  console.log(`GET ${shoes.length} SHOES : `, shoes);
 
   const formattedOutputForGemini = shoes.map((shoe) => {
     const item = {
       name: shoe.name,
       brand: shoe.brand,
-      category: shoe.category,
+      category: shoe.category.filter(Boolean),
       description: shoe.description,
       price: shoe.price,
       variants: shoe.variants,

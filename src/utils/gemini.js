@@ -488,108 +488,109 @@ const generateQuestionsToBubbleMessages = async ({
   chatRoomId,
   chatId,
 }) => {
-  try {
-    let history = [];
-    const latestMessage = {
-      senderUserId,
-    };
-    const getHistory = await getConversationHistoryForGemini({
-      latestMessage,
-      chatRoomId,
-      chatId,
-      recipientProfileId,
-    });
-    history = getHistory ?? [];
+  return [];
+  //   try {
+  //     let history = [];
+  //     const latestMessage = {
+  //       senderUserId,
+  //     };
+  //     const getHistory = await getConversationHistoryForGemini({
+  //       latestMessage,
+  //       chatRoomId,
+  //       chatId,
+  //       recipientProfileId,
+  //     });
+  //     history = getHistory ?? [];
 
-    const category = await Category.find();
-    const brands = await Brand.find();
+  //     const category = await Category.find();
+  //     const brands = await Brand.find();
 
-    const chat = genAI.chats.create({
-      model: "gemini-2.5-flash-lite",
-      history,
-    });
+  //     const chat = genAI.chats.create({
+  //       model: "gemini-2.5-flash-lite",
+  //       history,
+  //     });
 
-    const tools = await toolsDB.find({ role: "bubble-messages" });
+  //     const tools = await toolsDB.find({ role: "bubble-messages" });
 
-    // analisis percakapan (topik)
-    // const historyString = history
-    //   .map((h) => `${h?.role}: ${h?.parts?.[0]?.text}`)
-    //   .join("\n");
+  //     // analisis percakapan (topik)
+  //     // const historyString = history
+  //     //   .map((h) => `${h?.role}: ${h?.parts?.[0]?.text}`)
+  //     //   .join("\n");
 
-    const extractionPrompt = `
-  Analisis riwayat percakapan dan ekstrak informasi-informasi kunci ke dalam format JSON. Jika tidak ada informasi yang spesifik, gunakan "null".
+  //     const extractionPrompt = `
+  //   Analisis riwayat percakapan dan ekstrak informasi-informasi kunci ke dalam format JSON. Jika tidak ada informasi yang spesifik, gunakan "null".
 
-  Format Output JSON:
-  {
-    "topik": "string | null",
-    "user_intent": "string | null",
-    "pertanyaan_terakhir_pelanggan": "string | null",
-    "last_model_answer_summary": "string | null",
-    "sepatu": [
-      {
-        "nama_sepatu": "string | null",
-        "brand": "string | null",
-        "kategori": "string[] | null",
-        "keunggulan": "string[] | null",
-        "fitur": "string[] | null",
-        "warna": "string[] | null",
-        "ukuran": "string[] | null",
-        "audiens": "string[] | null"
-      }
-    ]
-  }
+  //   Format Output JSON:
+  //   {
+  //     "topik": "string | null",
+  //     "user_intent": "string | null",
+  //     "pertanyaan_terakhir_pelanggan": "string | null",
+  //     "last_model_answer_summary": "string | null",
+  //     "sepatu": [
+  //       {
+  //         "nama_sepatu": "string | null",
+  //         "brand": "string | null",
+  //         "kategori": "string[] | null",
+  //         "keunggulan": "string[] | null",
+  //         "fitur": "string[] | null",
+  //         "warna": "string[] | null",
+  //         "ukuran": "string[] | null",
+  //         "audiens": "string[] | null"
+  //       }
+  //     ]
+  //   }
 
-  Tolong pastikan output Anda HANYA berupa string JSON yang valid, tanpa ada teks penjelasan atau markdown code block.
+  //   Tolong pastikan output Anda HANYA berupa string JSON yang valid, tanpa ada teks penjelasan atau markdown code block.
 
-  JANGAN berikan data sepatu jika tidak ada data sepatu apapun dari riwayat percakapan yang disebutkan, berikan saja array kosong.
-`;
+  //   JANGAN berikan data sepatu jika tidak ada data sepatu apapun dari riwayat percakapan yang disebutkan, berikan saja array kosong.
+  // `;
 
-    const contextResponse = await chat.sendMessage({
-      message: extractionPrompt,
-      config: {
-        // Nonaktifkan tool di sini karena tujuannya hanya ekstraksi teks
-        tools: [],
-      },
-    });
+  //     const contextResponse = await chat.sendMessage({
+  //       message: extractionPrompt,
+  //       config: {
+  //         // Nonaktifkan tool di sini karena tujuannya hanya ekstraksi teks
+  //         tools: [],
+  //       },
+  //     });
 
-    const conversationContext = await getConversationContext(
-      contextResponse.text
-    );
-    console.log("CONVERSATION CONTEXT DEBUG:", conversationContext);
+  //     const conversationContext = await getConversationContext(
+  //       contextResponse.text
+  //     );
+  //     console.log("CONVERSATION CONTEXT DEBUG:", conversationContext);
 
-    const dynamicInstruction = generateDynamicInstruction(
-      conversationContext,
-      category,
-      brands
-    );
+  //     const dynamicInstruction = generateDynamicInstruction(
+  //       conversationContext,
+  //       category,
+  //       brands
+  //     );
 
-    const response = await chat.sendMessage({
-      message: `Berikan 5 pertanyaan rekomendasi "Pelanggan" ke "Layanan" dalam melanjutkan percakapan dia. Pertanyaan ini akan di realisasikan sebagai pemilik pertanyaan "Pelanggan"`, // Prompt bisa lebih sederhana
-      config: {
-        tools: [{ functionDeclarations: tools }],
-        temperature: 1,
-        thinkingConfig: {
-          thinkingBudget: 1024,
-        },
-        systemInstruction: dynamicInstruction,
-      },
-    });
+  //     const response = await chat.sendMessage({
+  //       message: `Berikan 5 pertanyaan rekomendasi "Pelanggan" ke "Layanan" dalam melanjutkan percakapan dia. Pertanyaan ini akan di realisasikan sebagai pemilik pertanyaan "Pelanggan"`, // Prompt bisa lebih sederhana
+  //       config: {
+  //         tools: [{ functionDeclarations: tools }],
+  //         temperature: 1,
+  //         thinkingConfig: {
+  //           thinkingBudget: 1024,
+  //         },
+  //         systemInstruction: dynamicInstruction,
+  //       },
+  //     });
 
-    let bubbleMessageQuestions = [];
-    if (response.functionCalls && response.functionCalls.length > 0) {
-      for (const call of response.functionCalls) {
-        const functionArgs = { ...call.args }; // Salin argumen
+  //     let bubbleMessageQuestions = [];
+  //     if (response.functionCalls && response.functionCalls.length > 0) {
+  //       for (const call of response.functionCalls) {
+  //         const functionArgs = { ...call.args }; // Salin argumen
 
-        if (functionArgs?.questions?.length > 0) {
-          bubbleMessageQuestions = functionArgs.questions;
-        }
-      }
-    }
-    return bubbleMessageQuestions;
-  } catch (error) {
-    console.log("ERROR generate questions for bubble messages: ", error);
-    return [];
-  }
+  //         if (functionArgs?.questions?.length > 0) {
+  //           bubbleMessageQuestions = functionArgs.questions;
+  //         }
+  //       }
+  //     }
+  //     return bubbleMessageQuestions;
+  //   } catch (error) {
+  //     console.log("ERROR generate questions for bubble messages: ", error);
+  //     return [];
+  //   }
 };
 
 module.exports = {

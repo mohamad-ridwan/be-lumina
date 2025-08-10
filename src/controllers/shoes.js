@@ -113,7 +113,7 @@ exports.updateShoeEmbedding = async (req, res, next) => {
             .join(", ");
         }
 
-        return `Varian: ${optionDetailsString}. Harga: ${v.price}. Stok: ${v.stock}.`;
+        return `${optionDetailsString}.`;
       });
       variantInfo = variantDescriptions.join(" ");
     }
@@ -131,8 +131,9 @@ exports.updateShoeEmbedding = async (req, res, next) => {
       Kategori: ${categoryNames}.
       Penawaran: ${offerTitles}.
       Deskripsi: ${cleanedDescription}.
-      Varian: ${variantInfo}.
+      Attribut Varian: ${variantInfo}.
     `;
+    console.log("TEXT TO EMBED : ", textToEmbed);
 
     const newEmbedding = await getEmbedding(textToEmbed);
     if (!newEmbedding) {
