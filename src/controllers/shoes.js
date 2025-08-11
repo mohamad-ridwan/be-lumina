@@ -117,16 +117,11 @@ const updateSingleShoeEmbedding = async (shoeId) => {
   const cleanedDescription = stripHtml(shoe.description);
   const compactedDescription = cleanedDescription.replace(/\s+/g, " ").trim();
 
-  let textToEmbed = `
-    Nama: ${shoe.name}.
-    Brand: ${brandName}.
-    Kategori: ${categoryNames}.
-    Penawaran: ${offerTitles}.
-    Deskripsi: ${compactedDescription}.
-  `;
+  let textToEmbed = `Nama: ${shoe.name}. Brand: ${brandName}. Kategori: ${categoryNames}. Penawaran: ${offerTitles}. Deskripsi: ${compactedDescription}.`;
   if (variantInfo.trim()) {
-    textToEmbed += ` Attribut Varian: ${variantInfo}`;
+    textToEmbed += `Attribut Varian: ${variantInfo}`;
   }
+  textToEmbed = textToEmbed.toLowerCase();
 
   console.log(`[ID: ${shoeId}] TEXT TO EMBED: ${textToEmbed}`);
 

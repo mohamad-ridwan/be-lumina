@@ -22,7 +22,9 @@ async function initializeEmbeddingPipeline() {
       extractor = await pipeline(
         "feature-extraction",
         // "mixedbread-ai/mxbai-embed-large-v1"
-        "Xenova/all-MiniLM-L6-v2"
+        // "Xenova/all-MiniLM-L6-v2"
+        // "sentence-transformers/all-MiniLM-L6-v2"
+        "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
       );
       console.log("Pipeline embedding siap digunakan.");
     } catch (error) {

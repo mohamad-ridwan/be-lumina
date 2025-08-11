@@ -4,6 +4,7 @@ const Shoe = require("../../models/shoes");
 const mongoose = require("mongoose");
 const { getEmbedding } = require("../../utils/embeddings");
 const LatestOffer = require("../../models/latestOffers");
+const { stripHtml } = require("../../helpers/general");
 
 const searchShoes = async ({
   userIntent,
@@ -39,10 +40,11 @@ const searchShoes = async ({
 
   let userIntentToEmbed = "";
 
-  if (userIntent && material) {
-    userIntentToEmbed += `Deskripsi: ${userIntent}, Material ${material}. `;
-  } else {
+  if (userIntent) {
     userIntentToEmbed += `Deskripsi: ${userIntent}. `;
+  }
+  if (material) {
+    userIntentToEmbed += `Material: ${material}. `;
   }
   if (brand) {
     userIntentToEmbed += `Brand: ${brand}. `;
@@ -78,9 +80,8 @@ const searchShoes = async ({
 
   console.log("USER INTENT TEXT TO EMBED : ", userIntentToEmbed);
 
-  const userIntentEmbedding = await getEmbedding(
-    "sepatu kasual, tahan air, sol karet, warna hitam, ukuran 42"
-  );
+  const userIntentEmbedding = await getEmbedding(userIntent);
+  console.log("user intent embedd length :", userIntentEmbedding.length);
   if (!userIntentEmbedding) {
     console.error("ERROR: Failed to generate embedding for query.");
     return { error: "Failed to generate embedding for query." };
@@ -152,7 +153,10 @@ const searchShoes = async ({
           "variants.optionValues": {
             $elemMatch: {
               key: attributeName,
-              value: { $in: attributeValues },
+              value: {
+                // $in: attributeValues.map((val) => new RegExp(val, "i")),
+                $in: attributeValues,
+              },
             },
           },
         });
@@ -167,14 +171,72 @@ const searchShoes = async ({
         index: "embedding",
         path: "embedding",
         queryVector: userIntentEmbedding,
-        numCandidates: 200,
+        numCandidates: 50,
         limit: limit,
-        filter: vectorSearchFilterObject,
+        // filter: vectorSearchFilterObject,
+        filter: {
+          category: {
+            $in: [new mongoose.Types.ObjectId("686173dc094fec4a4b64e516")],
+          },
+          // $and: [
+          //   { "variants.optionValues.key": "Warna" },
+          //   {
+          //     "variants.optionValues.value": {
+          //       $regex: "^hitam$",
+          //       $options: "i",
+          //     },
+          //   },
+          //   // { "variants.optionValues.key": "Ukuran" },
+          //   // {
+          //   //   "variants.optionValues.value": {
+          //   //     $in: ["42"],
+          //   //   },
+          //   // },
+          // ],
+          // "variants.optionValues.key": "Warna",
+          // "variants.optionValues.value": "Hitam",
+        },
       },
     },
-    postVectorSearchFilters.length > 0
-      ? { $match: postVectorSearchFilters }
-      : null,
+    // postVectorSearchFilters.$and.length > 0
+    //   ? {
+    //       $match: postVectorSearchFilters,
+    //     }
+    //   : null,
+    {
+      $match: {
+        $or: [
+          // {
+          //   "variants.optionValues.key": "Warna",
+          // },
+          // {
+          //   "variants.optionValues.value": { $regex: "^hitam$", $options: "i" },
+          // },
+          {
+            "variants.optionValues": {
+              $elemMatch: {
+                key: "Ukuran",
+                value: {
+                  // $in: attributeValues.map((val) => new RegExp(val, "i")),
+                  $in: ["42", "43"],
+                },
+              },
+            },
+          },
+          {
+            "variants.optionValues": {
+              $elemMatch: {
+                key: "Warna",
+                value: {
+                  // $in: attributeValues.map((val) => new RegExp(val, "i")),
+                  $in: ["Ungu"].map((val) => new RegExp(val, "i")),
+                },
+              },
+            },
+          },
+        ],
+      },
+    },
     {
       $lookup: {
         from: "brands",
@@ -240,17 +302,52 @@ const searchShoes = async ({
     JSON.stringify(postVectorSearchFilters, null, 2)
   );
 
+  // const testShoe = await Shoe.find({
+  //   $and: [
+  //     {
+  //       category: {
+  //         $eq: "686173dc094fec4a4b64e516",
+  //       },
+  //     },
+  //     {
+  //       "variants.optionValues": {
+  //         $elemMatch: {
+  //           key: "Warna",
+  //           value: {
+  //             $in: ["Hitam"].map((val) => new RegExp(val, "i")),
+  //           },
+  //         },
+  //       },
+  //     },
+  //     {
+  //       "variants.optionValues": {
+  //         $elemMatch: {
+  //           key: "Ukuran",
+  //           value: {
+  //             $in: ["42"].map((val) => new RegExp(val, "i")),
+  //           },
+  //         },
+  //       },
+  //     },
+  //   ],
+  // });
+
+  // console.log(`TEST SHOE ${testShoe.length} :`);
+
   const shoes = await Shoe.aggregate(pipeline).exec();
-  console.log(`GET ${shoes.length} SHOES : `, shoes);
+  console.log(`GET ${shoes.length} SHOES : `);
 
   const formattedOutputForGemini = shoes.map((shoe) => {
+    const cleanedDescription = stripHtml(shoe.description);
+    const compactedDescription = cleanedDescription.replace(/\s+/g, " ").trim();
     const item = {
       name: shoe.name,
       brand: shoe.brand,
-      category: shoe.category.filter(Boolean),
-      description: shoe.description,
+      category: shoe.category,
+      description: compactedDescription,
       price: shoe.price,
       variants: shoe.variants,
+      score: shoe.score,
     };
     if (shoe.variants && shoe.variants.length === 0) {
       item.stock = shoe.stock;
@@ -267,7 +364,9 @@ const searchShoes = async ({
   }
 
   console.log(
-    `--- END searchShoes. Found ${formattedOutputForGemini.length} results. ---`
+    `--- END searchShoes. Found ${formattedOutputForGemini.length} results. ---`,
+    userIntentToEmbed,
+    formattedOutputForGemini
   );
 
   return {
@@ -275,5 +374,21 @@ const searchShoes = async ({
     productsForFrontend: [],
   };
 };
+
+searchShoes({
+  userIntent: `Nama: Converse All Star Chuck 70 - Tahan Hujan, Kategori: Casual, Deskripsi: menjaga stabilitas saat berjalan di permukaan licin. Attribut Varian: Warna: Ungu, Ukuran: 42, 43`,
+  shoeNames: undefined,
+  minPrice: undefined,
+  maxPrice: undefined,
+  material: "Karet",
+  brand: undefined,
+  category: ["Casual"],
+  variantFilters: { Ukuran: ["39"], Warna: ["Cream"] },
+  limit: 5,
+  excludeIds: [],
+  newArrival: undefined,
+  relatedOffers: undefined,
+  isPopular: undefined,
+});
 
 module.exports = { searchShoes };

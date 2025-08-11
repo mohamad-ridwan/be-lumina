@@ -15,6 +15,7 @@ const fsp = require("fs").promises;
 const ffmpegPath = require("ffmpeg-static");
 const axios = require("axios");
 const chatRoomDB = require("../models/chatRoom");
+const { JSDOM } = require("jsdom");
 
 dayjs.extend(isToday);
 dayjs.extend(isYesterday);
@@ -752,7 +753,10 @@ const createMaterialRegex = (input) => {
   return tokens.map((token) => new RegExp(`\\b${token}\\b`, "i"));
 };
 
-const stripHtml = (html) => html.replace(/<[^>]*>?/gm, "");
+const stripHtml = (html) => {
+  const dom = new JSDOM(html);
+  return dom.window.document.body.textContent || "";
+};
 
 module.exports = {
   formatDate,
