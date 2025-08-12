@@ -203,40 +203,40 @@ const searchShoes = async ({
     //       $match: postVectorSearchFilters,
     //     }
     //   : null,
-    {
-      $match: {
-        $or: [
-          // {
-          //   "variants.optionValues.key": "Warna",
-          // },
-          // {
-          //   "variants.optionValues.value": { $regex: "^hitam$", $options: "i" },
-          // },
-          {
-            "variants.optionValues": {
-              $elemMatch: {
-                key: "Ukuran",
-                value: {
-                  // $in: attributeValues.map((val) => new RegExp(val, "i")),
-                  $in: ["42", "43"],
-                },
-              },
-            },
-          },
-          {
-            "variants.optionValues": {
-              $elemMatch: {
-                key: "Warna",
-                value: {
-                  // $in: attributeValues.map((val) => new RegExp(val, "i")),
-                  $in: ["Ungu"].map((val) => new RegExp(val, "i")),
-                },
-              },
-            },
-          },
-        ],
-      },
-    },
+    // {
+    //   $match: {
+    //     $or: [
+    //       // {
+    //       //   "variants.optionValues.key": "Warna",
+    //       // },
+    //       // {
+    //       //   "variants.optionValues.value": { $regex: "^hitam$", $options: "i" },
+    //       // },
+    //       {
+    //         "variants.optionValues": {
+    //           $elemMatch: {
+    //             key: "Ukuran",
+    //             value: {
+    //               // $in: attributeValues.map((val) => new RegExp(val, "i")),
+    //               $in: ["42", "43"],
+    //             },
+    //           },
+    //         },
+    //       },
+    //       {
+    //         "variants.optionValues": {
+    //           $elemMatch: {
+    //             key: "Warna",
+    //             value: {
+    //               // $in: attributeValues.map((val) => new RegExp(val, "i")),
+    //               $in: ["Ungu"].map((val) => new RegExp(val, "i")),
+    //             },
+    //           },
+    //         },
+    //       },
+    //     ],
+    //   },
+    // },
     {
       $lookup: {
         from: "brands",
@@ -376,7 +376,12 @@ const searchShoes = async ({
 };
 
 searchShoes({
-  userIntent: `Nama: Converse All Star Chuck 70 - Tahan Hujan, Kategori: Casual, Deskripsi: menjaga stabilitas saat berjalan di permukaan licin. Attribut Varian: Warna: Ungu, Ukuran: 42, 43`,
+  // userIntent: `Mencari sepatu casual, yang nyaman dan tahan basah`,
+  userIntent: `
+  Pelanggan mencari sepatu berdasarkan spesifikasi dan fungsi. Gunakan data ini sebagai query untuk mencari sepatu yang paling sesuai spesifikasi pelanggan:
+  Mencari sepatu yang memiliki bahan nyaman di cuaca panas, juga tidak mudah tergelincir ditempat basah.
+  Realisasikan sepatu yang dicari, gabungkan semua spesifikasi menjadi kalimat yang memiliki arti yang sesuai kebutuhan pelanggan, prioritaskan sepatu yang memiliki fungsi, spesifikasi yang berarti memiliki makna sama, abaikan data yang tidak memiliki makna yang sesuai maksud pelanggan.
+  `,
   shoeNames: undefined,
   minPrice: undefined,
   maxPrice: undefined,
@@ -384,7 +389,7 @@ searchShoes({
   brand: undefined,
   category: ["Casual"],
   variantFilters: { Ukuran: ["39"], Warna: ["Cream"] },
-  limit: 5,
+  limit: 10,
   excludeIds: [],
   newArrival: undefined,
   relatedOffers: undefined,

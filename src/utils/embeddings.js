@@ -2,16 +2,21 @@
 const {
   pipeline,
   cos_sim: cosineSimilarity,
+  AutoModel,
+  AutoProcessor,
+  matmul,
 } = require("@huggingface/transformers");
 
-let extractor = null; // Variabel global untuk instance extractor
-
+let extractor = null;
+const model_id = "jinaai/jina-clip-v2";
+let processor = null;
+let model = null;
 /**
  * Menginisialisasi pipeline embedding.
  * Fungsi ini harus dipanggil sekali saat aplikasi dimulai.
  */
 async function initializeEmbeddingPipeline() {
-  if (!extractor) {
+  if (!model) {
     // Pastikan hanya diinisialisasi sekali
     console.log(
       "Menginisialisasi pipeline embedding dengan @huggingface/transformers..."
@@ -19,13 +24,18 @@ async function initializeEmbeddingPipeline() {
     try {
       // Pilih model yang cocok untuk text embedding.
       // 'mixedbread-ai/mxbai-embed-large-v1' adalah pilihan yang bagus.
-      extractor = await pipeline(
-        "feature-extraction",
-        // "mixedbread-ai/mxbai-embed-large-v1"
-        // "Xenova/all-MiniLM-L6-v2"
-        // "sentence-transformers/all-MiniLM-L6-v2"
-        "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-      );
+      // extractor = await pipeline(
+      //   "feature-extraction",
+      //   // "mixedbread-ai/mxbai-embed-large-v1"
+      //   // "Xenova/all-MiniLM-L6-v2"
+      //   // "sentence-transformers/all-MiniLM-L6-v2"
+      //   // "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+      //   "jinaai/jina-clip-v2"
+      // );
+      processor = await AutoProcessor.from_pretrained(model_id);
+      model = await AutoModel.from_pretrained(model_id, {
+        dtype: "q4" /* e.g., "fp16", "q8", or "q4" */,
+      });
       console.log("Pipeline embedding siap digunakan.");
     } catch (error) {
       console.error("Gagal menginisialisasi pipeline embedding:", error);
@@ -53,19 +63,26 @@ function getExtractor() {
 async function getEmbedding(text) {
   try {
     // Pastikan pipeline sudah diinisialisasi
-    if (!extractor) {
+    if (!model) {
       await initializeEmbeddingPipeline();
     }
 
     // Jalankan inferensi untuk mendapatkan embedding
     // 'pooling: mean' umumnya digunakan untuk mendapatkan embedding kalimat/dokumen
     // 'normalize: true' disarankan untuk perbandingan kemiripan menggunakan cosine similarity
-    const output = await extractor(text, { pooling: "mean", normalize: true });
+    // const output = await extractor(text, { pooling: "mean", normalize: true });
 
     // Output dari pipeline adalah objek dengan properti 'data' yang berisi Float32Array.
     // Ubah ke array JavaScript biasa agar lebih mudah diolah jika diperlukan.
     // return Array.from(output.data);
-    return Array.from(output.data);
+
+    const query_inputs = await processor(text);
+    const { l2norm_text_embeddings: query_embeddings } = await model(
+      query_inputs
+    );
+    const embeddingTensor = query_embeddings[0];
+    const embeddingData = embeddingTensor.ort_tensor.cpuData;
+    return Array.from(embeddingData);
   } catch (error) {
     console.error(
       "Error generating embedding with @huggingface/transformers:",

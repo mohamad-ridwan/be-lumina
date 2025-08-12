@@ -117,11 +117,17 @@ const updateSingleShoeEmbedding = async (shoeId) => {
   const cleanedDescription = stripHtml(shoe.description);
   const compactedDescription = cleanedDescription.replace(/\s+/g, " ").trim();
 
-  let textToEmbed = `Nama: ${shoe.name}. Brand: ${brandName}. Kategori: ${categoryNames}. Penawaran: ${offerTitles}. Deskripsi: ${compactedDescription}.`;
-  if (variantInfo.trim()) {
-    textToEmbed += `Attribut Varian: ${variantInfo}`;
-  }
-  textToEmbed = textToEmbed.toLowerCase();
+  // let textToEmbed = `Nama: ${shoe.name}. Brand: ${brandName}. Kategori: ${categoryNames}. Penawaran: ${offerTitles}. Deskripsi: ${compactedDescription}.`;
+  // if (variantInfo.trim()) {
+  //   textToEmbed += `Attribut Varian: ${variantInfo}`;
+  // }
+  let textToEmbed = `
+  Data sepatu di urutkan menjadi paragraf untuk memahami karakteristik sepatu. Data ini akan di realisasikan sebagai query untuk mencari sepatu yang sesuai kebutuhan pelanggan:
+  Berikut ini deskripsi, keunggulan, fungsi, spesifikasi, dan material yang dimiliki sepatu: ${compactedDescription}.`;
+  // if (variantInfo.trim()) {
+  //   textToEmbed += `
+  //   Attribut varian sepatu ${variantInfo}`;
+  // }
 
   console.log(`[ID: ${shoeId}] TEXT TO EMBED: ${textToEmbed}`);
 
