@@ -420,8 +420,85 @@ const searchShoes = async ({
 ${formattedOutputForGemini}`;
 };
 
+const extractProductInfo = async (_id, newSpecsData) => {
+  try {
+    // 1. Validasi input _id
+    if (!_id) {
+      throw new Error("ID sepatu tidak boleh kosong.");
+    }
+
+    // 2. Buat objek untuk pembaruan
+    const updateFields = {};
+
+    // 3. Tangani field yang akan langsung memperbarui dokumen
+    if (newSpecsData.deskripsi) {
+      updateFields.description = newSpecsData.deskripsi;
+    }
+
+    // 4. Buat array 'specs' baru dari field lainnya
+    const newSpecsArray = [];
+
+    // Map setiap field dari tool ke dalam format { type, text }
+    if (newSpecsData.model) {
+      newSpecsArray.push({ type: "model", text: newSpecsData.model });
+    }
+    if (newSpecsData.spesifikasi) {
+      newSpecsArray.push({
+        type: "spesifikasi",
+        text: newSpecsData.spesifikasi,
+      });
+    }
+    if (newSpecsData.keunggulan) {
+      newSpecsArray.push({ type: "keunggulan", text: newSpecsData.keunggulan });
+    }
+    if (newSpecsData.bahan) {
+      newSpecsArray.push({ type: "bahan", text: newSpecsData.bahan });
+    }
+    if (newSpecsData.fitur) {
+      newSpecsArray.push({ type: "fitur", text: newSpecsData.fitur });
+    }
+    if (newSpecsData.penggunaan) {
+      newSpecsArray.push({ type: "penggunaan", text: newSpecsData.penggunaan });
+    }
+    if (newSpecsData.targetPengguna) {
+      newSpecsArray.push({
+        type: "targetPengguna",
+        text: newSpecsData.targetPengguna,
+      });
+    }
+    if (newSpecsData.tingkatBantalan) {
+      newSpecsArray.push({
+        type: "tingkatBantalan",
+        text: newSpecsData.tingkatBantalan,
+      });
+    }
+
+    // 5. Tambahkan array specs ke objek pembaruan jika ada data
+    if (newSpecsArray.length > 0) {
+      updateFields.specs = newSpecsArray;
+    }
+
+    // 6. Perbarui dokumen sepatu dengan semua field yang baru
+    //    Cari berdasarkan ID dan perbarui dengan objek 'updateFields'
+    const updatedShoe = await Shoe.findByIdAndUpdate(_id, updateFields, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!updatedShoe) {
+      throw new Error(`Sepatu dengan ID ${_id} tidak ditemukan.`);
+    }
+
+    return updatedShoe;
+  } catch (error) {
+    console.error("Gagal memperbarui spesifikasi sepatu:", error.message);
+    throw error;
+  }
+};
+
 const shoeFunctionTools = {
   searchShoes,
+  extractProductInfo,
 };
 
 module.exports = shoeFunctionTools;

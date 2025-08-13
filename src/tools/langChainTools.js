@@ -1,14 +1,16 @@
 const { tool } = require("@langchain/core/tools");
-const { searchShoes } = require("./function/shoes");
+const { searchShoes, extractProductInfo } = require("./function/shoes");
 const shoeSchemeTools = require("./scheme/shoes");
-const { searchShoesFuncDeclaration } = shoeSchemeTools;
+const { searchShoesFuncDeclaration, productInfoTool } = shoeSchemeTools;
 
 const searchShoesTool = tool(searchShoes, searchShoesFuncDeclaration);
+const extractProductInfoTool = tool(extractProductInfo, productInfoTool);
 
-const langChainTools = [searchShoesTool];
+const langChainTools = [searchShoesTool, extractProductInfoTool];
 
 const toolsByName = {
   searchShoes: searchShoesTool,
+  extractProductInfo: extractProductInfoTool,
 };
 
 module.exports = { langChainTools, toolsByName };

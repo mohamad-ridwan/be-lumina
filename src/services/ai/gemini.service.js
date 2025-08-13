@@ -1,7 +1,7 @@
 const { ChatGoogleGenerativeAI } = require("@langchain/google-genai");
 const { langChainTools, toolsByName } = require("../../tools/langChainTools");
 
-const model = new ChatGoogleGenerativeAI({
+const langChainModel = new ChatGoogleGenerativeAI({
   model: "gemini-2.0-flash",
   temperature: 0,
   apiKey: process.env.GEMINI_API_KEY,
@@ -9,7 +9,7 @@ const model = new ChatGoogleGenerativeAI({
 
 const getGeminiResponse = async (prompt) => {
   try {
-    const modelTools = model.bindTools(langChainTools);
+    const modelTools = langChainModel.bindTools(langChainTools);
     const messages = [prompt];
     const aiMessage = await modelTools.invoke(messages);
     console.log(aiMessage);
@@ -32,4 +32,4 @@ const getGeminiResponse = async (prompt) => {
   }
 };
 
-module.exports = { getGeminiResponse };
+module.exports = { getGeminiResponse, langChainModel };

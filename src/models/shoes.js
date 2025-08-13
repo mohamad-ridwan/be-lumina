@@ -48,7 +48,18 @@ const shoesSchema = new Schema(
     image: {
       type: String,
     },
-
+    specs: {
+      type: [
+        {
+          type: {
+            type: String,
+          },
+          text: {
+            type: String,
+          },
+        },
+      ],
+    },
     // --- Conditional Fields Based on Variant Presence ---
     price: {
       type: Number,

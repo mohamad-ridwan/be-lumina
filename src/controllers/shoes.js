@@ -8,6 +8,80 @@ const LatestOffers = require("../models/latestOffers");
 const mongoose = require("mongoose"); // Diperlukan untuk ObjectId.isValid
 const { getEmbedding } = require("../utils/embeddings");
 const { stripHtml } = require("../helpers/general");
+const { HumanMessage } = require("@langchain/core/messages");
+const { toolsByName } = require("../tools/langChainTools");
+const { extractProductInfo } = require("../tools/function/shoes");
+const { langChainModel } = require("../services/ai/gemini.service");
+
+exports.updateSpecs = async (req, res) => {
+  const { _id } = req.query;
+
+  try {
+    if (!_id) {
+      return res.status(400).json({ error: "ID sepatu tidak boleh kosong." });
+    }
+
+    // 1. Ambil data sepatu dari database dengan populasi brand dan category
+    const shoe = await shoesDB
+      .findById(_id)
+      .populate("brand")
+      .populate("category");
+    if (!shoe) {
+      return res
+        .status(404)
+        .json({ error: `Sepatu dengan ID ${_id} tidak ditemukan.` });
+    }
+
+    // 2. Siapkan input tambahan untuk AI
+    const cleanedDescription = stripHtml(shoe.description);
+    const compactedDescription = cleanedDescription.replace(/\s+/g, " ").trim();
+    const shoeName = shoe.name;
+    const shoeBrand = shoe.brand ? shoe.brand.name : "Tidak Diketahui";
+    const shoeCategory = shoe.category
+      ? shoe.category.map((cat) => cat.name).join(", ")
+      : "Tidak Diketahui";
+
+    // 3. Masukkan semua informasi ke dalam prompt AI
+    const prompt = new HumanMessage(`
+    Ekstrak informasi produk dari data berikut:
+
+      - Nama Produk: ${shoeName}
+      - Merek: ${shoeBrand}
+      - Kategori: ${shoeCategory}
+      - Deskripsi: ${compactedDescription}
+    `);
+
+    // 4. Panggil model AI dengan tool binding
+    const modelTools = langChainModel.bindTools([
+      toolsByName.extractProductInfo,
+    ]);
+    const messages = [prompt];
+    const aiMessage = await modelTools.invoke(messages);
+
+    // 5. Proses tool call dari AI
+    let updatedShoeData = null;
+    for (const toolCall of aiMessage.tool_calls) {
+      // Dapatkan argumen yang sudah diekstrak oleh AI dari tool call
+      const extractedData = toolCall.args;
+      console.log("Data yang diekstrak oleh AI:", extractedData);
+
+      // Gunakan fungsi update database Anda
+      updatedShoeData = await extractProductInfo(_id, extractedData);
+    }
+
+    // 6. Berikan respons sukses ke klien
+    return res.status(200).json({
+      message: "Spesifikasi sepatu berhasil diperbarui.",
+      updatedShoe: updatedShoeData,
+    });
+  } catch (error) {
+    console.error("Gagal memperbarui spesifikasi sepatu:", error);
+    return res.status(500).json({
+      error: "Terjadi kesalahan internal saat memperbarui spesifikasi.",
+      details: error.message,
+    });
+  }
+};
 
 exports.updateManyShoeVariants = async (req, res) => {
   try {
