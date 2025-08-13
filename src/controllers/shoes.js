@@ -151,25 +151,33 @@ const updateSingleShoeEmbedding = async (shoeId) => {
     return null;
   }
 
-  // --- Logika untuk membuat string variantInfo yang diringkas ---
+  // --- Ambil info brand & kategori ---
+  const brandName = shoe.brand ? shoe.brand.name : "";
+  const categoryNames = Array.isArray(shoe.category)
+    ? shoe.category.map((cat) => cat.name).join(", ")
+    : "";
+  const offerTitles = shoe.relatedOffers
+    ? shoe.relatedOffers.map((offer) => offer.title).join(", ")
+    : "";
+
+  // --- Ringkas varian ---
   let variantInfo = "";
-  if (shoe.variants && shoe.variants.length > 0) {
+  if (Array.isArray(shoe.variants) && shoe.variants.length > 0) {
     const uniqueOptionValues = new Map();
 
     for (const variant of shoe.variants) {
-      if (variant.optionValues && !Array.isArray(variant.optionValues)) {
-        variant.optionValues = Object.entries(variant.optionValues).map(
-          ([key, value]) => ({ key, value })
-        );
-      }
+      const optionValuesArray = !Array.isArray(variant.optionValues)
+        ? Object.entries(variant.optionValues || {}).map(([key, value]) => ({
+            key,
+            value,
+          }))
+        : variant.optionValues;
 
-      if (variant.optionValues && Array.isArray(variant.optionValues)) {
-        for (const option of variant.optionValues) {
-          if (!uniqueOptionValues.has(option.key)) {
-            uniqueOptionValues.set(option.key, new Set());
-          }
-          uniqueOptionValues.get(option.key).add(option.value);
+      for (const option of optionValuesArray) {
+        if (!uniqueOptionValues.has(option.key)) {
+          uniqueOptionValues.set(option.key, new Set());
         }
+        uniqueOptionValues.get(option.key).add(option.value);
       }
     }
 
@@ -183,28 +191,29 @@ const updateSingleShoeEmbedding = async (shoeId) => {
     }
   }
 
-  const brandName = shoe.brand ? shoe.brand.name : "";
-  const categoryNames = shoe.category.map((cat) => cat.name).join(", ");
-  const offerTitles = shoe.relatedOffers
-    ? shoe.relatedOffers.map((offer) => offer.title).join(", ")
-    : "";
-  const cleanedDescription = stripHtml(shoe.description);
-  const compactedDescription = cleanedDescription.replace(/\s+/g, " ").trim();
+  // --- Gabungkan specs ---
+  let specsText = "";
+  if (Array.isArray(shoe.specs) && shoe.specs.length > 0) {
+    specsText = shoe.specs
+      .map((s) => `${capitalizeFirstLetter(s.type)}: ${s.text}`)
+      .join(". ");
+  }
 
-  // let textToEmbed = `Nama: ${shoe.name}. Brand: ${brandName}. Kategori: ${categoryNames}. Penawaran: ${offerTitles}. Deskripsi: ${compactedDescription}.`;
-  // if (variantInfo.trim()) {
-  //   textToEmbed += `Attribut Varian: ${variantInfo}`;
-  // }
+  // --- Buat teks final untuk embedding ---
   let textToEmbed = `
-  Data sepatu di urutkan menjadi paragraf untuk memahami karakteristik sepatu. Data ini akan di realisasikan sebagai query untuk mencari sepatu yang sesuai kebutuhan pelanggan:
-  Berikut ini deskripsi, keunggulan, fungsi, spesifikasi, dan material yang dimiliki sepatu: ${compactedDescription}.`;
-  // if (variantInfo.trim()) {
-  //   textToEmbed += `
-  //   Attribut varian sepatu ${variantInfo}`;
-  // }
+Nama: ${shoe.name}.
+Brand: ${brandName}.
+Kategori: ${categoryNames}.
+Penawaran: ${offerTitles}.
+${variantInfo ? `Varian: ${variantInfo}` : ""}
+${specsText}
+  `
+    .replace(/\s+/g, " ")
+    .trim();
 
   console.log(`[ID: ${shoeId}] TEXT TO EMBED: ${textToEmbed}`);
 
+  // --- Generate embedding ---
   const newEmbedding = await getEmbedding(textToEmbed);
   if (!newEmbedding) {
     console.error(`Gagal membuat embedding baru untuk sepatu ID: ${shoeId}`);
@@ -216,6 +225,11 @@ const updateSingleShoeEmbedding = async (shoeId) => {
 
   return shoeId;
 };
+
+// Helper: Kapitalisasi huruf pertama
+function capitalizeFirstLetter(str) {
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
 
 // --- Fungsi utama untuk API endpoint ---
 exports.updateManyShoesEmbedding = async (req, res, next) => {
