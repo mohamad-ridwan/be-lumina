@@ -13,6 +13,7 @@ const {
   confirmCancelOrder,
   getBubbleMessages,
   loadingBubbleMessages,
+  sendMessage,
   // getBatchChatRoom
 } = require("../controllers/chatRoom");
 
@@ -41,6 +42,7 @@ const upload = multer({ storage: storage });
 
 router.post("/", getChatRoom);
 router.post("/upload-media-message", upload.single("file"), uploadMediaMessage);
+router.post("/user/send-message", sendMessage);
 router.post("/loading-bubble-messages", loadingBubbleMessages);
 router.post("/bubble-messages", getBubbleMessages);
 router.get("/stream", stream);

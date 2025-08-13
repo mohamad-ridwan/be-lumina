@@ -1,9 +1,9 @@
+const mongoose = require("mongoose");
 const Brand = require("../../models/brand");
 const Category = require("../../models/category");
 const Shoe = require("../../models/shoes");
-const mongoose = require("mongoose");
 const { getEmbedding } = require("../../utils/embeddings");
-const LatestOffer = require("../../models/latestOffers");
+// const LatestOffer = require("../../models/latestOffers");
 const { stripHtml } = require("../../helpers/general");
 
 const searchShoes = async ({
@@ -337,16 +337,38 @@ const searchShoes = async ({
   const shoes = await Shoe.aggregate(pipeline).exec();
   console.log(`GET ${shoes.length} SHOES : `);
 
-  const formattedOutputForGemini = shoes.map((shoe) => {
+  const searchResults = shoes.map((shoe) => {
     const cleanedDescription = stripHtml(shoe.description);
     const compactedDescription = cleanedDescription.replace(/\s+/g, " ").trim();
+    const formattedVariants = [];
+    if (shoe.variants && shoe.variants.length > 0) {
+      for (const variant of shoe.variants) {
+        const variantObject = {};
+
+        // Pastikan optionValues adalah array
+        if (Array.isArray(variant.optionValues)) {
+          // Iterasi setiap objek di array optionValues
+          for (const option of variant.optionValues) {
+            // Tambahkan pasangan key-value ke objek varian
+            variantObject[option.key] = option.value;
+          }
+        }
+
+        // Tambahkan detail varian lainnya
+        if (variant.price) variantObject.price = variant.price;
+        if (variant.stock) variantObject.stock = variant.stock;
+        if (variant.sku) variantObject.sku = variant.sku;
+        if (variant.imageUrl) variantObject.imageUrl = variant.imageUrl;
+        formattedVariants.push(variantObject);
+      }
+    }
     const item = {
       name: shoe.name,
       brand: shoe.brand,
       category: shoe.category,
       description: compactedDescription,
       price: shoe.price,
-      variants: shoe.variants,
+      variants: formattedVariants,
       score: shoe.score,
     };
     if (shoe.variants && shoe.variants.length === 0) {
@@ -355,45 +377,49 @@ const searchShoes = async ({
     return item;
   });
 
-  if (formattedOutputForGemini.length === 0) {
-    return {
-      message:
-        "Maaf, kami tidak menemukan sepatu yang sesuai dengan kriteria Anda. Coba kata kunci lain atau perlonggar kriteria pencarian.",
-      shoes: [],
-    };
+  if (searchResults.length === 0) {
+    return "Maaf, kami tidak menemukan sepatu yang sesuai dengan kriteria Anda. Coba kata kunci lain atau perlonggar kriteria pencarian.";
   }
 
   console.log(
-    `--- END searchShoes. Found ${formattedOutputForGemini.length} results. ---`,
+    `--- END searchShoes. Found ${searchResults.length} results. ---`,
     userIntentToEmbed,
-    formattedOutputForGemini
+    searchResults
   );
 
-  return {
-    shoes: formattedOutputForGemini,
-    productsForFrontend: [],
-  };
+  //   return {
+  //     shoes: formattedOutputForGemini,
+  //     productsForFrontend: [],
+  //   };
+
+  const formattedOutputForGemini = searchResults
+    .map((shoe) => {
+      const formattedVariants = shoe.variants
+        .map((v) =>
+          Object.entries(v)
+            .map(([key, value]) => `${key}: ${value}`)
+            .join(", ")
+        )
+        .join("; ");
+
+      return `
+- Nama: ${shoe.name}
+- Merek: ${shoe.brand}
+- Kategori: ${shoe.category.join(", ")}
+- Harga: Rp ${shoe.price.toLocaleString("id-ID")}
+- Deskripsi: ${shoe.description}
+- Varian Tersedia: ${formattedVariants}
+`;
+    })
+    .join("\n---\n"); // Gabungkan setiap item dengan pemisah yang jelas
+
+  return `Hasil pencarian sepatu:
+  
+${formattedOutputForGemini}`;
 };
 
-// searchShoes({
-//   // userIntent: `Mencari sepatu casual, yang nyaman dan tahan basah`,
-//   userIntent: `
-//   Pelanggan mencari sepatu berdasarkan spesifikasi dan fungsi. Gunakan data ini sebagai query untuk mencari sepatu yang paling sesuai spesifikasi pelanggan:
-//   Mencari sepatu yang memiliki bahan nyaman di cuaca panas, juga tidak mudah tergelincir ditempat basah.
-//   Realisasikan sepatu yang dicari, gabungkan semua spesifikasi menjadi kalimat yang memiliki arti yang sesuai kebutuhan pelanggan, prioritaskan sepatu yang memiliki fungsi, spesifikasi yang berarti memiliki makna sama, abaikan data yang tidak memiliki makna yang sesuai maksud pelanggan.
-//   `,
-//   shoeNames: undefined,
-//   minPrice: undefined,
-//   maxPrice: undefined,
-//   material: "Karet",
-//   brand: undefined,
-//   category: ["Casual"],
-//   variantFilters: { Ukuran: ["39"], Warna: ["Cream"] },
-//   limit: 10,
-//   excludeIds: [],
-//   newArrival: undefined,
-//   relatedOffers: undefined,
-//   isPopular: undefined,
-// });
+const shoeFunctionTools = {
+  searchShoes,
+};
 
-module.exports = { searchShoes };
+module.exports = shoeFunctionTools;

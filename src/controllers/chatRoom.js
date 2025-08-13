@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { HumanMessage } = require("@langchain/core/messages");
 const chats = require("../models/chats");
 const chatRoom = require("../models/chatRoom");
 const { HTTP_STATUS_CODE } = require("../constant");
@@ -15,6 +16,30 @@ const {
   agenda_name_automaticOrderCancelOfProcessingStatus,
 } = require("../utils/agenda");
 const { generateQuestionsToBubbleMessages } = require("../utils/gemini");
+const { getGeminiResponse } = require("../services/ai/gemini.service");
+
+exports.sendMessage = async (req, res) => {
+  const { message } = req.body;
+
+  if (!message) {
+    return res.status(400).json({ error: "Pesan tidak boleh kosong." });
+  }
+
+  try {
+    const prompt = new HumanMessage(message);
+    const response = await getGeminiResponse(prompt);
+
+    // Mengirimkan respons akhir dari Gemini ke klien
+    return res.status(200).json({
+      aiResponse: response.content,
+    });
+  } catch (error) {
+    console.error("Error pada sendMessage:", error);
+    return res
+      .status(500)
+      .json({ error: "Terjadi kesalahan internal pada server." });
+  }
+};
 
 exports.loadingBubbleMessages = async (req, res) => {
   const { chatId, loading } = req.body;
