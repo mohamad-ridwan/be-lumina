@@ -2,9 +2,10 @@ const mongoose = require("mongoose");
 const Brand = require("../../models/brand");
 const Category = require("../../models/category");
 const Shoe = require("../../models/shoes");
-const { getEmbedding } = require("../../utils/embeddings");
+// const { getEmbedding } = require("../../utils/embeddings");
 // const LatestOffer = require("../../models/latestOffers");
 const { stripHtml } = require("../../helpers/general");
+const { getQueryVector } = require("../../services/embeddings/jina.service");
 
 const searchShoes = async ({
   userIntent,
@@ -80,7 +81,8 @@ const searchShoes = async ({
 
   console.log("USER INTENT TEXT TO EMBED : ", userIntentToEmbed);
 
-  const userIntentEmbedding = await getEmbedding(userIntent);
+  // const userIntentEmbedding = await getEmbedding(userIntent);
+  const userIntentEmbedding = await getQueryVector(userIntent);
   console.log("user intent embedd length :", userIntentEmbedding.length);
   if (!userIntentEmbedding) {
     console.error("ERROR: Failed to generate embedding for query.");
