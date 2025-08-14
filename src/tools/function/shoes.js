@@ -430,15 +430,13 @@ const extractProductInfo = async (_id, newSpecsData) => {
     // 2. Buat objek untuk pembaruan
     const updateFields = {};
 
-    // 3. Tangani field yang akan langsung memperbarui dokumen
-    if (newSpecsData.deskripsi) {
-      updateFields.description = newSpecsData.deskripsi;
-    }
-
     // 4. Buat array 'specs' baru dari field lainnya
     const newSpecsArray = [];
 
     // Map setiap field dari tool ke dalam format { type, text }
+    if (newSpecsData.deskripsi) {
+      newSpecsArray.push({ type: "deskripsi", text: newSpecsData.deskripsi });
+    }
     if (newSpecsData.model) {
       newSpecsArray.push({ type: "model", text: newSpecsData.model });
     }

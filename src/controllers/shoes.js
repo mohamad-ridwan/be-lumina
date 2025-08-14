@@ -196,22 +196,20 @@ const updateSingleShoeEmbedding = async (shoeId) => {
   if (Array.isArray(shoe.specs) && shoe.specs.length > 0) {
     specsText = shoe.specs
       .map((s) => `${capitalizeFirstLetter(s.type)}: ${s.text}`)
-      .join(". ");
+      .join(" | ");
   }
 
   // --- Buat teks final untuk embedding ---
-  let textToEmbed = `
-Nama: ${shoe.name}.
-Brand: ${brandName}.
-Kategori: ${categoryNames}.
-Penawaran: ${offerTitles}.
-${variantInfo ? `Varian: ${variantInfo}` : ""}
-${specsText}
+  let textToEmbed = `Nama: ${
+    shoe.name
+  } | Brand: ${brandName} | Kategori: ${categoryNames} | Penawaran: ${offerTitles}${
+    variantInfo ? ` | Varian: ${variantInfo}` : ""
+  } | ${specsText}
   `
     .replace(/\s+/g, " ")
     .trim();
 
-  console.log(`[ID: ${shoeId}] TEXT TO EMBED: ${textToEmbed}`);
+  console.log(`[ID: ${shoeId}] TEXT TO EMBED: `, textToEmbed);
 
   // --- Generate embedding ---
   const newEmbedding = await getEmbedding(textToEmbed);
