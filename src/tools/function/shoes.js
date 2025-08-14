@@ -89,6 +89,8 @@ const searchShoes = async ({
     return { error: "Failed to generate embedding for query." };
   }
 
+  let vectorSearchFilterObject = {};
+
   // --- Tahap 1: Bangun Filter Query untuk Vector Search (filter sederhana) ---
   const vectorSearchFilters = [];
 
@@ -107,12 +109,36 @@ const searchShoes = async ({
     }
   }
 
-  if (category) {
-    const categoryDoc = await Category.findOne({
-      name: { $regex: new RegExp(category, "i") },
+  // if (category) {
+  //   const categoryDoc = await Category.findOne({
+  //     name: { $regex: new RegExp(category, "i") },
+  //   });
+  //   if (categoryDoc) {
+  //     vectorSearchFilters.push({ category: { $eq: categoryDoc._id } });
+  //   }
+  // }
+  if (category && Array.isArray(category) && category.length > 0) {
+    // Buat array untuk menampung semua ID kategori yang cocok
+    const matchedCategoryIds = [];
+
+    // Cari semua dokumen kategori yang namanya cocok dengan salah satu kategori di array input
+    const categoryDocs = await Category.find({
+      name: {
+        // Gunakan $in dengan array regex untuk pencarian yang fleksibel dan efisien
+        $in: category.map((catName) => new RegExp(catName, "i")),
+      },
     });
-    if (categoryDoc) {
-      vectorSearchFilters.push({ category: { $eq: categoryDoc._id } });
+
+    // Kumpulkan ID dari dokumen yang ditemukan
+    for (const doc of categoryDocs) {
+      matchedCategoryIds.push(doc._id);
+    }
+
+    // Jika ada ID yang cocok, tambahkan ke filter
+    if (matchedCategoryIds.length > 0) {
+      vectorSearchFilterObject.category = {
+        $in: matchedCategoryIds,
+      };
     }
   }
 
@@ -124,9 +150,11 @@ const searchShoes = async ({
     vectorSearchFilters.push({ price: priceQuery });
   }
 
-  let vectorSearchFilterObject = {};
   if (vectorSearchFilters.length > 0) {
-    vectorSearchFilterObject = { $and: vectorSearchFilters };
+    vectorSearchFilterObject = {
+      ...vectorSearchFilterObject,
+      $and: vectorSearchFilters,
+    };
   }
 
   // --- Tahap 2: Bangun Kriteria Filter untuk Tahap Aggregation lanjutan ($match) ---
@@ -157,7 +185,7 @@ const searchShoes = async ({
               key: attributeName,
               value: {
                 // $in: attributeValues.map((val) => new RegExp(val, "i")),
-                $in: attributeValues,
+                $in: attributeValues.map((val) => new RegExp(val, "i")),
               },
             },
           },
@@ -175,68 +203,42 @@ const searchShoes = async ({
         queryVector: userIntentEmbedding,
         numCandidates: 50,
         limit: limit,
-        // filter: vectorSearchFilterObject,
-        filter: {
-          category: {
-            $in: [new mongoose.Types.ObjectId("686173dc094fec4a4b64e516")],
-          },
-          // $and: [
-          //   { "variants.optionValues.key": "Warna" },
-          //   {
-          //     "variants.optionValues.value": {
-          //       $regex: "^hitam$",
-          //       $options: "i",
-          //     },
-          //   },
-          //   // { "variants.optionValues.key": "Ukuran" },
-          //   // {
-          //   //   "variants.optionValues.value": {
-          //   //     $in: ["42"],
-          //   //   },
-          //   // },
-          // ],
-          // "variants.optionValues.key": "Warna",
-          // "variants.optionValues.value": "Hitam",
-        },
+        filter: vectorSearchFilterObject,
       },
     },
-    // postVectorSearchFilters.$and.length > 0
-    //   ? {
-    //       $match: postVectorSearchFilters,
-    //     }
-    //   : null,
+    postVectorSearchFilters.$and.length > 0
+      ? {
+          $match: postVectorSearchFilters,
+        }
+      : null,
     // {
     //   $match: {
-    //     $or: [
-    //       // {
-    //       //   "variants.optionValues.key": "Warna",
-    //       // },
-    //       // {
-    //       //   "variants.optionValues.value": { $regex: "^hitam$", $options: "i" },
-    //       // },
-    //       {
-    //         "variants.optionValues": {
-    //           $elemMatch: {
-    //             key: "Ukuran",
-    //             value: {
-    //               // $in: attributeValues.map((val) => new RegExp(val, "i")),
-    //               $in: ["42", "43"],
-    //             },
-    //           },
-    //         },
-    //       },
-    //       {
-    //         "variants.optionValues": {
-    //           $elemMatch: {
-    //             key: "Warna",
-    //             value: {
-    //               // $in: attributeValues.map((val) => new RegExp(val, "i")),
-    //               $in: ["Ungu"].map((val) => new RegExp(val, "i")),
-    //             },
-    //           },
-    //         },
-    //       },
-    //     ],
+    //     // $and: [
+    //     //   {
+    //     //     "variants.optionValues": {
+    //     //       $elemMatch: {
+    //     //         key: "Ukuran",
+    //     //         value: {
+    //     //           // $in: attributeValues.map((val) => new RegExp(val, "i")),
+    //     //           $in: ["39", "40"].map((val) => new RegExp(val, "i")),
+    //     //         },
+    //     //       },
+    //     //     },
+    //     //   },
+    //     //   {
+    //     //     "variants.optionValues": {
+    //     //       $elemMatch: {
+    //     //         key: "Warna",
+    //     //         value: {
+    //     //           // $in: attributeValues.map((val) => new RegExp(val, "i")),
+    //     //           $in: ["PUTIH/abu-abu", "HITAM", "UNGU"].map(
+    //     //             (val) => new RegExp(val, "i")
+    //     //           ),
+    //     //         },
+    //     //       },
+    //     //     },
+    //     //   },
+    //     // ],
     //   },
     // },
     {
@@ -419,6 +421,23 @@ const searchShoes = async ({
   
 ${formattedOutputForGemini}`;
 };
+
+// searchShoes({
+//   // userIntent: `Mencari sepatu casual, yang nyaman dan tahan basah`,
+//   userIntent: `nyari sepatu Basket, rekomendasi yang ga gampang kena noda & lembab`,
+//   shoeNames: undefined,
+//   minPrice: undefined,
+//   maxPrice: undefined,
+//   material: "anti noda, anti lembab",
+//   brand: undefined,
+//   category: ["Basket"],
+//   variantFilters: { Ukuran: ["39", "40"], Warna: ["Putih"] },
+//   limit: 5,
+//   excludeIds: [],
+//   newArrival: undefined,
+//   relatedOffers: undefined,
+//   isPopular: undefined,
+// });
 
 const extractProductInfo = async (_id, newSpecsData) => {
   try {
