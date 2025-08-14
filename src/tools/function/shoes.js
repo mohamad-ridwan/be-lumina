@@ -222,6 +222,86 @@ const searchShoes = async ({
       $or: [{ price: priceQuery }, { "variants.price": priceQuery }],
     });
   }
+
+  function escapeRegex(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  // Separator rentang yang umum dipakai (hyphen, en dash, em dash, s/d, to, ~, dst)
+  const RANGE_SEP = "(?:-|–|—|~|s\\/?d|s\\.d\\.|to)";
+
+  // Regex string untuk menangkap rentang angka (mis. "39-45", "39 s/d 45", "39–45")
+  const RANGE_REGEX = new RegExp(
+    `(\\d+(?:\\.\\d+)?)\\s*${RANGE_SEP}\\s*(\\d+(?:\\.\\d+)?)`,
+    "gi"
+  );
+
+  /**
+   * Membangun klausa filter untuk 1 atribut varian.
+   * - attributeName: "Ukuran" | "Warna" | dst.
+   * - attributeValues: array string, mis. ["42"] atau ["hitam"]
+   */
+  function buildVariantFilterClause(attributeName, attributeValues) {
+    const regexList = attributeValues.map(
+      (v) => new RegExp(`\\b${escapeRegex(v)}\\b`, "i")
+    );
+
+    // Default: cocokkan di variants.optionValues ATAU di name (string langsung)
+    const baseOr = [
+      {
+        "variants.optionValues": {
+          $elemMatch: {
+            key: attributeName,
+            value: { $in: regexList },
+          },
+        },
+      },
+      { name: { $in: regexList } },
+    ];
+
+    // Jika atribut berupa angka (contoh: Ukuran), tambahkan cek rentang di name
+    const numericValues = attributeValues
+      .map((v) => parseFloat(String(v).replace(",", ".")))
+      .filter((n) => !Number.isNaN(n));
+
+    const rangeOr = numericValues.map((num) => ({
+      $expr: {
+        // Match semua rentang angka dalam 'name', lalu cek apakah 'num' berada di salah satu rentang
+        $let: {
+          vars: {
+            matches: { $regexFindAll: { input: "$name", regex: RANGE_REGEX } },
+          },
+          in: {
+            $anyElementTrue: {
+              $map: {
+                input: "$$matches",
+                as: "m",
+                in: {
+                  $let: {
+                    vars: {
+                      start: {
+                        $toDouble: { $arrayElemAt: ["$$m.captures", 0] },
+                      },
+                      end: { $toDouble: { $arrayElemAt: ["$$m.captures", 1] } },
+                    },
+                    in: {
+                      $and: [
+                        { $lte: ["$$start", num] },
+                        { $gte: ["$$end", num] },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    }));
+
+    return { $or: rangeOr.length ? baseOr.concat(rangeOr) : baseOr };
+  }
+
   // Filter varian menggunakan $elemMatch
   if (variantFilters && Object.keys(variantFilters).length > 0) {
     // 1. Iterasi setiap filter varian dari input
@@ -229,18 +309,32 @@ const searchShoes = async ({
       variantFilters
     )) {
       if (Array.isArray(attributeValues) && attributeValues.length > 0) {
+        // Dorong ke $and utama sebagai satu klausa per atribut
+        postVectorSearchFilters.$and.push(
+          buildVariantFilterClause(attributeName, attributeValues)
+        );
         // 2. Buat objek kriteria untuk setiap attributeName
-        postVectorSearchFilters.$and.push({
-          "variants.optionValues": {
-            $elemMatch: {
-              key: attributeName,
-              value: {
-                // $in: attributeValues.map((val) => new RegExp(val, "i")),
-                $in: attributeValues.map((val) => new RegExp(val, "i")),
-              },
-            },
-          },
-        });
+        // const regexList = attributeValues.map(
+        //   (val) => new RegExp(`\\b${val}\\b`, "i")
+        // );
+
+        // postVectorSearchFilters.$and.push({
+        //   $or: [
+        //     // Cek di variants.optionValues
+        //     {
+        //       "variants.optionValues": {
+        //         $elemMatch: {
+        //           key: attributeName,
+        //           value: { $in: regexList },
+        //         },
+        //       },
+        //     },
+        //     // Cek di name
+        //     {
+        //       name: { $in: regexList },
+        //     },
+        //   ],
+        // });
       }
     }
   }

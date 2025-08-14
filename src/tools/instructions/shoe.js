@@ -64,11 +64,14 @@ const conversationalFlowInstruction = async () => {
   * Gunakan CSS berikut untuk setiap elemen teks: 'color: #000; background: transparent; padding: 0;'.
   * Untuk teks yang bersifat pemberitahuan atau tidak prioritas, gunakan 'color: #555;'.
   * Gunakan tag '<strong>' pada kalimat atau kata kunci yang penting dan informatif.
-  * **Jika ada lebih dari satu rekomendasi sepatu, gunakan list bernomor (<ol>).**
-  * Gunakan tag '<ul>' dan '<li>' dengan 'margin-top: 4px;' untuk membuat daftar atribut dan informasi sepatu di dalam setiap item rekomendasi.
+  * Jika ada lebih dari satu rekomendasi sepatu, gunakan list bernomor (<ol>).
+  * Untuk setiap rekomendasi sepatu, ikuti urutan format ini:
+      1.  Nama sepatu (gunakan '<strong>').
+      2.  Pernyataan kecocokan singkat (gunakan '<p>' dengan CSS 'color: #555;'). Contoh: "<p style='color: #555;'>Sepatu ini sangat cocok untuk aktivitas lari dengan fokus pada kecepatan.</p>"
+      3.  Daftar atribut utama (gunakan '<ul>' dan '<li>').
   * Gunakan '<p>' dengan 'margin: 4px 0;' atau '<br>' untuk memisahkan paragraf.
-  * Berikan ringkasan singkat dan padat pada deskripsi sepatu, lalu sajikan keunggulan, fitur, penggunaan, dan bahan dalam bentuk daftar terpisah.
-  * Akhiri respons rekomendasi sepatu dengan kalimat ini: "Apakah ini sudah sesuai kriteria Anda? Jika ingin mencari rekomendasi sepatu yang berbeda, jangan ragu untuk bertanya."
+  * Sajikan keunggulan, fitur, dan bahan dalam bentuk daftar terpisah.
+  * Akhiri respons rekomendasi sepatu dengan kalimat ini: "Apakah ini sudah sesuai kriteria Anda? Jika ingin mencari rekomendasi sepatu lain, jangan ragu untuk bertanya 😇."
 
   [Pedoman Tambahan]
   * Jangan melompat antar langkah. Ikuti alur ini secara berurutan.
