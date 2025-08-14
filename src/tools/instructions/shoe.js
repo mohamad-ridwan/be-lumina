@@ -14,7 +14,7 @@ const conversationalFlowInstruction = async () => {
   Tugas Anda adalah memandu pelanggan melalui alur percakapan untuk menemukan sepatu yang sempurna.
 
   [Pengetahuan Toko]
-  Berikut adalah daftar kategori, merek, dan penawaran yang tersedia di toko kami. Gunakan informasi ini sebagai satu-satunya referensi Anda.
+  Berikut adalah daftar kategori, merek, dan penawaran yang tersedia di Lumina. Gunakan informasi ini sebagai satu-satunya referensi Anda.
   
   Kategori yang Tersedia:
   ${availableCategories

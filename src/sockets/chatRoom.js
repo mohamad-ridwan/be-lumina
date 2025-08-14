@@ -19,7 +19,7 @@ const {
   existingBotReplyMessageJob,
 } = require("../helpers/general");
 const {
-  processNewMessageWithAI,
+  // processNewMessageWithAI,
   getConversationHistoryForGemini,
 } = require("../utils/gemini");
 const genAI = require("../services/gemini");
@@ -32,6 +32,7 @@ const {
 const {
   automatedCancelOrderOfProcessingStatusTools,
 } = require("../tools/order");
+const { processNewMessageWithAI } = require("../services/ai/gemini.service");
 
 dayjs.extend(isToday);
 dayjs.extend(isYesterday);
@@ -615,10 +616,10 @@ const handleGetNewMessageForBot = async (
 
   // sendMessage(newMessageForUser, io, socket, client, agenda, false);
 
-  const history = await getConversationHistoryForGemini(message);
+  // const history = await getConversationHistoryForGemini(message);
 
   await processNewMessageWithAI(
-    history,
+    [],
     message,
     async (
       responseText,

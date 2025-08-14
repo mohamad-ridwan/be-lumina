@@ -77,8 +77,6 @@ const searchShoes = async ({
     }
   }
 
-  console.log("USER INTENT TEXT TO EMBED : ", userIntentToEmbed);
-
   // const userIntentEmbedding = await getEmbedding(userIntent);
   const userIntentEmbedding = await getQueryVector(userIntent);
   console.log("user intent embedd length :", userIntentEmbedding.length);
@@ -440,7 +438,7 @@ const searchShoes = async ({
 
   console.log(
     `--- END searchShoes. Found ${searchResults.length} results. ---`,
-    userIntentToEmbed,
+    userIntent,
     searchResults
   );
 
