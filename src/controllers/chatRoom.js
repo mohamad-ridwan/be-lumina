@@ -17,6 +17,9 @@ const {
 } = require("../utils/agenda");
 const { generateQuestionsToBubbleMessages } = require("../utils/gemini");
 const { getGeminiResponse } = require("../services/ai/gemini.service");
+const shoeSystemInstructions = require("../tools/instructions/shoe");
+
+const { conversationalFlowInstruction } = shoeSystemInstructions;
 
 exports.sendMessage = async (req, res) => {
   const { message } = req.body;
@@ -26,7 +29,9 @@ exports.sendMessage = async (req, res) => {
   }
 
   try {
-    const prompt = new HumanMessage(message);
+    const userMessage = new HumanMessage(message);
+    const flowInstruction = await conversationalFlowInstruction();
+    const prompt = [flowInstruction, userMessage];
     const response = await getGeminiResponse(prompt);
 
     // Mengirimkan respons akhir dari Gemini ke klien

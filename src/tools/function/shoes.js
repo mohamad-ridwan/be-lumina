@@ -3,7 +3,7 @@ const Brand = require("../../models/brand");
 const Category = require("../../models/category");
 const Shoe = require("../../models/shoes");
 // const { getEmbedding } = require("../../utils/embeddings");
-// const LatestOffer = require("../../models/latestOffers");
+const LatestOffers = require("../../models/latestOffers");
 const { stripHtml } = require("../../helpers/general");
 const { getQueryVector } = require("../../services/embeddings/jina.service");
 
@@ -20,7 +20,6 @@ const searchShoes = async ({
   excludeIds = [],
   newArrival,
   relatedOffers,
-  isPopular,
 }) => {
   console.log("--- START searchShoes (Atlas Vector Search) ---");
   console.log("Calling searchShoes with parameters:", {
@@ -36,7 +35,6 @@ const searchShoes = async ({
     excludeIds,
     newArrival,
     relatedOffers,
-    isPopular,
   });
 
   let userIntentToEmbed = "";
@@ -100,13 +98,40 @@ const searchShoes = async ({
     });
   }
 
-  if (brand) {
-    const brandDoc = await Brand.findOne({
-      name: { $regex: new RegExp(brand, "i") },
+  // if (brand) {
+  //   const brandDoc = await Brand.findOne({
+  //     name: { $regex: new RegExp(brand, "i") },
+  //   });
+  //   if (brandDoc) {
+  //     vectorSearchFilters.push({ brand: { $eq: brandDoc._id } });
+  //   }
+  // }
+  if (brand && Array.isArray(brand) && brand.length > 0) {
+    // Buat array untuk menampung semua ID kategori yang cocok
+    const matchedBrandIds = [];
+
+    // Cari semua dokumen kategori yang namanya cocok dengan salah satu kategori di array input
+    const brandDocs = await Brand.find({
+      name: {
+        // Gunakan $in dengan array regex untuk pencarian yang fleksibel dan efisien
+        $in: brand.map((brandName) => new RegExp(brandName, "i")),
+      },
     });
-    if (brandDoc) {
-      vectorSearchFilters.push({ brand: { $eq: brandDoc._id } });
+
+    // Kumpulkan ID dari dokumen yang ditemukan
+    for (const doc of brandDocs) {
+      matchedBrandIds.push(doc._id);
     }
+
+    // Jika ada ID yang cocok, tambahkan ke filter
+    if (matchedBrandIds.length > 0) {
+      vectorSearchFilterObject.brand = {
+        $in: matchedBrandIds,
+      };
+    }
+  }
+  if (newArrival === true) {
+    vectorSearchFilterObject.newArrival = newArrival;
   }
 
   // if (category) {
@@ -138,6 +163,34 @@ const searchShoes = async ({
     if (matchedCategoryIds.length > 0) {
       vectorSearchFilterObject.category = {
         $in: matchedCategoryIds,
+      };
+    }
+  }
+  if (
+    relatedOffers &&
+    Array.isArray(relatedOffers) &&
+    relatedOffers.length > 0
+  ) {
+    // Buat array untuk menampung semua ID kategori yang cocok
+    const matchedOffersIds = [];
+
+    // Cari semua dokumen kategori yang namanya cocok dengan salah satu kategori di array input
+    const offersDocs = await LatestOffers.find({
+      title: {
+        // Gunakan $in dengan array regex untuk pencarian yang fleksibel dan efisien
+        $in: relatedOffers.map((offersName) => new RegExp(offersName, "i")),
+      },
+    });
+
+    // Kumpulkan ID dari dokumen yang ditemukan
+    for (const doc of offersDocs) {
+      matchedOffersIds.push(doc._id);
+    }
+
+    // Jika ada ID yang cocok, tambahkan ke filter
+    if (matchedOffersIds.length > 0) {
+      vectorSearchFilterObject.relatedOffers = {
+        $in: matchedOffersIds,
       };
     }
   }

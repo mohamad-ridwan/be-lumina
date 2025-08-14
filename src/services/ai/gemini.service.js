@@ -10,7 +10,7 @@ const langChainModel = new ChatGoogleGenerativeAI({
 const getGeminiResponse = async (prompt) => {
   try {
     const modelTools = langChainModel.bindTools(langChainTools);
-    const messages = [prompt];
+    const messages = prompt;
     const aiMessage = await modelTools.invoke(messages);
     console.log(aiMessage);
 
@@ -23,6 +23,10 @@ const getGeminiResponse = async (prompt) => {
     }
 
     console.log(messages);
+
+    if (aiMessage.tool_calls.length === 0) {
+      return aiMessage;
+    }
 
     const response = await modelTools.invoke(messages);
     return response;

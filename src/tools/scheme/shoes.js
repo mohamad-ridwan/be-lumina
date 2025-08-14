@@ -26,7 +26,7 @@ const searchShoesSchema = z.object({
     .optional()
     .describe("Harga maksimum yang diinginkan dalam Rupiah. Contoh: 2000000"),
   brand: z
-    .string()
+    .array(z.string())
     .optional()
     .describe("Nama merek sepatu (misal: 'Adidas', 'Nike')."),
   category: z
@@ -42,17 +42,15 @@ const searchShoesSchema = z.object({
     .optional()
     .describe("Filter untuk sepatu yang merupakan model baru."),
   relatedOffers: z
-    .string()
+    .array(z.string())
     .optional()
-    .describe("Nama penawaran khusus atau diskon yang terkait."),
+    .describe(
+      "Daftar penawaran sepatu (misal: 'Musim Panas Tiba!', 'Waktunya Untuk Belajar Lagi!')"
+    ),
   limit: z
     .number()
     .optional()
     .describe("Jumlah maksimum hasil pencarian, maksimal 15."),
-  isPopular: z
-    .boolean()
-    .optional()
-    .describe("Filter untuk sepatu yang memiliki kategori populer."),
   material: z
     .string()
     .optional()
