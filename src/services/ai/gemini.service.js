@@ -17,7 +17,7 @@ const {
 } = require("../../tools/instructions/shoe");
 
 const langChainModel = new ChatGoogleGenerativeAI({
-  model: "gemini-2.5-flash",
+  model: "gemini-2.0-flash",
   temperature: 0,
   apiKey: process.env.GEMINI_API_KEY,
 });

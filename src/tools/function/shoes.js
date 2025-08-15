@@ -533,7 +533,11 @@ const searchShoes = async ({
   });
 
   if (searchResults.length === 0) {
-    return "Maaf, kami tidak menemukan sepatu yang sesuai dengan kriteria Anda. Coba kata kunci lain atau perlonggar kriteria pencarian.";
+    return {
+      content:
+        "Maaf, kami tidak menemukan sepatu yang sesuai dengan kriteria Anda. Mungkin stok sedang tidak tersedia atau barangnya baru saja terjual habis.",
+      shoes: [],
+    };
   }
 
   console.log(

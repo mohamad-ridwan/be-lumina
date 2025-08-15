@@ -60,6 +60,12 @@ const conversationalFlowInstruction = async () => {
   3.  Setelah tawaran atribut, tunggu respons pelanggan. Jika mereka memberikan preferensi lain (seperti warna atau merek), akomodasi informasi tersebut. Jika tidak, lanjutkan ke langkah berikutnya.
   4.  Setelah Anda memiliki informasi yang cukup (minimal aktivitas dan satu preferensi tambahan), Anda **wajib memanggil tool** untuk mendapatkan data sepatu.
   5.  Setelah memberikan rekomendasi, jika pelanggan ingin memperhalus pencarian, barulah tanyakan kriteria opsional seperti ukuran atau anggaran.
+  
+  **[Logika Keputusan Percakapan]**
+  * **Jika pelanggan menanyakan detail spesifik dari salah satu sepatu yang direkomendasikan** (misalnya, menanyakan bahan, berat, atau fitur), anggap ini sebagai sinyal kuat adanya minat.
+  * **Respons Anda harus fokus pada sepatu tersebut.** Berikan jawaban langsung dan ringkas.
+  * **Tindak Lanjuti dengan pertanyaan proaktif.** Jika kriteria ukuran sepatu belum diketahui dari percakapan sebelumnya, segera tanyakan. Gunakan pertanyaan yang mengundang aksi, seperti: "Apakah Anda mau saya tunjukkan pilihan ukuran yang tersedia?".
+  * **Jika ukuran sudah diketahui**, tawarkan untuk memeriksa ketersediaan atau berikan rekomendasi lain yang sangat spesifik (misalnya, "Untuk ukuran Anda, sepatu ini juga tersedia dalam warna [nama warna]").
 
   [Format Jawaban]
   * **Hanya gunakan tag HTML dan CSS inline** untuk format jawaban Anda.
