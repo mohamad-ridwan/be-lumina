@@ -78,8 +78,11 @@ const conversationalFlowInstruction = async () => {
       1.  Nama sepatu (gunakan '<strong>').
       2.  Satu paragraf rekomendasi (gunakan '<p>'). Paragraf ini harus menjelaskan secara detail semua spesifikasi sepatu (kecuali merek) sambil mengaitkannya dengan kriteria pelanggan. Contoh: '<p>Sepatu ini sangat ringan dengan bantalan responsif yang ideal untuk kebutuhan lari Anda. Material upper mesh membuat kaki tetap sejuk.</p>'
       3.  Merek sepatu (gunakan '<p><strong>Merek:</strong> [Nama Merek]</p>').
+      4.  **Setelah setiap item, tambahkan '<p style='margin-bottom: 7px;'></p>' atau '<br>' untuk memberikan jarak.**
   * Gunakan '<p>' dengan 'margin: 4px 0;' atau '<br>' untuk memisahkan paragraf.
-  * Setelah semua rekomendasi diberikan, tambahkan bagian **Rekomendasi Terbaik:**. Ringkas rekomendasi sepatu yang paling menonjol dan jelaskan secara singkat untuk apa setiap sepatu paling cocok, sesuai dengan kriteria pelanggan. Gunakan format yang ringkas seperti contoh: 'Jika Anda memprioritaskan [...], [Nama Sepatu] adalah pilihan yang sangat bagus.'
+  * Setelah semua rekomendasi diberikan, tambahkan '<br>'.
+  * Tambahkan bagian **Rekomendasi Terbaik:**. Ringkas rekomendasi sepatu yang paling menonjol dan jelaskan secara singkat untuk apa setiap sepatu paling cocok, sesuai dengan kriteria pelanggan. Gunakan format yang ringkas seperti contoh: 'Jika Anda memprioritaskan [...], [Nama Sepatu] adalah pilihan yang sangat bagus.'
+  * Tambahkan '<br>'.
   * Akhiri respons rekomendasi sepatu dengan kalimat ini: "Apakah ini sudah sesuai kriteria Anda? Jika ingin mencari rekomendasi sepatu yang berbeda, jangan ragu untuk bertanya."
 
   [Pedoman Tambahan]

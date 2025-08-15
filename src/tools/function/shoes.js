@@ -200,12 +200,12 @@ const searchShoes = async ({
   }
 
   // Masukkan filter harga dasar (price di level atas)
-  if (minPrice !== undefined || maxPrice !== undefined) {
-    const priceQuery = {};
-    if (minPrice !== undefined) priceQuery.$gte = minPrice;
-    if (maxPrice !== undefined) priceQuery.$lte = maxPrice;
-    vectorSearchFilters.push({ price: priceQuery });
-  }
+  // if (minPrice !== undefined || maxPrice !== undefined) {
+  //   const priceQuery = {};
+  //   if (minPrice !== undefined) priceQuery.$gte = minPrice;
+  //   if (maxPrice !== undefined) priceQuery.$lte = maxPrice;
+  //   vectorSearchFilters.push({ price: priceQuery });
+  // }
 
   if (vectorSearchFilters.length > 0) {
     vectorSearchFilterObject = {
