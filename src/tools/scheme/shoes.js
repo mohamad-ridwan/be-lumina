@@ -13,7 +13,13 @@ const searchShoesSchema = z.object({
     .record(z.array(z.string()))
     .optional()
     .describe(
-      "Objek untuk memfilter varian seperti warna atau ukuran. Contoh: {'Warna': ['hitam'], 'Ukuran': ['42'] }"
+      `Objek untuk memfilter varian seperti warna atau ukuran. 
+     Nilai warna mengacu pada pemahaman warna umum di dunia, bukan hanya yang ada di katalog internal.
+     Contoh warna umum: hitam, putih, abu-abu, biru, merah, hijau, kuning, oranye, cokelat, beige, pastel.
+     Warna lembut atau 'tidak mencolok' biasanya termasuk hitam, krem, abu-abu, biru muda/navy.
+     Warna mencolok biasanya termasuk merah terang, kuning neon, oranye terang.
+     Gunakan kata warna literal yang terdekat.
+     Contoh: {'Warna': ['hitam'], 'Ukuran': ['42'] }`
     ),
 
   // Atribut yang opsional (optional)
@@ -73,7 +79,7 @@ const searchShoesFuncDeclaration = {
 *   Gaya (misal: 'retro', 'modern', 'sporty', 'fashionable')
 *   Budget atau kisaran harga (misal: 'harga di bawah 1.5 juta', 'antara 800 ribu sampai 2 juta')
 *   Merek tertentu (misal: 'dari Adidas', 'Nike', 'Converse')
-*   Warna spesifik (misal: 'warna hitam', 'merah cerah')
+*   Warna spesifik — AI boleh memetakan istilah umum seperti 'tidak mencolok' menjadi warna literal yang sesuai (misalnya hitam, putih, abu-abu, cokelat, krem)
 *   Ketersediaan ukuran (misal: 'ukuran 42', 'tersedia ukuran besar')
 *   Kombinasi dari kriteria tersebut
 

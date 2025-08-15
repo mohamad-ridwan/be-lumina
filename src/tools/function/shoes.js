@@ -89,6 +89,7 @@ const searchShoes = async ({
 
   // --- Tahap 1: Bangun Filter Query untuk Vector Search (filter sederhana) ---
   const vectorSearchFilters = [];
+  const postVectorSearchFilters = { $and: [] };
 
   if (Array.isArray(excludeIds) && excludeIds.length > 0) {
     vectorSearchFilters.push({
@@ -186,10 +187,15 @@ const searchShoes = async ({
     }
 
     // Jika ada ID yang cocok, tambahkan ke filter
+    // if (matchedOffersIds.length > 0) {
+    //   vectorSearchFilterObject.relatedOffers = {
+    //     $in: matchedOffersIds,
+    //   };
+    // }
     if (matchedOffersIds.length > 0) {
-      vectorSearchFilterObject.relatedOffers = {
-        $in: matchedOffersIds,
-      };
+      postVectorSearchFilters.$and.push({
+        $or: [{ relatedOffers: { $in: matchedOffersIds } }],
+      });
     }
   }
 
@@ -209,7 +215,6 @@ const searchShoes = async ({
   }
 
   // --- Tahap 2: Bangun Kriteria Filter untuk Tahap Aggregation lanjutan ($match) ---
-  const postVectorSearchFilters = { $and: [] };
 
   // Filter harga yang lebih kompleks (price di variants)
   if (minPrice !== undefined || maxPrice !== undefined) {
