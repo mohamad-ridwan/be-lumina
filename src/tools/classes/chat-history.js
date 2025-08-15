@@ -90,9 +90,15 @@ const getConversationHistoryForGemini = async (message, io, socket, client) => {
       .map((msg) => {
         if (msg.role === "user") {
           return new HumanMessage(msg.textMessage);
-        } else {
-          return new AIMessage(msg.textMessage);
+        } else if (msg?.productData?.length > 0) {
+          return new AIMessage({
+            content: msg.textMessage,
+            additional_kwargs: {
+              data: msg?.productData,
+            },
+          });
         }
+        return new AIMessage(msg.textMessage);
       });
 
     return formattedHisory;

@@ -517,6 +517,7 @@ const searchShoes = async ({
       }
     }
     const item = {
+      _id: shoe._id,
       name: shoe.name,
       brand: shoe.brand,
       category: shoe.category,
@@ -567,9 +568,14 @@ const searchShoes = async ({
     })
     .join("\n---\n"); // Gabungkan setiap item dengan pemisah yang jelas
 
-  return `Hasil pencarian sepatu:
+  const content = `Hasil pencarian sepatu:
   
 ${formattedOutputForGemini}`;
+
+  return {
+    shoes: searchResults,
+    content: content,
+  };
 };
 
 // searchShoes({

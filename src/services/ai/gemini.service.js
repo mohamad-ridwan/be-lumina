@@ -62,7 +62,8 @@ const processNewMessageWithAI = async (
   let orderForFrontendData = [];
   let typeOrder = "";
   const userQuestions = message.latestMessage.textMessage;
-
+  const collectedProductIds = new Set();
+  let productData = [];
   let functionCallForHistory = [];
   let functionResponseForHistory = [];
 
@@ -104,10 +105,26 @@ const processNewMessageWithAI = async (
     if (firstResponse.tool_calls && firstResponse.tool_calls.length > 0) {
       let toolCallResults = [];
       for (const toolCall of firstResponse.tool_calls) {
+        const functionName = toolCall.name;
+        const functionArgs = { ...toolCall.args };
         const selectedTool = toolsByName[toolCall.name];
+
+        if (functionName === "searchShoes") {
+          functionArgs.excludeIds = Array.from(collectedProductIds);
+        }
         // Pastikan tool.invoke() menerima argumen yang benar
-        const toolMessage = await selectedTool.invoke(toolCall.args);
-        toolCallResults.push(toolMessage);
+        const toolMessage = await selectedTool.invoke(functionArgs);
+        toolCallResults.push(toolMessage.content);
+
+        if (functionName === "searchShoes" && toolMessage.shoes.length > 0) {
+          toolMessage.shoes.forEach((product) => {
+            const id = product._id?.toString();
+            if (id && !collectedProductIds.has(id)) {
+              productData.push(product);
+              collectedProductIds.add(id); // Tambahkan ID ke set global
+            }
+          });
+        }
       }
 
       const currentChatHistory = await new MongooseChatHistory(
@@ -123,7 +140,7 @@ const processNewMessageWithAI = async (
       const toolResultMessages = toolCallResults.map(
         (result) =>
           new ToolMessage({
-            content: JSON.stringify(result),
+            content: result,
             name: "searchShoes", // Nama tool harus sesuai
             tool_call_id: firstResponse.tool_calls[0].id, // Penting untuk mengaitkan respons dengan tool call
           })
@@ -148,7 +165,7 @@ const processNewMessageWithAI = async (
           client,
           agenda,
           newMessageId: messageId,
-          productData: [], // Kirimkan hasil tools ke frontend
+          productData, // Kirimkan hasil tools ke frontend
           orderData: {
             loading: false,
             type: typeOrder,
@@ -172,7 +189,7 @@ const processNewMessageWithAI = async (
           client,
           agenda,
           newMessageId: messageId,
-          productData: [],
+          productData,
           orderData: {},
         },
         functionCallForHistory,
@@ -191,7 +208,7 @@ const processNewMessageWithAI = async (
         client,
         agenda,
         newMessageId: messageId,
-        productData: [],
+        productData,
         orderData: {},
       }
     );

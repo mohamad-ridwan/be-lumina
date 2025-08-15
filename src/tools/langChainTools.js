@@ -4,13 +4,13 @@ const shoeSchemeTools = require("./scheme/shoes");
 const { searchShoesFuncDeclaration, productInfoTool } = shoeSchemeTools;
 
 const searchShoesTool = tool(searchShoes, searchShoesFuncDeclaration);
-const extractProductInfoTool = tool(extractProductInfo, productInfoTool);
+// const extractProductInfoTool = tool(extractProductInfo, productInfoTool);
 
-const langChainTools = [searchShoesTool, extractProductInfoTool];
+const langChainTools = [searchShoesTool];
 
 const toolsByName = {
   searchShoes: searchShoesTool,
-  extractProductInfo: extractProductInfoTool,
+  // extractProductInfo: extractProductInfoTool,
 };
 
 module.exports = { langChainTools, toolsByName };
