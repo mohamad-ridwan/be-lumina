@@ -420,6 +420,7 @@ const searchShoes = async ({
         name: 1,
         brand: "$brand.name",
         category: "$category.name",
+        slug: 1,
         description: 1,
         price: 1,
         variants: 1,
@@ -437,6 +438,7 @@ const searchShoes = async ({
         price: { $first: "$price" },
         variants: { $first: "$variants" },
         stock: { $first: "$stock" },
+        slug: { $first: "$slug" },
       },
     },
     {
@@ -524,6 +526,7 @@ const searchShoes = async ({
       description: compactedDescription,
       price: shoe.price,
       variants: formattedVariants,
+      slug: shoe.slug,
       score: shoe.score,
     };
     if (shoe.variants && shoe.variants.length === 0) {
