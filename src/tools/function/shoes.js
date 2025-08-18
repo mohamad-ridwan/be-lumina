@@ -526,7 +526,7 @@ const searchShoes = async ({
       description: compactedDescription,
       price: shoe.price,
       variants: formattedVariants,
-      slug: shoe.slug,
+      slug_sepatu: shoe.slug,
       score: shoe.score,
     };
     if (shoe.variants && shoe.variants.length === 0) {
@@ -570,6 +570,7 @@ const searchShoes = async ({
 - Kategori: ${shoe.category.join(", ")}
 - Harga: Rp ${shoe.price.toLocaleString("id-ID")}
 - Deskripsi: ${shoe.description}
+- Link Url Sepatu: http://localhost:3008/product/${shoe.slug_sepatu}
 - Varian Tersedia: ${formattedVariants}
 `;
     })

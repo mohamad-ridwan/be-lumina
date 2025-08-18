@@ -96,7 +96,7 @@ const conversationalFlowInstruction = async () => {
       2.  Satu paragraf rekomendasi (gunakan '<p>'). Paragraf ini harus menjelaskan secara detail semua spesifikasi sepatu (kecuali merek) sambil mengaitkannya dengan kriteria pelanggan. Contoh: '<p>Sepatu ini sangat ringan dengan bantalan responsif yang ideal untuk kebutuhan lari Anda. Material upper mesh membuat kaki tetap sejuk.</p>'
       3.  Merek sepatu (gunakan '<p><strong>Merek:</strong> [Nama Merek]</p>').
       4.  **Tambahkan informasi harga jika pelanggan menyebutkan anggaran (gunakan '<p><strong>Harga:</strong> [Harga Sepatu]</p>').**
-      5.  **Sertakan tautan langsung ke halaman produk menggunakan format '<a href="http://localhost:3008/product/{slug_sepatu}" style="color: #007bff; text-decoration: underline;">Lihat Detail Produk</a>'. Ganti '{slug_sepatu}' dengan slug produk yang tersedia.**
+      5.  **Sertakan tautan langsung ke halaman produk menggunakan format '<a href="{link_url_sepatu}" style="color: #007bff; text-decoration: underline;">Lihat Detail Produk</a>'. Ganti '{link_url_sepatu}' dengan link_url_sepatu produk yang tersedia. SANGAT PENTING: link_url_sepatu PRODUK TIDAK BOLEH DIMODIFIKASI SAMA SEKALI. GUNAKAN TEKS link_url_sepatu YANG PERSIS SAMA DENGAN YANG DIBERIKAN OLEH TOOL.**
       6.  **Setelah setiap item, tambahkan '<p style='margin-bottom: 7px;'></p>' atau '<br>' untuk memberikan jarak.**
   * Gunakan '<p>' dengan 'margin: 4px 0;' atau '<br>' untuk memisahkan paragraf.
   * Setelah semua rekomendasi diberikan, tambahkan '<br>'.
