@@ -352,7 +352,7 @@ const searchShoes = async ({
         path: "embedding",
         queryVector: userIntentEmbedding,
         numCandidates: 50,
-        limit: limit,
+        limit: 3,
         filter: vectorSearchFilterObject,
       },
     },
