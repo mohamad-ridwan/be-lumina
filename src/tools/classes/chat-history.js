@@ -123,16 +123,18 @@ class MongooseChatHistory extends BaseChatMessageHistory {
   }
 
   // Metode untuk menyimpan pesan baru ke database
-  // async addMessage(message) {
-  //   const { type, content } = message;
-  //   const role = type === "human" ? "user" : "model";
-  //   const newMessage = new ChatRoom({
-  //     messageId: this.messageId,
-  //     role: role,
-  //     textMessage: content,
-  //   });
-  //   await newMessage.save();
-  // }
+  async addMessage(message) {
+    const { type, content } = message;
+    console.log("Call addMessage", type, content);
+    return;
+    // const role = type === "human" ? "user" : "model";
+    // const newMessage = new ChatRoom({
+    //   messageId: this.messageId,
+    //   role: role,
+    //   textMessage: content,
+    // });
+    // await newMessage.save();
+  }
 }
 
 module.exports = { MongooseChatHistory };
