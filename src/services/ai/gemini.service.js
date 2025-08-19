@@ -1,5 +1,10 @@
 const { ChatGoogleGenerativeAI } = require("@langchain/google-genai");
-const { AIMessage, ToolMessage } = require("@langchain/core/messages");
+const {
+  AIMessage,
+  HumanMessage,
+  ToolMessage,
+  BaseMessage,
+} = require("@langchain/core/messages");
 const {
   ChatPromptTemplate,
   MessagesPlaceholder,
@@ -9,6 +14,7 @@ const {
   RunnableWithMessageHistory,
   RunnablePassthrough,
 } = require("@langchain/core/runnables");
+const { StateGraph, END } = require("@langchain/langgraph");
 const { langChainTools, toolsByName } = require("../../tools/langChainTools");
 const { generateRandomId } = require("../../helpers/generateRandomId");
 const { MongooseChatHistory } = require("../../tools/classes/chat-history");
@@ -51,241 +57,388 @@ const getGeminiResponse = async (prompt) => {
   }
 };
 
+const modelWithTools = langChainModel.bindTools(langChainTools);
+
+// Definisikan tipe state untuk LangGraph
+const State = {
+  messages: {
+    value: (x, y) => x.concat(y),
+    default: () => [],
+  },
+};
+
+// Buat Graph
+const graph = new StateGraph({
+  channels: State,
+})
+  // Node agent: Memanggil model dan memutuskan langkah selanjutnya
+  .addNode("agent", async (state) => {
+    const { messages } = state;
+    const response = await modelWithTools.invoke(messages);
+    return { messages: [response] };
+  })
+
+  // Node tools: Menjalankan tools yang diputuskan oleh agent
+  .addNode("tools", async (state) => {
+    const { messages } = state;
+    const lastMessage = messages[messages.length - 1];
+
+    // Asumsi hanya ada satu tool call per langkah. Untuk multiple, perlu perulangan.
+    const toolCall = lastMessage.tool_calls[0];
+    const selectedTool = toolsByName[toolCall.name];
+
+    if (!selectedTool) {
+      throw new Error(`Tool tidak ditemukan: ${toolCall.name}`);
+    }
+
+    // Jalankan tool
+    const toolResult = await selectedTool.invoke(toolCall.args);
+
+    // Buat ToolMessage dari hasil tool
+    const toolMessage = new ToolMessage({
+      tool_call_id: toolCall.id,
+      content: JSON.stringify(toolResult),
+      name: toolCall.name,
+    });
+
+    // Kembalikan ToolMessage ke graph
+    return { messages: [toolMessage] };
+  })
+
+  // Hubungkan node
+  .addEdge("tools", "agent")
+  .addConditionalEdges("agent", (state) => {
+    const { messages } = state;
+    const lastMessage = messages[messages.length - 1];
+    console.log("Last message:", lastMessage);
+    // Jika ada tool calls, arahkan ke node 'tools'
+    if (lastMessage.tool_calls && lastMessage.tool_calls.length > 0) {
+      return "tools";
+    }
+    // Jika tidak, akhiri graph
+    return END;
+  })
+  .setEntryPoint("agent");
+
+// Kompilasi graph menjadi sebuah runnable
+const app = graph.compile();
+
 const processNewMessageWithAI = async (
-  formattedHistory, // Fixed typo: formattedHisory -> formattedHistory
+  formattedHisory,
   message,
   sendMessageCallback,
   { io, socket, client, agenda }
 ) => {
   const latestMessageTimestamp = Date.now();
   const messageId = generateRandomId(15);
-  const userQuestions = message.latestMessage.textMessage;
-  let productData = [];
+  let finalResponse = "Maaf, kami tidak tersedia saat ini. Silakan coba lagi.";
 
   try {
-    // Get chat history
-    const getHistoryMessages = new MongooseChatHistory(messageId, message);
-    const history = await getHistoryMessages.getMessages();
+    const userQuestions = message.latestMessage.textMessage;
+    const chatHistoryManager = new MongooseChatHistory(messageId, message);
+    const instruction = await conversationalFlowInstruction();
 
-    // Build the conversation context
-    let conversationContext = "";
-    if (history && history.length > 0) {
-      conversationContext =
-        history
-          .map((msg) => {
-            if (typeof msg === "string") return `Human: ${msg}`;
-            if (msg.content) {
-              const role =
-                msg.constructor.name.includes("Human") ||
-                msg.type === "human" ||
-                msg.role === "user"
-                  ? "Human"
-                  : "Assistant";
-              return `${role}: ${msg.content}`;
-            }
-            return "";
-          })
-          .filter(Boolean)
-          .join("\n") + "\n";
-    }
+    // Ambil riwayat chat dari MongoDB
+    const chatHistory = await chatHistoryManager.getMessages();
+    const formattedChatHistory = chatHistory.map((item) =>
+      item.role === "human"
+        ? new HumanMessage(item.content)
+        : new AIMessage(item.content)
+    );
 
-    // Manual ReAct implementation with multiple tool call capability
-    const systemMessage = await conversationalFlowInstruction();
-    const systemPrompt =
-      typeof systemMessage === "string" ? systemMessage : systemMessage.content;
+    // Jalankan LangGraph dengan semua pesan (instruksi, riwayat, pesan baru)
+    const initialState = {
+      messages: [
+        new HumanMessage(instruction), // Menggunakan HumanMessage untuk instruksi agar lebih jelas
+        ...formattedChatHistory,
+        new HumanMessage(userQuestions),
+      ],
+    };
 
-    let finalAnswer = "";
-    let maxIterations = 2;
-    let iteration = 0;
-    let shouldContinue = true;
-    let allToolResults = []; // Track all tool results across iterations
-    let conversationHistory = ""; // Build conversation history with tool results
+    const finalState = await app.invoke(initialState);
 
-    while (shouldContinue && iteration < maxIterations) {
-      iteration++;
-      console.log(`ReAct iteration ${iteration}`);
+    const responseMessage = finalState.messages[finalState.messages.length - 1];
+    finalResponse = responseMessage.content;
 
-      // Build the current context with previous tool results
-      let currentContext = `${systemPrompt}
+    // Simpan pesan terakhir ke riwayat
+    await chatHistoryManager.addMessage({
+      role: "human",
+      content: userQuestions,
+    });
+    await chatHistoryManager.addMessage({
+      role: "ai",
+      content: finalResponse,
+    });
 
-${conversationContext}Human: ${userQuestions}`;
-
-      if (allToolResults.length > 0) {
-        const previousToolResults = allToolResults
-          .map(
-            (tr, index) =>
-              `Tool Call ${index + 1} - ${tr.tool}: ${
-                typeof tr.result === "string"
-                  ? tr.result
-                  : JSON.stringify(tr.result)
-              }`
-          )
-          .join("\n\n");
-
-        currentContext += `\n\nPrevious tool results:\n${previousToolResults}`;
-        currentContext += `\n\nBased on the above results, you can either:
-1. Call another tool with different parameters if the results are empty or insufficient
-2. Provide your final answer if you have enough information
-
-What would you like to do next?`;
-      } else {
-        currentContext += `\n\nIf you need to search for information, please use the available tools. If the first search doesn't return results, try with different parameters or alternative approaches.`;
-      }
-
-      try {
-        // Get model response with tools
-        const modelWithTools = langChainModel.bindTools(langChainTools);
-        const messages = [new HumanMessage(currentContext)];
-        const aiMessage = await modelWithTools.invoke(messages);
-
-        // If there are tool calls, execute them
-        if (aiMessage.tool_calls && aiMessage.tool_calls.length > 0) {
-          let currentIterationResults = [];
-
-          for (const toolCall of aiMessage.tool_calls) {
-            const selectedTool = toolsByName[toolCall.name];
-
-            if (selectedTool) {
-              try {
-                const toolResult = await selectedTool.invoke(
-                  toolCall.args || toolCall
-                );
-
-                const resultObj = {
-                  tool: toolCall.name,
-                  args: toolCall.args,
-                  result: toolResult,
-                  iteration: iteration,
-                };
-
-                currentIterationResults.push(resultObj);
-                allToolResults.push(resultObj);
-
-                // Save product data if it's a shoe search and has results
-                if (
-                  toolCall.name === "searchShoes" &&
-                  toolResult.shoes &&
-                  toolResult.shoes.length > 0
-                ) {
-                  productData = [...productData, ...toolResult.shoes]; // Accumulate results
-                }
-              } catch (toolError) {
-                console.error(
-                  `Error executing tool ${toolCall.name}:`,
-                  toolError
-                );
-                const errorResult = {
-                  tool: toolCall.name,
-                  args: toolCall.args,
-                  result: `Error: ${toolError.message}`,
-                  iteration: iteration,
-                };
-                currentIterationResults.push(errorResult);
-                allToolResults.push(errorResult);
-              }
-            }
-          }
-
-          // Check if we should continue or provide final answer
-          const hasEmptyResults = currentIterationResults.some(
-            (r) =>
-              r.tool === "searchShoes" &&
-              (r.result.shoes?.length === 0 || r.result.error)
-          );
-
-          // If we have empty results and haven't reached max iterations, continue
-          if (hasEmptyResults && iteration < maxIterations) {
-            console.log(
-              `Iteration ${iteration}: Got empty results, continuing to next iteration...`
-            );
-            shouldContinue = true;
-            // Continue to next iteration to let model try different approach
-          } else {
-            // Either we have results or we've reached max iterations, time for final answer
-            shouldContinue = false;
-
-            const allToolResultsText = allToolResults
-              .map(
-                (tr, index) =>
-                  `Tool Call ${index + 1} (Iteration ${tr.iteration}) - ${
-                    tr.tool
-                  }:\nArgs: ${JSON.stringify(tr.args)}\nResult: ${
-                    typeof tr.result === "string"
-                      ? tr.result
-                      : JSON.stringify(tr.result)
-                  }`
-              )
-              .join("\n\n---\n\n");
-
-            const finalPrompt = `${systemPrompt}
-
-${conversationContext}Human: ${userQuestions}
-
-All tool executions completed:
-${allToolResultsText}
-
-Based on all the tool results above, please provide your final comprehensive answer to the user. If no products were found despite multiple searches, suggest alternatives or ask for different criteria.`;
-
-            const finalResponse = await langChainModel.invoke([
-              new HumanMessage(finalPrompt),
-            ]);
-            finalAnswer = finalResponse.content;
-          }
-        } else {
-          // No tool calls, this is the final answer
-          finalAnswer =
-            aiMessage.content || "Maaf, tidak ada respons yang dihasilkan.";
-          shouldContinue = false;
-
-          console.log("No tool calls, ai content:", aiMessage.content);
-        }
-      } catch (iterationError) {
-        console.error(`Error in iteration ${iteration}:`, iterationError);
-        if (iteration === maxIterations) {
-          throw iterationError;
-        }
-        // Continue to next iteration
-      }
-    }
-
-    if (!finalAnswer) {
-      finalAnswer = "Maaf, saya tidak bisa memproses pertanyaan Anda saat ini.";
-    }
-
-    await sendMessageCallback(finalAnswer, message, latestMessageTimestamp, {
+    // Kirim jawaban akhir ke pengguna
+    await sendMessageCallback(finalResponse, message, latestMessageTimestamp, {
       io,
       socket,
       client,
       agenda,
       newMessageId: messageId,
-      productData,
+      productData: [], // LangGraph tidak mengembalikan ini secara default, perlu diadaptasi jika diperlukan
       orderData: {},
     });
-
-    return finalAnswer;
+    return finalResponse;
   } catch (error) {
-    console.error("Detailed error in processNewMessageWithAI:", {
-      message: error.message,
-      stack: error.stack,
-      name: error.name,
-    });
-
-    const errorMessage =
-      "Maaf, kami tidak tersedia saat ini. Silakan coba lagi.";
-
-    await sendMessageCallback(errorMessage, message, latestMessageTimestamp, {
-      io,
-      socket,
-      client,
-      agenda,
-      newMessageId: messageId,
-      productData: [],
-      orderData: {},
-    });
-
-    throw new Error(`Failed to process new message with AI: ${error.message}`);
+    await sendMessageCallback(
+      "Maaf, kami tidak tersedia saat ini. Silakan coba lagi.",
+      message,
+      latestMessageTimestamp,
+      {
+        io,
+        socket,
+        client,
+        agenda,
+        newMessageId: messageId,
+        productData: [],
+        orderData: {},
+      }
+    );
+    console.error(
+      "Internal Server Error when process new message with AI:",
+      error
+    );
+    throw new Error("Failed process new message with AI", error);
   }
 };
+
+// const processNewMessageWithAI = async (
+//   formattedHistory, // Fixed typo: formattedHisory -> formattedHistory
+//   message,
+//   sendMessageCallback,
+//   { io, socket, client, agenda }
+// ) => {
+//   const latestMessageTimestamp = Date.now();
+//   const messageId = generateRandomId(15);
+//   const userQuestions = message.latestMessage.textMessage;
+//   let productData = [];
+
+//   try {
+//     // Get chat history
+//     const getHistoryMessages = new MongooseChatHistory(messageId, message);
+//     const history = await getHistoryMessages.getMessages();
+
+//     // Build the conversation context
+//     let conversationContext = "";
+//     if (history && history.length > 0) {
+//       conversationContext =
+//         history
+//           .map((msg) => {
+//             if (typeof msg === "string") return `Human: ${msg}`;
+//             if (msg.content) {
+//               const role =
+//                 msg.constructor.name.includes("Human") ||
+//                 msg.type === "human" ||
+//                 msg.role === "user"
+//                   ? "Human"
+//                   : "Assistant";
+//               return `${role}: ${msg.content}`;
+//             }
+//             return "";
+//           })
+//           .filter(Boolean)
+//           .join("\n") + "\n";
+//     }
+
+//     // Manual ReAct implementation with multiple tool call capability
+//     const systemMessage = await conversationalFlowInstruction();
+//     const systemPrompt =
+//       typeof systemMessage === "string" ? systemMessage : systemMessage.content;
+
+//     let finalAnswer = "";
+//     let maxIterations = 2;
+//     let iteration = 0;
+//     let shouldContinue = true;
+//     let allToolResults = []; // Track all tool results across iterations
+//     let conversationHistory = ""; // Build conversation history with tool results
+
+//     while (shouldContinue && iteration < maxIterations) {
+//       iteration++;
+//       console.log(`ReAct iteration ${iteration}`);
+
+//       // Build the current context with previous tool results
+//       let currentContext = `${systemPrompt}
+
+// ${conversationContext}Human: ${userQuestions}`;
+
+//       if (allToolResults.length > 0) {
+//         const previousToolResults = allToolResults
+//           .map(
+//             (tr, index) =>
+//               `Tool Call ${index + 1} - ${tr.tool}: ${
+//                 typeof tr.result === "string"
+//                   ? tr.result
+//                   : JSON.stringify(tr.result)
+//               }`
+//           )
+//           .join("\n\n");
+
+//         currentContext += `\n\nPrevious tool results:\n${previousToolResults}`;
+//         currentContext += `\n\nBased on the above results, you can either:
+// 1. Call another tool with different parameters if the results are empty or insufficient
+// 2. Provide your final answer if you have enough information
+
+// What would you like to do next?`;
+//       } else {
+//         currentContext += `\n\nIf you need to search for information, please use the available tools. If the first search doesn't return results, try with different parameters or alternative approaches.`;
+//       }
+
+//       try {
+//         // Get model response with tools
+//         const modelWithTools = langChainModel.bindTools(langChainTools);
+//         const messages = [new HumanMessage(currentContext)];
+//         const aiMessage = await modelWithTools.invoke(messages);
+
+//         // If there are tool calls, execute them
+//         if (aiMessage.tool_calls && aiMessage.tool_calls.length > 0) {
+//           let currentIterationResults = [];
+
+//           for (const toolCall of aiMessage.tool_calls) {
+//             const selectedTool = toolsByName[toolCall.name];
+
+//             if (selectedTool) {
+//               try {
+//                 const toolResult = await selectedTool.invoke(
+//                   toolCall.args || toolCall
+//                 );
+
+//                 const resultObj = {
+//                   tool: toolCall.name,
+//                   args: toolCall.args,
+//                   result: toolResult,
+//                   iteration: iteration,
+//                 };
+
+//                 currentIterationResults.push(resultObj);
+//                 allToolResults.push(resultObj);
+
+//                 // Save product data if it's a shoe search and has results
+//                 if (
+//                   toolCall.name === "searchShoes" &&
+//                   toolResult.shoes &&
+//                   toolResult.shoes.length > 0
+//                 ) {
+//                   productData = [...productData, ...toolResult.shoes]; // Accumulate results
+//                 }
+//               } catch (toolError) {
+//                 console.error(
+//                   `Error executing tool ${toolCall.name}:`,
+//                   toolError
+//                 );
+//                 const errorResult = {
+//                   tool: toolCall.name,
+//                   args: toolCall.args,
+//                   result: `Error: ${toolError.message}`,
+//                   iteration: iteration,
+//                 };
+//                 currentIterationResults.push(errorResult);
+//                 allToolResults.push(errorResult);
+//               }
+//             }
+//           }
+
+//           // Check if we should continue or provide final answer
+//           const hasEmptyResults = currentIterationResults.some(
+//             (r) =>
+//               r.tool === "searchShoes" &&
+//               (r.result.shoes?.length === 0 || r.result.error)
+//           );
+
+//           // If we have empty results and haven't reached max iterations, continue
+//           if (hasEmptyResults && iteration < maxIterations) {
+//             console.log(
+//               `Iteration ${iteration}: Got empty results, continuing to next iteration...`
+//             );
+//             shouldContinue = true;
+//             // Continue to next iteration to let model try different approach
+//           } else {
+//             // Either we have results or we've reached max iterations, time for final answer
+//             shouldContinue = false;
+
+//             const allToolResultsText = allToolResults
+//               .map(
+//                 (tr, index) =>
+//                   `Tool Call ${index + 1} (Iteration ${tr.iteration}) - ${
+//                     tr.tool
+//                   }:\nArgs: ${JSON.stringify(tr.args)}\nResult: ${
+//                     typeof tr.result === "string"
+//                       ? tr.result
+//                       : JSON.stringify(tr.result)
+//                   }`
+//               )
+//               .join("\n\n---\n\n");
+
+//             const finalPrompt = `${systemPrompt}
+
+// ${conversationContext}Human: ${userQuestions}
+
+// All tool executions completed:
+// ${allToolResultsText}
+
+// Based on all the tool results above, please provide your final comprehensive answer to the user. If no products were found despite multiple searches, suggest alternatives or ask for different criteria.`;
+
+//             const finalResponse = await langChainModel.invoke([
+//               new HumanMessage(finalPrompt),
+//             ]);
+//             finalAnswer = finalResponse.content;
+//           }
+//         } else {
+//           // No tool calls, this is the final answer
+//           finalAnswer =
+//             aiMessage.content || "Maaf, tidak ada respons yang dihasilkan.";
+//           shouldContinue = false;
+
+//           console.log("No tool calls, ai content:", aiMessage.content);
+//         }
+//       } catch (iterationError) {
+//         console.error(`Error in iteration ${iteration}:`, iterationError);
+//         if (iteration === maxIterations) {
+//           throw iterationError;
+//         }
+//         // Continue to next iteration
+//       }
+//     }
+
+//     if (!finalAnswer) {
+//       finalAnswer = "Maaf, saya tidak bisa memproses pertanyaan Anda saat ini.";
+//     }
+
+//     await sendMessageCallback(finalAnswer, message, latestMessageTimestamp, {
+//       io,
+//       socket,
+//       client,
+//       agenda,
+//       newMessageId: messageId,
+//       productData,
+//       orderData: {},
+//     });
+
+//     return finalAnswer;
+//   } catch (error) {
+//     console.error("Detailed error in processNewMessageWithAI:", {
+//       message: error.message,
+//       stack: error.stack,
+//       name: error.name,
+//     });
+
+//     const errorMessage =
+//       "Maaf, kami tidak tersedia saat ini. Silakan coba lagi.";
+
+//     await sendMessageCallback(errorMessage, message, latestMessageTimestamp, {
+//       io,
+//       socket,
+//       client,
+//       agenda,
+//       newMessageId: messageId,
+//       productData: [],
+//       orderData: {},
+//     });
+
+//     throw new Error(`Failed to process new message with AI: ${error.message}`);
+//   }
+// };
 
 // const processNewMessageWithAI = async (
 //   formattedHisory,

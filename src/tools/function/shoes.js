@@ -536,11 +536,7 @@ const searchShoes = async ({
   });
 
   if (searchResults.length === 0) {
-    return {
-      content:
-        "Maaf, kami tidak menemukan sepatu yang sesuai dengan kriteria Anda. Mungkin stok sedang tidak tersedia atau barangnya baru saja terjual habis.",
-      shoes: [],
-    };
+    return "Tidak ada hasil yang ditemukan untuk pencarian ini. Silahkan Anda coba ulang dengan memanggil tool dengan query yang berbeda namun relevan dengan kriteria Pelanggan.";
   }
 
   console.log(
@@ -580,10 +576,11 @@ const searchShoes = async ({
   
 ${formattedOutputForGemini}`;
 
-  return {
-    shoes: searchResults,
-    content: content,
-  };
+  // return {
+  //   shoes: searchResults,
+  //   content: content,
+  // };
+  return content;
 };
 
 // searchShoes({
