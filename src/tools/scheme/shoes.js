@@ -56,7 +56,7 @@ const searchShoesSchema = z.object({
   limit: z
     .number()
     .optional()
-    .describe("Jumlah maksimum hasil pencarian, maksimal 3."),
+    .describe("Jumlah maksimum hasil pencarian, maksimal 2."),
   material: z
     .string()
     .optional()
@@ -87,7 +87,7 @@ Fungsi ini juga dapat digunakan untuk pertanyaan yang ambigu ('sepatu apa ya yan
 
 Ekstrak semua parameter yang relevan dari pertanyaan pengguna. Pastikan hasil pencarian tidak duplikasi dan akurat sesuai pertanyaan. Jangan memberikan solusi di luar konteks pertanyaan.
 
-AI juga bisa menemukan produk sesuai jumlah yang di inginkan, namun maksimal nya 3.
+AI juga bisa menemukan produk sesuai jumlah yang di inginkan, namun maksimal nya 2.
 AI juga bisa menghasilkan multi argumen apabila makna yang tersirat dari pertanyaan mengandung permintaan yang berbeda (misal: saya mencari sepatu untuk lari dan juga sepatu untuk berkerja).
 AI juga bisa menyesuaikan sepatu dengan harga atau budget yang ditentukan pertanyaan.
 AI wajib memberikan solusi dan di extract menjadi parameter yang relevan.
