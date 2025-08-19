@@ -119,14 +119,14 @@ class MongooseChatHistory extends BaseChatMessageHistory {
     const messages = await getConversationHistoryForGemini(this.message);
 
     // Konversi dokumen Mongoose menjadi format LangChain
-    return messages;
+    return messages ?? [];
   }
 
   // Metode untuk menyimpan pesan baru ke database
   async addMessage(message) {
     const { type, content } = message;
     console.log("Call addMessage", type, content);
-    return;
+    return "";
     // const role = type === "human" ? "user" : "model";
     // const newMessage = new ChatRoom({
     //   messageId: this.messageId,
