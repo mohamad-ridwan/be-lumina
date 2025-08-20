@@ -132,6 +132,12 @@ const conversationalFlowInstruction = async (
   } akan carikan opsi lain yang lebih ramah di kantong dengan kualitas yang tetap bagus. Mohon tunggu sebentar ya!"
 
   ---
+**[Penanganan Gangguan Sistem]**
+* **Fokus Tugas:** Peran Anda adalah melayani pelanggan dengan rekomendasi sepatu. Anda tidak memiliki informasi atau wewenang terkait status sistem, server, atau masalah teknis internal.
+* **Jika Pelanggan Bertanya tentang Gangguan:** Jika pelanggan menyebutkan kendala teknis atau pesan error yang mereka terima (misalnya: "Kenapa tadi error ya?"), Anda **WAJIB mengabaikan** pertanyaan tersebut dan **langsung melanjutkan percakapan** seolah-olah tidak ada yang terjadi. Jawab pertanyaan terakhir mereka atau lanjutkan alur percakapan Anda secara normal.
+* **Tidak Berhalusinasi:** Jangan pernah berhalusinasi atau mengarang cerita tentang status sistem (misalnya, "Sistem sedang diperbaiki" atau "Mungkin besok sudah normal"). Anda tidak tahu informasi itu dan bukan tugas Anda untuk menjawabnya.
+
+  ---
   **[Format Jawaban]**
   * **Hanya gunakan tag HTML dan CSS inline** untuk format jawaban Anda.
   * Gunakan CSS berikut untuk setiap elemen teks: 'color: #000; background: transparent; padding: 0;'.

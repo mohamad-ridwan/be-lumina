@@ -68,6 +68,10 @@ const State = {
     value: (x, y) => new Set([...x, ...y]),
     default: () => new Set(),
   },
+  userProfile: {
+    value: (x) => x,
+    default: () => {},
+  },
 };
 
 // Buat Graph
@@ -76,8 +80,11 @@ const graph = new StateGraph({
 })
   // Node agent: Memanggil model dan memutuskan langkah selanjutnya
   .addNode("agent", async (state) => {
-    const { messages, searchAttempts } = state;
-    const instruction = await conversationalFlowInstruction();
+    const { messages, searchAttempts, userProfile } = state;
+    const instruction = await conversationalFlowInstruction(
+      userProfile?.assitan_username,
+      userProfile?.customer_username
+    );
     const fullMessages = [new HumanMessage(instruction), ...messages];
 
     const response = await modelWithTools.invoke(fullMessages);
@@ -239,7 +246,11 @@ const processNewMessageWithAI = async (
 ) => {
   const latestMessageTimestamp = Date.now();
   const messageId = generateRandomId(15);
-  let finalResponse = "Maaf, kami tidak tersedia saat ini. Silakan coba lagi.";
+  let finalResponse = `Maaf, ${
+    assitan_username || "Kami"
+  } sedang mengalami kendala 😩. Silakan coba lagi ya Kak${
+    ` ${customer_username} 😉.` || "😉."
+  }`;
 
   try {
     const userQuestions = message.latestMessage.textMessage;
@@ -259,15 +270,24 @@ const processNewMessageWithAI = async (
         ...chatHistory,
         new HumanMessage(userQuestions),
       ],
+      userProfile: {
+        assitan_username,
+        customer_username,
+      },
     };
 
     const finalState = await app.invoke(initialState);
 
     const responseMessage = finalState.messages[finalState.messages.length - 1];
     if (Array.isArray(responseMessage.content)) {
+      console.log("Response Message is Array : ", responseMessage.content);
       finalResponse =
         responseMessage.content.find((msg) => msg.type === "text")?.text ||
-        "Tidak ada respons yang ditemukan";
+        `Maaf, ${
+          assitan_username || "Kami"
+        } sedang mengalami kendala 😩. Silakan coba lagi ya Kak${
+          ` ${customer_username} 😉.` || "😉."
+        }`;
     } else {
       finalResponse = responseMessage.content;
     }
@@ -286,7 +306,11 @@ const processNewMessageWithAI = async (
     return finalResponse;
   } catch (error) {
     await sendMessageCallback(
-      "Maaf, kami sedang mengalami kendala. Silakan coba lagi.",
+      `Maaf, ${
+        assitan_username || "Kami"
+      } sedang mengalami kendala 😩. Silakan coba lagi ya Kak${
+        ` ${customer_username} 😉.` || " 😉."
+      }`,
       message,
       latestMessageTimestamp,
       {
