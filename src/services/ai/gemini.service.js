@@ -1,9 +1,5 @@
 const { ChatGoogleGenerativeAI } = require("@langchain/google-genai");
-const {
-  AIMessage,
-  HumanMessage,
-  ToolMessage,
-} = require("@langchain/core/messages");
+const { HumanMessage, ToolMessage } = require("@langchain/core/messages");
 const { StateGraph, END } = require("@langchain/langgraph");
 const { langChainTools, toolsByName } = require("../../tools/langChainTools");
 const { generateRandomId } = require("../../helpers/generateRandomId");
@@ -67,6 +63,10 @@ const State = {
     value: (x, y) => y,
     default: () => [],
   },
+  collectedProductIds: {
+    value: (x, y) => new Set([...x, ...y]),
+    default: () => new Set(),
+  },
 };
 
 // Buat Graph
@@ -94,67 +94,108 @@ const graph = new StateGraph({
 
   // Node tools: Menjalankan tools yang diputuskan oleh agent
   .addNode("tools", async (state) => {
-    const { messages } = state;
+    const { messages, collectedProductIds } = state;
     const lastMessage = messages[messages.length - 1];
-    const toolCall = lastMessage.tool_calls[0];
-    const selectedTool = toolsByName[toolCall.name];
-    let productData = [];
-    let tool_arguments = [];
 
-    if (lastMessage.tool_calls) {
-      tool_arguments = lastMessage.tool_calls;
+    if (!lastMessage.tool_calls || lastMessage.tool_calls.length === 0) {
+      throw new Error("Tidak ada tool_calls untuk diproses.");
     }
 
-    if (!selectedTool) {
-      throw new Error(`Tool tidak ditemukan: ${toolCall.name}`);
-    }
+    const toolMessages = [];
+    const productData = [];
+    const newProductIds = new Set(); // Set sementara untuk ID baru
 
-    // Jalankan tool
-    let toolResult;
-    try {
-      toolResult = await selectedTool.invoke(toolCall.args);
-    } catch (error) {
-      console.error(`Error invoking tool ${toolCall.name}:`, error);
-      toolResult = `Terjadi kesalahan saat menjalankan tool ${toolCall.name}.`;
-    }
+    for (const toolCall of lastMessage.tool_calls) {
+      const selectedTool = toolsByName[toolCall.name];
 
-    // Jika hasil searchShoes menunjukkan tidak ada produk,
-    // tambahkan pesan khusus untuk memberi tahu LLM
-    if (
-      toolCall.name === "searchShoes" &&
-      typeof toolResult.content === "string" &&
-      toolResult.content.includes("Tidak ada hasil sepatu yang ditemukan")
-    ) {
-      // Kembalikan pesan yang memberitahu LLM bahwa pencarian gagal
-      // LLM akan menggunakan informasi ini untuk memanggil tool rephraseQuery di langkah selanjutnya
-      console.log(
-        "Pencarian gagal, memanggil rephraseQuery tool:",
-        toolResult.content,
-        toolCall.name
-      );
-      return {
-        messages: [
+      if (!selectedTool) {
+        toolMessages.push(
           new ToolMessage({
             tool_call_id: toolCall.id,
-            content: `Pencarian gagal: ${toolResult.content}. Segera panggil tool rephraseQuery untuk mencari sepatu dengan query yang berbeda.`,
+            content: `Tool dengan nama ${toolCall.name} tidak ditemukan.`,
             name: toolCall.name,
-          }),
-        ],
-      };
+          })
+        );
+        continue;
+      }
+
+      let toolResult;
+      try {
+        // --- LOGIKA UTAMA DI SINI ---
+        // Jika tool yang dipanggil adalah "searchShoes", tambahkan excludeIds dari state
+        if (toolCall.name === "searchShoes") {
+          const argsWithExclusion = {
+            ...toolCall.args,
+            excludeIds: Array.from(collectedProductIds), // Ambil ID dari state dan ubah ke array
+          };
+          toolResult = await selectedTool.invoke(argsWithExclusion);
+        } else {
+          // Panggil tool lain seperti biasa
+          toolResult = await selectedTool.invoke(toolCall.args);
+        }
+      } catch (error) {
+        console.error(`Error invoking tool ${toolCall.name}:`, error);
+        toolMessages.push(
+          new ToolMessage({
+            tool_call_id: toolCall.id,
+            content: `Terjadi kesalahan saat menjalankan tool ${toolCall.name}.`,
+            name: toolCall.name,
+          })
+        );
+        continue;
+      }
+
+      if (toolCall.name === "searchShoes") {
+        if (toolResult && toolResult.shoes) {
+          // Kumpulkan ID baru dari hasil pencarian ini
+          for (const shoe of toolResult.shoes) {
+            const id = shoe._id?.toString();
+            if (id && !newProductIds.has(id)) {
+              productData.push(shoe);
+              newProductIds.add(id);
+            }
+          }
+        }
+
+        if (
+          typeof toolResult.content === "string" &&
+          toolResult.content.includes("Tidak ada hasil sepatu yang ditemukan")
+        ) {
+          toolMessages.push(
+            new ToolMessage({
+              tool_call_id: toolCall.id,
+              content: `Pencarian gagal: ${toolResult.content}. Segera panggil tool rephraseQuery untuk mencari sepatu dengan query yang berbeda.`,
+              name: toolCall.name,
+            })
+          );
+        } else {
+          toolMessages.push(
+            new ToolMessage({
+              tool_call_id: toolCall.id,
+              content: toolResult.content || "Tidak ada yang dihasilkan",
+              name: toolCall.name,
+            })
+          );
+        }
+      } else {
+        toolMessages.push(
+          new ToolMessage({
+            tool_call_id: toolCall.id,
+            content: toolResult.content || "Tidak ada yang dihasilkan",
+            name: toolCall.name,
+          })
+        );
+      }
     }
 
-    if (toolCall.name === "searchShoes") {
-      productData = toolResult.shoes;
-    }
-
-    // Jika hasilnya normal, kembalikan ToolMessage seperti biasa
-    const toolMessage = new ToolMessage({
-      tool_call_id: toolCall.id,
-      content: toolResult.content || "Tidak ada yang dihasilkan",
-      name: toolCall.name,
-    });
-
-    return { messages: [toolMessage], productData, tool_arguments };
+    // Kembalikan state yang diperbarui
+    return {
+      messages: toolMessages,
+      productData,
+      tool_arguments: lastMessage.tool_calls,
+      // Perbarui set ID yang terkumpul
+      collectedProductIds: newProductIds,
+    };
   })
 
   // Hubungkan node
