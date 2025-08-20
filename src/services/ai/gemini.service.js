@@ -3,17 +3,7 @@ const {
   AIMessage,
   HumanMessage,
   ToolMessage,
-  BaseMessage,
 } = require("@langchain/core/messages");
-const {
-  ChatPromptTemplate,
-  MessagesPlaceholder,
-} = require("@langchain/core/prompts");
-const {
-  RunnableSequence,
-  RunnableWithMessageHistory,
-  RunnablePassthrough,
-} = require("@langchain/core/runnables");
 const { StateGraph, END } = require("@langchain/langgraph");
 const { langChainTools, toolsByName } = require("../../tools/langChainTools");
 const { generateRandomId } = require("../../helpers/generateRandomId");
@@ -65,6 +55,18 @@ const State = {
     value: (x, y) => x.concat(y),
     default: () => [],
   },
+  searchAttempts: {
+    value: (x, y) => y, // Ambil nilai terbaru
+    default: () => 0,
+  },
+  productData: {
+    value: (x, y) => y,
+    default: () => [],
+  },
+  tool_arguments: {
+    value: (x, y) => y,
+    default: () => [],
+  },
 };
 
 // Buat Graph
@@ -73,8 +75,20 @@ const graph = new StateGraph({
 })
   // Node agent: Memanggil model dan memutuskan langkah selanjutnya
   .addNode("agent", async (state) => {
-    const { messages } = state;
-    const response = await modelWithTools.invoke(messages);
+    const { messages, searchAttempts } = state;
+    const instruction = await conversationalFlowInstruction();
+    const fullMessages = [new HumanMessage(instruction), ...messages];
+
+    const response = await modelWithTools.invoke(fullMessages);
+
+    // Tingkatkan hitungan percobaan jika ada tool_calls
+    if (response.tool_calls && response.tool_calls.length > 0) {
+      return {
+        messages: [response],
+        searchAttempts: searchAttempts + 1,
+      };
+    }
+
     return { messages: [response] };
   })
 
@@ -82,40 +96,90 @@ const graph = new StateGraph({
   .addNode("tools", async (state) => {
     const { messages } = state;
     const lastMessage = messages[messages.length - 1];
-
-    // Asumsi hanya ada satu tool call per langkah. Untuk multiple, perlu perulangan.
     const toolCall = lastMessage.tool_calls[0];
     const selectedTool = toolsByName[toolCall.name];
+    let productData = [];
+    let tool_arguments = [];
+
+    if (lastMessage.tool_calls) {
+      tool_arguments = lastMessage.tool_calls;
+    }
 
     if (!selectedTool) {
       throw new Error(`Tool tidak ditemukan: ${toolCall.name}`);
     }
 
     // Jalankan tool
-    const toolResult = await selectedTool.invoke(toolCall.args);
+    let toolResult;
+    try {
+      toolResult = await selectedTool.invoke(toolCall.args);
+    } catch (error) {
+      console.error(`Error invoking tool ${toolCall.name}:`, error);
+      toolResult = `Terjadi kesalahan saat menjalankan tool ${toolCall.name}.`;
+    }
 
-    // Buat ToolMessage dari hasil tool
+    // Jika hasil searchShoes menunjukkan tidak ada produk,
+    // tambahkan pesan khusus untuk memberi tahu LLM
+    if (
+      toolCall.name === "searchShoes" &&
+      typeof toolResult.content === "string" &&
+      toolResult.content.includes("Tidak ada hasil sepatu yang ditemukan")
+    ) {
+      // Kembalikan pesan yang memberitahu LLM bahwa pencarian gagal
+      // LLM akan menggunakan informasi ini untuk memanggil tool rephraseQuery di langkah selanjutnya
+      console.log(
+        "Pencarian gagal, memanggil rephraseQuery tool:",
+        toolResult.content,
+        toolCall.name
+      );
+      return {
+        messages: [
+          new ToolMessage({
+            tool_call_id: toolCall.id,
+            content: `Pencarian gagal: ${toolResult.content}. Segera panggil tool rephraseQuery untuk mencari sepatu dengan query yang berbeda.`,
+            name: toolCall.name,
+          }),
+        ],
+      };
+    }
+
+    if (toolCall.name === "searchShoes") {
+      productData = toolResult.shoes;
+    }
+
+    // Jika hasilnya normal, kembalikan ToolMessage seperti biasa
     const toolMessage = new ToolMessage({
       tool_call_id: toolCall.id,
-      content: JSON.stringify(toolResult),
+      content: toolResult.content || "Tidak ada yang dihasilkan",
       name: toolCall.name,
     });
 
-    // Kembalikan ToolMessage ke graph
-    return { messages: [toolMessage] };
+    return { messages: [toolMessage], productData, tool_arguments };
   })
 
   // Hubungkan node
   .addEdge("tools", "agent")
   .addConditionalEdges("agent", (state) => {
-    const { messages } = state;
+    const { messages, searchAttempts } = state;
     const lastMessage = messages[messages.length - 1];
-    console.log("Last message:", lastMessage);
-    // Jika ada tool calls, arahkan ke node 'tools'
+    console.log("state:", searchAttempts, lastMessage.tool_calls);
+
+    // Aturan 1: Batasi percobaan
+    if (
+      searchAttempts >= 4 &&
+      lastMessage.tool_calls &&
+      lastMessage.tool_calls.length > 0
+    ) {
+      // Jika sudah mencoba 2 kali dan masih mencoba, hentikan
+      return END;
+    }
+
+    // Aturan 2: Lanjutkan jika ada tool_calls
     if (lastMessage.tool_calls && lastMessage.tool_calls.length > 0) {
       return "tools";
     }
-    // Jika tidak, akhiri graph
+
+    // Aturan 3: Jika tidak ada tool_calls, akhiri
     return END;
   })
   .setEntryPoint("agent");
@@ -140,17 +204,12 @@ const processNewMessageWithAI = async (
 
     // Ambil riwayat chat dari MongoDB
     const chatHistory = await chatHistoryManager.getMessages();
-    const formattedChatHistory = chatHistory.map((item) =>
-      item.role === "human"
-        ? new HumanMessage(item.content)
-        : new AIMessage(item.content)
-    );
 
     // Jalankan LangGraph dengan semua pesan (instruksi, riwayat, pesan baru)
     const initialState = {
       messages: [
         new HumanMessage(instruction), // Menggunakan HumanMessage untuk instruksi agar lebih jelas
-        ...formattedChatHistory,
+        ...chatHistory,
         new HumanMessage(userQuestions),
       ],
     };
@@ -158,17 +217,13 @@ const processNewMessageWithAI = async (
     const finalState = await app.invoke(initialState);
 
     const responseMessage = finalState.messages[finalState.messages.length - 1];
-    finalResponse = responseMessage.content;
-
-    // Simpan pesan terakhir ke riwayat
-    await chatHistoryManager.addMessage({
-      role: "human",
-      content: userQuestions,
-    });
-    await chatHistoryManager.addMessage({
-      role: "ai",
-      content: finalResponse,
-    });
+    if (Array.isArray(responseMessage.content)) {
+      finalResponse =
+        responseMessage.content.find((msg) => msg.type === "text")?.text ||
+        "Tidak ada respons yang ditemukan";
+    } else {
+      finalResponse = responseMessage.content;
+    }
 
     // Kirim jawaban akhir ke pengguna
     await sendMessageCallback(finalResponse, message, latestMessageTimestamp, {
@@ -177,7 +232,8 @@ const processNewMessageWithAI = async (
       client,
       agenda,
       newMessageId: messageId,
-      productData: [], // LangGraph tidak mengembalikan ini secara default, perlu diadaptasi jika diperlukan
+      productData: finalState?.productData || [],
+      toolArguments: finalState?.tool_arguments || [],
       orderData: {},
     });
     return finalResponse;
@@ -193,6 +249,7 @@ const processNewMessageWithAI = async (
         agenda,
         newMessageId: messageId,
         productData: [],
+        toolArguments: [],
         orderData: {},
       }
     );

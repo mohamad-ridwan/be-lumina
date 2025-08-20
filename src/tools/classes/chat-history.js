@@ -94,7 +94,8 @@ const getConversationHistoryForGemini = async (message, io, socket, client) => {
           return new AIMessage({
             content: msg.textMessage,
             additional_kwargs: {
-              data: msg?.productData,
+              product_data: msg?.productData,
+              tool_arguments: msg?.toolArguments || [],
             },
           });
         }

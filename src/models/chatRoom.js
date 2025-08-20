@@ -42,6 +42,9 @@ const chatRoom = new Schema(
     productData: {
       type: Array,
     },
+    toolArguments: {
+      type: Array,
+    },
     orderData: {
       type: Object,
     },

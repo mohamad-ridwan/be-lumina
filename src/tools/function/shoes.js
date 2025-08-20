@@ -536,7 +536,10 @@ const searchShoes = async ({
   });
 
   if (searchResults.length === 0) {
-    return "Tidak ada hasil yang ditemukan untuk pencarian ini. Silahkan Anda coba ulang dengan memanggil tool dengan query yang berbeda namun relevan dengan kriteria Pelanggan.";
+    return {
+      content: "Tidak ada hasil sepatu yang ditemukan",
+      shoes: [],
+    };
   }
 
   console.log(
@@ -576,11 +579,10 @@ const searchShoes = async ({
   
 ${formattedOutputForGemini}`;
 
-  // return {
-  //   shoes: searchResults,
-  //   content: content,
-  // };
-  return content;
+  return {
+    shoes: searchResults,
+    content: content,
+  };
 };
 
 // searchShoes({

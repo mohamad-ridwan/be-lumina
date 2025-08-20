@@ -431,7 +431,16 @@ const handleSendMessageFromAI = async (
   generatedText,
   message,
   latestMessageTimestamp,
-  { io, socket, client, agenda, newMessageId, productData, orderData },
+  {
+    io,
+    socket,
+    client,
+    agenda,
+    newMessageId,
+    productData,
+    orderData,
+    toolArguments,
+  },
   functionCallForHistory,
   functionResponseForHistory
 ) => {
@@ -478,6 +487,7 @@ const handleSendMessageFromAI = async (
       {
         productData,
         orderData,
+        toolArguments,
       },
       functionCallForHistory,
       functionResponseForHistory
@@ -489,6 +499,9 @@ const handleSendMessageFromAI = async (
         : "Maaf kami tidak tersedia untuk saat ini. Mohon coba lagi nanti.";
     if (productData?.length > 0) {
       isAvailableMessage.productData = productData;
+    }
+    if (toolArguments?.length > 0) {
+      isAvailableMessage.toolArguments = toolArguments;
     }
     if (orderData?.length > 0) {
       isAvailableMessage.orderData = orderData;
@@ -625,7 +638,16 @@ const handleGetNewMessageForBot = async (
       responseText,
       message,
       latestMessageTimestamp,
-      { io, socket, client, agenda, newMessageId, productData, orderData },
+      {
+        io,
+        socket,
+        client,
+        agenda,
+        newMessageId,
+        productData,
+        orderData,
+        toolArguments,
+      },
       functionCallForHistory,
       functionResponseForHistory
     ) => {
@@ -633,7 +655,16 @@ const handleGetNewMessageForBot = async (
         responseText,
         message,
         latestMessageTimestamp,
-        { io, socket, client, agenda, newMessageId, productData, orderData },
+        {
+          io,
+          socket,
+          client,
+          agenda,
+          newMessageId,
+          productData,
+          orderData,
+          toolArguments,
+        },
         functionCallForHistory,
         functionResponseForHistory
       );
@@ -801,6 +832,9 @@ const sendMessage = async (
   }
   if (productData?.orderData?.orders?.length > 0) {
     chatRoomData.orderData = productData.orderData;
+  }
+  if (productData?.toolArguments?.length > 0) {
+    chatRoomData.toolArguments = productData.toolArguments;
   }
   if (
     functionCallForHistory?.length > 0 &&
