@@ -11,6 +11,7 @@ const {
 const langChainModel = new ChatGoogleGenerativeAI({
   model: "gemini-2.5-flash",
   temperature: 0,
+  maxRetries: 4,
   apiKey: process.env.GEMINI_API_KEY,
 });
 
@@ -80,6 +81,7 @@ const graph = new StateGraph({
     const fullMessages = [new HumanMessage(instruction), ...messages];
 
     const response = await modelWithTools.invoke(fullMessages);
+    console.log("Call Agent : ", searchAttempts, response.tool_calls);
 
     // Tingkatkan hitungan percobaan jika ada tool_calls
     if (response.tool_calls && response.tool_calls.length > 0) {
@@ -94,7 +96,8 @@ const graph = new StateGraph({
 
   // Node tools: Menjalankan tools yang diputuskan oleh agent
   .addNode("tools", async (state) => {
-    const { messages, collectedProductIds } = state;
+    const { messages, collectedProductIds, searchAttempts } = state;
+    console.log("Call Tools : ", searchAttempts);
     const lastMessage = messages[messages.length - 1];
 
     if (!lastMessage.tool_calls || lastMessage.tool_calls.length === 0) {
@@ -138,7 +141,7 @@ const graph = new StateGraph({
         toolMessages.push(
           new ToolMessage({
             tool_call_id: toolCall.id,
-            content: `Terjadi kesalahan saat menjalankan tool ${toolCall.name}.`,
+            content: `Tool ${toolCall.name} gagal dieksekusi karena masalah internal.`,
             name: toolCall.name,
           })
         );
@@ -232,7 +235,7 @@ const processNewMessageWithAI = async (
   formattedHisory,
   message,
   sendMessageCallback,
-  { io, socket, client, agenda }
+  { io, socket, client, agenda, assitan_username, customer_username }
 ) => {
   const latestMessageTimestamp = Date.now();
   const messageId = generateRandomId(15);
@@ -241,7 +244,10 @@ const processNewMessageWithAI = async (
   try {
     const userQuestions = message.latestMessage.textMessage;
     const chatHistoryManager = new MongooseChatHistory(messageId, message);
-    const instruction = await conversationalFlowInstruction();
+    const instruction = await conversationalFlowInstruction(
+      assitan_username,
+      customer_username
+    );
 
     // Ambil riwayat chat dari MongoDB
     const chatHistory = await chatHistoryManager.getMessages();
@@ -280,7 +286,7 @@ const processNewMessageWithAI = async (
     return finalResponse;
   } catch (error) {
     await sendMessageCallback(
-      "Maaf, kami tidak tersedia saat ini. Silakan coba lagi.",
+      "Maaf, kami sedang mengalami kendala. Silakan coba lagi.",
       message,
       latestMessageTimestamp,
       {

@@ -601,6 +601,15 @@ const handleGetNewMessageForBot = async (
 
   const chatRoomId = message?.chatRoomId;
   const chatId = message?.chatId;
+  const chats = await chatsDB.findOne({ chatRoomId, chatId });
+  const userIds = chats?.userIds || [];
+  const users = await usersDB.find({ id: { $in: userIds } });
+  const customer_username = users.find(
+    (user) => user.role === "user"
+  )?.username;
+  const assitan_username = users.find(
+    (user) => user.role === "admin"
+  )?.username;
 
   const senderUserId = recipientProfileId;
   const newRecipientProfileId = latestMessage?.senderUserId;
@@ -670,7 +679,7 @@ const handleGetNewMessageForBot = async (
       );
       return result;
     },
-    { io, socket, client, agenda }
+    { io, socket, client, agenda, assitan_username, customer_username }
   );
   io.emit("typing-stop", {
     recipientId: newRecipientProfileId,
