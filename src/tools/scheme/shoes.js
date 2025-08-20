@@ -84,17 +84,18 @@ const searchShoesFuncDeclaration = {
 *   Kombinasi dari kriteria tersebut
 
 Fungsi ini juga dapat digunakan untuk pertanyaan yang ambigu ('sepatu apa ya yang cocok untuk saya?'). Dalam kasus ini, biarkan logika di backend melakukan pemfilteran cerdas berdasarkan deskripsi produk.
-
-Ekstrak semua parameter yang relevan dari pertanyaan pengguna. Pastikan hasil pencarian tidak duplikasi dan akurat sesuai pertanyaan. Jangan memberikan solusi di luar konteks pertanyaan.
-
-AI juga bisa menemukan produk sesuai jumlah yang di inginkan, namun maksimal nya 2.
-AI juga bisa menghasilkan multi argumen apabila makna yang tersirat dari pertanyaan mengandung permintaan yang berbeda (misal: saya mencari sepatu untuk lari dan juga sepatu untuk berkerja).
-AI juga bisa menyesuaikan sepatu dengan harga atau budget yang ditentukan pertanyaan.
-AI wajib memberikan solusi dan di extract menjadi parameter yang relevan.
-
-AI HARUS MEMANGGIL fungsi ini ketika pengguna mencari sepatu berdasarkan berbagai kriteria.
-
-Jangan gunakan fungsi ini ketika pengguna menanyakan tentang hal yang sebelumnya di dalam percakapan (history)`,
+  
+  Ekstrak semua parameter yang relevan dari satu niat pencarian pengguna. Jika ada lebih dari satu niat dalam satu kalimat (contoh: "Saya mencari sepatu lari dan juga sepatu untuk bekerja"), AI HARUS memanggil tool ini dua kali secara terpisah, satu untuk setiap niat.
+  
+  Pastikan hasil pencarian tidak duplikasi dan akurat sesuai pertanyaan. Jangan memberikan solusi di luar konteks pertanyaan.
+  
+  AI juga bisa menemukan produk sesuai jumlah yang di inginkan, namun maksimal nya 2.
+  AI juga bisa menyesuaikan sepatu dengan harga atau budget yang ditentukan pertanyaan.
+  AI wajib memberikan solusi dan di extract menjadi parameter yang relevan.
+  
+  AI HARUS MEMANGGIL fungsi ini ketika pengguna mencari sepatu berdasarkan berbagai kriteria.
+  
+  Jangan gunakan fungsi ini ketika pengguna menanyakan tentang hal yang sebelumnya di dalam percakapan (history) atau hal-hal yang tidak relevan dengan produk sepatu.`,
 };
 
 const productInfoSchema = z.object({

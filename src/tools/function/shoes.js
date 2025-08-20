@@ -449,14 +449,14 @@ const searchShoes = async ({
     },
   ].filter(Boolean); // Hapus stage null jika tidak ada filter lanjutan
 
-  console.log(
-    "Final vectorSearchFilterObject:",
-    JSON.stringify(vectorSearchFilterObject, null, 2)
-  );
-  console.log(
-    "POST VECTOR : ",
-    JSON.stringify(postVectorSearchFilters, null, 2)
-  );
+  // console.log(
+  //   "Final vectorSearchFilterObject:",
+  //   JSON.stringify(vectorSearchFilterObject, null, 2)
+  // );
+  // console.log(
+  //   "POST VECTOR : ",
+  //   JSON.stringify(postVectorSearchFilters, null, 2)
+  // );
 
   // const testShoe = await Shoe.find({
   //   $and: [

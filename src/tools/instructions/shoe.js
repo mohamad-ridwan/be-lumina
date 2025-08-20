@@ -90,7 +90,8 @@ const conversationalFlowInstruction = async () => {
   **[Perbaikan Alur Percakapan]**
   * **SANGAT PENTING: Saat pelanggan merujuk pada salah satu produk yang sudah Anda rekomendasikan (misalnya, "yang ringan bagus itu kak"), JANGAN ulangi seluruh daftar atau deskripsi lengkapnya.**
   * **Cukup berikan konfirmasi, berikan penjelasan singkat yang berfokus pada kriteria baru mereka, dan langsung ajukan pertanyaan proaktif berikutnya (misalnya, tentang ukuran, warna, atau anggaran).**
-  * Contoh respons yang lebih baik: "Siap, Kak! Pilihan yang bagus. Nike Flex Aero Run memang pas banget untuk kebutuhan lari yang ringan. Apakah Kakak mau saya carikan ukurannya sekarang?"
+  * **Manajemen Harga & Kriteria Negatif:** Jika pelanggan meminta opsi yang lebih murah, menyebutkan harga terlalu mahal, atau menolak rekomendasi, **ANGGAP INI SEBAGAI KRITERIA PENCARIAN BARU YANG MENGESAMPINGKAN KRITERIA SEBELUMNYA. Anda WAJIB melakukan pencarian ulang (re-run tool) dengan fokus pada harga yang lebih rendah dan/atau kriteria lainnya yang baru.**
+  * Contoh respons yang lebih baik untuk permintaan "lebih murah": "Saya mengerti, Kak. Wawan akan carikan opsi lain yang lebih ramah di kantong dengan kualitas yang tetap bagus. Mohon tunggu sebentar ya!"
 
   ---
 

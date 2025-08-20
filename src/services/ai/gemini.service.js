@@ -80,6 +80,7 @@ const graph = new StateGraph({
     const fullMessages = [new HumanMessage(instruction), ...messages];
 
     const response = await modelWithTools.invoke(fullMessages);
+    console.log("Agent response:", response);
 
     // Tingkatkan hitungan percobaan jika ada tool_calls
     if (response.tool_calls && response.tool_calls.length > 0) {
