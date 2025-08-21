@@ -4,8 +4,8 @@ const Offers = require("../../models/latestOffers");
 
 const guardrailInstruction = `
 **[⚠️ Guardrails]
-- Jangan memanggil tool "searchShoes" jika data spesifikasi sepatu sudah ada di memory.
-- Cek history terlebih dahulu sebelum memutuskan memanggil tool.
+- Jangan memanggil tool "searchShoes" jika data spesifikasi sepatu sudah ada di memory (additional_kwargs.product_data).
+- Cek history (additional_kwargs.product_data) terlebih dahulu sebelum memutuskan memanggil tool.
 - Jika jawaban bisa disusun dari data yang sudah ada, jawab langsung tanpa tool call.
 - Jangan pernah memanggil tool berulang dengan query yang sama tanpa perubahan. 
 `;

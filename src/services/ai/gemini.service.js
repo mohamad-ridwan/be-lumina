@@ -1,9 +1,5 @@
 const { ChatGoogleGenerativeAI } = require("@langchain/google-genai");
-const {
-  HumanMessage,
-  ToolMessage,
-  SystemMessage,
-} = require("@langchain/core/messages");
+const { HumanMessage, ToolMessage } = require("@langchain/core/messages");
 const { StateGraph, END } = require("@langchain/langgraph");
 const { langChainTools, toolsByName } = require("../../tools/langChainTools");
 const { generateRandomId } = require("../../helpers/generateRandomId");
@@ -13,7 +9,7 @@ const {
 } = require("../../tools/instructions/shoe");
 
 const langChainModel = new ChatGoogleGenerativeAI({
-  model: "gemini-2.5-flash",
+  model: "gemini-2.5-flash-lite",
   temperature: 1,
   maxRetries: 4,
   maxOutputTokens: 1024,
@@ -91,7 +87,6 @@ const State = {
 const graph = new StateGraph({
   channels: State,
 })
-  // Node agent: Memanggil model dan memutuskan langkah selanjutnya
   .addNode("agent", async (state) => {
     const {
       messages,
@@ -100,6 +95,13 @@ const graph = new StateGraph({
       searchAttemptsLimit,
       isFailedQuery,
     } = state;
+
+    // Kumpulkan semua data produk yang ada dari seluruh riwayat pesan AI
+    const allExistingProducts = messages
+      .filter((msg) => msg.additional_kwargs?.product_data?.length > 0)
+      .flatMap((msg) => msg.additional_kwargs.product_data);
+
+    // Ambil instruksi percakapan
     const instruction = await conversationalFlowInstruction(
       userProfile?.assitan_username,
       userProfile?.customer_username,
@@ -107,9 +109,42 @@ const graph = new StateGraph({
       searchAttemptsLimit,
       isFailedQuery
     );
-    const fullMessages = [new SystemMessage(instruction), ...messages];
 
+    const fullMessages = [new HumanMessage(instruction), ...messages];
+
+    // Panggil model dengan tools
     const response = await modelWithTools.invoke(fullMessages);
+
+    // Lakukan modifikasi pada tool_calls
+    if (response.tool_calls && response.tool_calls.length > 0) {
+      for (const toolCall of response.tool_calls) {
+        if (
+          toolCall.name === "searchShoes" &&
+          toolCall.args.shoeNames &&
+          toolCall.args.shoeNames.length > 0
+        ) {
+          const requestedShoeNames = toolCall.args.shoeNames.map((name) =>
+            name.toLowerCase()
+          );
+          let data_memory = [];
+          requestedShoeNames.forEach((name) => {
+            const existingShoe = allExistingProducts.find(
+              (shoe) => name === shoe.name.toLowerCase()
+            );
+            if (existingShoe) {
+              data_memory.push(existingShoe);
+            }
+          });
+
+          if (data_memory.length > 0) {
+            // Jika sepatu ditemukan, tambahkan data mentah ke dalam field baru
+            toolCall.args.data_memory = data_memory;
+          }
+        }
+        // Tool lainnya tidak dimodifikasi
+      }
+    }
+
     console.log(
       "Call Agent : ",
       searchAttempts,
@@ -118,16 +153,18 @@ const graph = new StateGraph({
       response.tool_calls
     );
 
-    // Tingkatkan hitungan percobaan jika ada tool_calls
+    // Mengembalikan AIMessage dari LLM yang sudah dimodifikasi
     if (response.tool_calls && response.tool_calls.length > 0) {
       return {
         messages: [response],
         searchAttempts: searchAttempts + 1,
       };
+    } else {
+      return { messages: [response] };
     }
-
-    return { messages: [response] };
   })
+
+  // ... Bagian node tools dan graph lainnya ada di bawah ...
 
   // Node tools: Menjalankan tools yang diputuskan oleh agent
   .addNode("tools", async (state) => {
@@ -147,10 +184,62 @@ const graph = new StateGraph({
     for (const toolCall of lastMessage.tool_calls) {
       const selectedTool = toolsByName[toolCall.name];
 
+      // --- LOGIKA UTAMA: CEK FIELD data_memory DULU ---
+      if (
+        toolCall.args.data_memory &&
+        Array.isArray(toolCall.args.data_memory)
+      ) {
+        // Loop melalui setiap objek sepatu di dalam array data_memory
+        for (const shoe of toolCall.args.data_memory) {
+          const id = shoe._id?.toString();
+          if (id && !newProductIds.has(id)) {
+            productData.push(shoe);
+            newProductIds.add(id);
+          }
+        }
+
+        const formattedOutputForGemini = toolCall.args.data_memory
+          .map((shoe) => {
+            const formattedVariants = shoe.variants
+              .map((v) =>
+                Object.entries(v)
+                  .map(([key, value]) => `${key}: ${value}`)
+                  .join(", ")
+              )
+              .join("; ");
+
+            return `
+- Nama: ${shoe.name}
+- Merek: ${shoe.brand}
+- Kategori: ${shoe.category.join(", ")}
+- Harga: Rp ${shoe.price.toLocaleString("id-ID")}
+- Deskripsi: ${shoe.description}
+- Link Url Sepatu: http://localhost:3008/product/${shoe.slug_sepatu}
+- Varian Tersedia: ${formattedVariants}
+`;
+          })
+          .join("\n---\n"); // Gabungkan setiap item dengan pemisah yang jelas
+
+        const content = `Hasil pencarian sepatu:
+  
+${formattedOutputForGemini}`;
+
+        toolMessages.push(
+          new ToolMessage({
+            id: toolCall.id,
+            content: content,
+            name: toolCall.name,
+          })
+        );
+        continue; // Lanjut ke tool_call berikutnya
+      }
+      // --- AKHIR LOGIKA UTAMA ---
+
+      // Jika data_memory tidak ada, jalankan tool seperti biasa
       if (!selectedTool) {
         toolMessages.push(
           new ToolMessage({
-            tool_call_id: toolCall.id,
+            id: toolCall.id,
             content: `Tool dengan nama ${toolCall.name} tidak ditemukan.`,
             name: toolCall.name,
           })
@@ -160,23 +249,20 @@ const graph = new StateGraph({
 
       let toolResult;
       try {
-        // --- LOGIKA UTAMA DI SINI ---
-        // Jika tool yang dipanggil adalah "searchShoes", tambahkan excludeIds dari state
         if (toolCall.name === "searchShoes") {
           const argsWithExclusion = {
             ...toolCall.args,
-            excludeIds: Array.from(collectedProductIds), // Ambil ID dari state dan ubah ke array
+            excludeIds: Array.from(collectedProductIds),
           };
           toolResult = await selectedTool.invoke(argsWithExclusion);
         } else {
-          // Panggil tool lain seperti biasa
           toolResult = await selectedTool.invoke(toolCall.args);
         }
       } catch (error) {
         console.error(`Error invoking tool ${toolCall.name}:`, error);
         toolMessages.push(
           new ToolMessage({
-            tool_call_id: toolCall.id,
+            id: toolCall.id,
             content: `Tool ${toolCall.name} gagal dieksekusi karena masalah internal.`,
             name: toolCall.name,
           })
@@ -186,7 +272,6 @@ const graph = new StateGraph({
 
       if (toolCall.name === "searchShoes") {
         if (toolResult && toolResult.shoes.length > 0) {
-          // Kumpulkan ID baru dari hasil pencarian ini
           for (const shoe of toolResult.shoes) {
             const id = shoe._id?.toString();
             if (id && !newProductIds.has(id)) {
@@ -200,7 +285,7 @@ const graph = new StateGraph({
           isFailedQueryCurrently = true;
           toolMessages.push(
             new ToolMessage({
-              tool_call_id: toolCall.id,
+              id: toolCall.id,
               content: `Pencarian gagal: ${toolResult.content}. Segera panggil tool rephraseQuery untuk mencari sepatu dengan query yang berbeda.`,
               name: toolCall.name,
             })
@@ -208,7 +293,7 @@ const graph = new StateGraph({
         } else {
           toolMessages.push(
             new ToolMessage({
-              tool_call_id: toolCall.id,
+              id: toolCall.id,
               content: toolResult.content || "Tidak ada yang dihasilkan",
               name: toolCall.name,
             })
@@ -217,7 +302,7 @@ const graph = new StateGraph({
       } else {
         toolMessages.push(
           new ToolMessage({
-            tool_call_id: toolCall.id,
+            id: toolCall.id,
             content: toolResult.content || "Tidak ada yang dihasilkan",
             name: toolCall.name,
           })
@@ -225,11 +310,17 @@ const graph = new StateGraph({
       }
     }
 
+    const tool_arguments = lastMessage.tool_calls.map((call) => {
+      const args = call.args;
+      delete args.data_memory;
+      return args;
+    });
+
     // Kembalikan state yang diperbarui
     return {
       messages: toolMessages,
       productData,
-      tool_arguments: lastMessage.tool_calls,
+      tool_arguments,
       // Perbarui set ID yang terkumpul
       collectedProductIds: newProductIds,
       isFailedQuery: isFailedQueryCurrently,
@@ -335,25 +426,30 @@ const processNewMessageWithAI = async (
     });
     return finalResponse;
   } catch (error) {
-    await sendMessageCallback(
-      `Maaf, ${
-        assitan_username || "Kami"
-      } sedang mengalami kendala 😩. Silakan coba lagi ya Kak${
-        ` ${customer_username} 😉.` || " 😉."
-      }`,
-      message,
-      latestMessageTimestamp,
-      {
-        io,
-        socket,
-        client,
-        agenda,
-        newMessageId: messageId,
-        productData: [],
-        toolArguments: [],
-        orderData: {},
-      }
-    );
+    let errorMessage;
+    const assistantName = assitan_username || "Kami";
+    const customerName = customer_username ? ` Kak ${customer_username}` : "";
+
+    // Periksa jenis error dan sesuaikan pesan
+    if (error?.statusText?.includes("Too Many Requests")) {
+      errorMessage = `Mohon maaf, ${assistantName} sedang sibuk melayani banyak pelanggan. Silakan coba lagi sebentar lagi ya${customerName} 😉.`;
+    } else if (error?.status === 500) {
+      errorMessage = `Mohon maaf, ${assistantName} sedang mengalami kendala teknis. Mohon tunggu sebentar ya${customerName} 🙏.`;
+    } else {
+      // Pesan default untuk error lainnya
+      errorMessage = `Maaf, ${assistantName} sedang tidak bisa dihubungi saat ini. Silakan coba lagi ya${customerName} 😉.`;
+    }
+
+    await sendMessageCallback(errorMessage, message, latestMessageTimestamp, {
+      io,
+      socket,
+      client,
+      agenda,
+      newMessageId: messageId,
+      productData: [],
+      toolArguments: [],
+      orderData: {},
+    });
     console.error(
       "Internal Server Error when process new message with AI:",
       error
