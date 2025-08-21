@@ -1,13 +1,19 @@
-const rephraseQuery = async ({ failedQuery, reason, newQuerySuggestion }) => {
-  // Fungsi ini tidak melakukan aksi, hanya mengembalikan sinyal untuk LLM.
+const rephraseQuery = async ({ originalQuery, reason, newQuerySuggestion }) => {
   console.log(
-    `Rephrase query dipanggil. Query gagal: "${failedQuery}", Alasan: "${reason}", Saran query baru: "${newQuerySuggestion}"`
+    `Rephrase query dipanggil. Query asli: "${originalQuery}", Alasan: "${reason}", Saran: "${
+      newQuerySuggestion || "Tidak ada saran baru."
+    }"`
   );
 
-  // Mengembalikan string yang akan dibaca oleh LLM.
-  // String ini memberikan informasi yang jelas kepada LLM untuk mengambil langkah selanjutnya.
-  return `Pencarian untuk "${failedQuery}" gagal karena "${reason}".
-  Saran: Gunakan query yang disarankan: "${newQuerySuggestion}" untuk mencoba kembali.`;
+  if (newQuerySuggestion) {
+    return {
+      content: `Pencarian untuk "${originalQuery}" gagal karena "${reason}". Saran: Gunakan query yang disarankan: "${newQuerySuggestion}" untuk mencoba kembali.`,
+    };
+  } else {
+    return {
+      content: `Pencarian untuk "${originalQuery}" gagal karena "${reason}". Tidak ada saran query baru yang dapat diberikan. Berikan jawaban akhir yang sopan kepada pelanggan.`,
+    };
+  }
 };
 
 const rephraseQueryFunctionTools = {

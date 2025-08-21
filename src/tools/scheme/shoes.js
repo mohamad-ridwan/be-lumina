@@ -67,6 +67,12 @@ const searchShoesSchema = z.object({
     .array(z.string())
     .optional()
     .describe("Daftar nama sepatu spesifik yang dicari."),
+  excludeIds: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Daftar ID sepatu yang harus dikecualikan dari hasil pencarian karena sudah dilihat atau tidak sesuai."
+    ),
 });
 
 const searchShoesFuncDeclaration = {
@@ -85,7 +91,7 @@ const searchShoesFuncDeclaration = {
 
 Fungsi ini juga dapat digunakan untuk pertanyaan yang ambigu ('sepatu apa ya yang cocok untuk saya?'). Dalam kasus ini, biarkan logika di backend melakukan pemfilteran cerdas berdasarkan deskripsi produk.
   
-  Ekstrak semua parameter yang relevan dari satu niat pencarian pengguna. Jika ada lebih dari satu niat dalam satu kalimat (contoh: "Saya mencari sepatu lari dan juga sepatu untuk bekerja"), AI HARUS memanggil tool ini dua kali secara terpisah, satu untuk setiap niat.
+  Ekstrak semua parameter yang relevan dari satu niat pencarian pengguna. Jika ada produk yang sudah gagal atau tidak relevan, tambahkan ID produk tersebut ke parameter **'excludeIds'** untuk mencegahnya muncul di hasil pencarian berikutnya.
   
   Pastikan hasil pencarian tidak duplikasi dan akurat sesuai pertanyaan. Jangan memberikan solusi di luar konteks pertanyaan.
   

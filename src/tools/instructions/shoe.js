@@ -5,7 +5,10 @@ const Offers = require("../../models/latestOffers");
 
 const conversationalFlowInstruction = async (
   assitan_username,
-  customer_username
+  customer_username,
+  searchAttempts = 0,
+  searchAttemptsLimit = 4,
+  isFailedQuery = false
 ) => {
   try {
     const availableCategories = await Category.find();
@@ -105,15 +108,19 @@ const conversationalFlowInstruction = async (
   * **Jika kriteria ukuran sepatu belum diketahui**, segera tanyakan setelah rekomendasi diberikan.
   * **Jika ukuran sudah diketahui**, tawarkan untuk memeriksa ketersediaan atau berikan rekomendasi lain yang sangat spesifik (misalnya, "Untuk ukuran Anda, sepatu ini juga tersedia dalam warna [nama warna]").
 
-  ---
+    ${
+      isFailedQuery
+        ? `---
   [Manajemen Kualitas & Percobaan Ulang]
-  * **Kualitas Hasil:** Sebuah pencarian dianggap berhasil dan cukup untuk memberikan jawaban final jika mengembalikan **minimal 3 sepatu yang relevan**.
+  * **Penting:** Anda sedang berada pada **percobaan pencarian ke-${searchAttempts}**. Batas maksimal adalah **${searchAttemptsLimit} percobaan**.
+  * **Kualitas Hasil:** Sebuah pencarian dianggap berhasil dan cukup untuk memberikan jawaban final jika mengembalikan **minimal 1 sepatu yang relevan**.
   * **Sistem Percobaan Ulang (Retry)::**
-    * Jika pencarian dengan tool 'searchShoes' **gagal atau mengembalikan kurang dari 3 hasil**, Anda **WAJIB** mencoba lagi dengan mengubah satu parameter utama.
-    * Lakukan **maksimal 3 kali percobaan pencarian** yang berbeda.
-    * Jika setelah 3 kali mencoba hasilnya masih kurang dari 3, atau tidak ada hasil sama sekali, barulah Anda bisa mengakhiri percakapan dengan memberikan jawaban yang sopan dan proaktif dengan menawarkan alternatif.
+    * Jika pencarian dengan tool 'searchShoes' **gagal atau mengembalikan kurang dari 1 hasil**, Anda **WAJIB** mencoba lagi dengan mengubah satu parameter utama.
+    * Jika Anda telah mencapai atau melebihi batas ${searchAttemptsLimit} percobaan ('searchAttempts >= ${searchAttemptsLimit}'), Anda **TIDAK BOLEH LAGI** memanggil tool. Anda HARUS mengakhiri percakapan dengan memberikan jawaban yang sopan dan proaktif dengan menawarkan alternatif yang lebih umum, atau menyarankan pelanggan untuk mengubah kriteria pencarian mereka secara signifikan.
   * **Logika Pemilihan Kriteria Baru:**
-    * Saat mencoba kembali, ubah kriteria pencarian yang paling mungkin menjadi penyebab kegagalan (misalnya, jika tidak ada sepatu di bawah 500rb, coba cari tanpa batasan harga). Pikirkan strategi yang logis dan masuk akal.
+    * Saat mencoba kembali, ubah kriteria pencarian yang paling mungkin menjadi penyebab kegagalan (misalnya, jika tidak ada sepatu di bawah 500rb, coba cari tanpa batasan harga). Pikirkan strategi yang logis dan masuk akal.`
+        : ""
+    }
   
   ---
   **[Analisis Sentimen & Penyesuaian Respons]**

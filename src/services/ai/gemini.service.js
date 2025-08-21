@@ -10,8 +10,9 @@ const {
 
 const langChainModel = new ChatGoogleGenerativeAI({
   model: "gemini-2.5-flash",
-  temperature: 0,
+  temperature: 1,
   maxRetries: 4,
+  maxOutputTokens: 1024,
   apiKey: process.env.GEMINI_API_KEY,
 });
 
@@ -72,6 +73,14 @@ const State = {
     value: (x) => x,
     default: () => {},
   },
+  searchAttemptsLimit: {
+    value: (x, y) => 4, // Ambil nilai terbaru
+    default: () => 4,
+  },
+  isFailedQuery: {
+    value: (x, y) => y,
+    default: () => false,
+  },
 };
 
 // Buat Graph
@@ -80,15 +89,30 @@ const graph = new StateGraph({
 })
   // Node agent: Memanggil model dan memutuskan langkah selanjutnya
   .addNode("agent", async (state) => {
-    const { messages, searchAttempts, userProfile } = state;
+    const {
+      messages,
+      searchAttempts,
+      userProfile,
+      searchAttemptsLimit,
+      isFailedQuery,
+    } = state;
     const instruction = await conversationalFlowInstruction(
       userProfile?.assitan_username,
-      userProfile?.customer_username
+      userProfile?.customer_username,
+      searchAttempts,
+      searchAttemptsLimit,
+      isFailedQuery
     );
     const fullMessages = [new HumanMessage(instruction), ...messages];
 
     const response = await modelWithTools.invoke(fullMessages);
-    console.log("Call Agent : ", searchAttempts, response.tool_calls);
+    console.log(
+      "Call Agent : ",
+      searchAttempts,
+      searchAttemptsLimit,
+      isFailedQuery,
+      response.tool_calls
+    );
 
     // Tingkatkan hitungan percobaan jika ada tool_calls
     if (response.tool_calls && response.tool_calls.length > 0) {
@@ -114,6 +138,7 @@ const graph = new StateGraph({
     const toolMessages = [];
     const productData = [];
     const newProductIds = new Set(); // Set sementara untuk ID baru
+    let isFailedQueryCurrently = false;
 
     for (const toolCall of lastMessage.tool_calls) {
       const selectedTool = toolsByName[toolCall.name];
@@ -156,7 +181,7 @@ const graph = new StateGraph({
       }
 
       if (toolCall.name === "searchShoes") {
-        if (toolResult && toolResult.shoes) {
+        if (toolResult && toolResult.shoes.length > 0) {
           // Kumpulkan ID baru dari hasil pencarian ini
           for (const shoe of toolResult.shoes) {
             const id = shoe._id?.toString();
@@ -167,10 +192,8 @@ const graph = new StateGraph({
           }
         }
 
-        if (
-          typeof toolResult.content === "string" &&
-          toolResult.content.includes("Tidak ada hasil sepatu yang ditemukan")
-        ) {
+        if (toolResult.shoes.length === 0) {
+          isFailedQueryCurrently = true;
           toolMessages.push(
             new ToolMessage({
               tool_call_id: toolCall.id,
@@ -205,19 +228,20 @@ const graph = new StateGraph({
       tool_arguments: lastMessage.tool_calls,
       // Perbarui set ID yang terkumpul
       collectedProductIds: newProductIds,
+      isFailedQuery: isFailedQueryCurrently,
     };
   })
 
   // Hubungkan node
   .addEdge("tools", "agent")
   .addConditionalEdges("agent", (state) => {
-    const { messages, searchAttempts } = state;
+    const { messages, searchAttempts, searchAttemptsLimit } = state;
     const lastMessage = messages[messages.length - 1];
     console.log("state:", searchAttempts, lastMessage.tool_calls);
 
     // Aturan 1: Batasi percobaan
     if (
-      searchAttempts >= 4 &&
+      searchAttempts >= searchAttemptsLimit &&
       lastMessage.tool_calls &&
       lastMessage.tool_calls.length > 0
     ) {
@@ -257,7 +281,10 @@ const processNewMessageWithAI = async (
     const chatHistoryManager = new MongooseChatHistory(messageId, message);
     const instruction = await conversationalFlowInstruction(
       assitan_username,
-      customer_username
+      customer_username,
+      4,
+      4,
+      false
     );
 
     // Ambil riwayat chat dari MongoDB
