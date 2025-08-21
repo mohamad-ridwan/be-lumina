@@ -9,7 +9,7 @@ const {
 } = require("../../tools/instructions/shoe");
 
 const langChainModel = new ChatGoogleGenerativeAI({
-  model: "gemini-2.5-flash-lite",
+  model: "gemini-2.5-flash",
   temperature: 1,
   maxRetries: 4,
   maxOutputTokens: 1024,
@@ -454,7 +454,7 @@ const processNewMessageWithAI = async (
       "Internal Server Error when process new message with AI:",
       error
     );
-    throw new Error("Failed process new message with AI", error);
+    return errorMessage; // Kembalikan pesan error untuk ditampilkan
   }
 };
 
