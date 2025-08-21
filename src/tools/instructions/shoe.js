@@ -1,7 +1,14 @@
-const { SystemMessage } = require("@langchain/core/messages");
 const Category = require("../../models/category");
 const Brand = require("../../models/brand");
 const Offers = require("../../models/latestOffers");
+
+const guardrailInstruction = `
+**[⚠️ Guardrails]
+- Jangan memanggil tool "searchShoes" jika data spesifikasi sepatu sudah ada di memory.
+- Cek history terlebih dahulu sebelum memutuskan memanggil tool.
+- Jika jawaban bisa disusun dari data yang sudah ada, jawab langsung tanpa tool call.
+- Jangan pernah memanggil tool berulang dengan query yang sama tanpa perubahan. 
+`;
 
 const conversationalFlowInstruction = async (
   assitan_username,
@@ -95,6 +102,11 @@ const conversationalFlowInstruction = async (
   
   ---
   **[Logika Keputusan Percakapan]**
+  * **SANGAT PENTING: PRIORITAS UTAMA.** Ikuti aturan ini dengan ketat:
+      1.  **PERIKSA RIWAYAT PERCAKAPAN:** Cek apakah pertanyaan pelanggan (misalnya tentang warna atau ukuran) mengacu pada sepatu yang **baru saja** Anda rekomendasikan dalam percakapan terakhir.
+      2.  **JANGAN PANGGIL TOOL UNTUK DATA YANG SUDAH ADA:** Jika jawabannya YA, Anda **WAJIB** menjawab dari memori percakapan yang ada. **JANGAN PERNAH MEMANGGIL TOOL.**
+      3.  **HINDARI PANGGILAN BERULANG:** Jangan pernah memanggil tool berulang dengan query yang sama tanpa perubahan. Gunakan 'excludeIds' jika Anda perlu mencari ulang.
+      4.  **GUNAKAN TOOL SEBAGAI FALLBACK:** Panggil tool 'searchShoes' **HANYA JIKA** pertanyaan pelanggan adalah kriteria yang sama sekali baru (misalnya, "cari sepatu lain" atau "ada merek lain?") atau jika Anda tidak dapat menemukan informasi yang diminta dalam memori percakapan terdekat.
   * **Prioritas Pertanyaan:** Jika pelanggan masih menanyakan detail atau klarifikasi tentang fitur (misalnya, bahan, ketahanan air, berat), **prioritaskan untuk menjawab pertanyaan tersebut secara informatif** terlebih dahulu.
   * **Indikasi Kesiapan:** Anggap pelanggan **siap untuk rekomendasi** jika mereka menyebutkan kategori sepatu atau aktivitas yang jelas. Anda tidak perlu lagi menunggu "preferensi tambahan."
   * **Logika Rekomendasi Terbaik:**
@@ -203,7 +215,8 @@ const conversationalFlowInstruction = async (
   * **SANGAT PENTING: Ketika Anda telah mengumpulkan semua kriteria yang diperlukan, JANGAN berikan rekomendasi dalam bentuk teks bebas. Anda HARUS mengembalikan tool call yang sesuai untuk mengambil data dari sistem.**
 `;
 
-    return new SystemMessage(promptText);
+    // return new SystemMessage(promptText);
+    return promptText;
   } catch (error) {
     console.error("ERROR create flow instruction shoes", error);
     throw new Error("Failed to get response flow instruction shoes.");
@@ -212,6 +225,7 @@ const conversationalFlowInstruction = async (
 
 const shoeSystemInstructions = {
   conversationalFlowInstruction,
+  guardrailInstruction,
 };
 
 module.exports = shoeSystemInstructions;

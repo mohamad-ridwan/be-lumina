@@ -1,5 +1,9 @@
 const { ChatGoogleGenerativeAI } = require("@langchain/google-genai");
-const { HumanMessage, ToolMessage } = require("@langchain/core/messages");
+const {
+  HumanMessage,
+  ToolMessage,
+  SystemMessage,
+} = require("@langchain/core/messages");
 const { StateGraph, END } = require("@langchain/langgraph");
 const { langChainTools, toolsByName } = require("../../tools/langChainTools");
 const { generateRandomId } = require("../../helpers/generateRandomId");
@@ -103,7 +107,7 @@ const graph = new StateGraph({
       searchAttemptsLimit,
       isFailedQuery
     );
-    const fullMessages = [new HumanMessage(instruction), ...messages];
+    const fullMessages = [new SystemMessage(instruction), ...messages];
 
     const response = await modelWithTools.invoke(fullMessages);
     console.log(
@@ -295,7 +299,6 @@ const processNewMessageWithAI = async (
       messages: [
         new HumanMessage(instruction), // Menggunakan HumanMessage untuk instruksi agar lebih jelas
         ...chatHistory,
-        new HumanMessage(userQuestions),
       ],
       userProfile: {
         assitan_username,
