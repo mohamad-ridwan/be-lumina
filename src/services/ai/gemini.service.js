@@ -9,7 +9,7 @@ const {
 } = require("../../tools/instructions/shoe");
 
 const langChainModel = new ChatGoogleGenerativeAI({
-  model: "gemini-2.5-flash",
+  model: "gemini-2.5-flash-lite",
   temperature: 1,
   maxRetries: 4,
   maxOutputTokens: 1024,
@@ -328,7 +328,7 @@ ${formattedOutputForGemini}`;
   })
 
   // Hubungkan node
-  .addEdge("tools", "agent")
+  .addEdge("__start__", "agent")
   .addConditionalEdges("agent", (state) => {
     const { messages, searchAttempts, searchAttemptsLimit } = state;
     const lastMessage = messages[messages.length - 1];
@@ -352,7 +352,7 @@ ${formattedOutputForGemini}`;
     // Aturan 3: Jika tidak ada tool_calls, akhiri
     return END;
   })
-  .setEntryPoint("agent");
+  .addEdge("tools", "agent");
 
 // Kompilasi graph menjadi sebuah runnable
 const app = graph.compile();
