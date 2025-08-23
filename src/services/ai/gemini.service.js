@@ -4,7 +4,12 @@ const {
   ToolMessage,
   SystemMessage,
 } = require("@langchain/core/messages");
+const {
+  MessagesPlaceholder,
+  ChatPromptTemplate,
+} = require("@langchain/core/prompts");
 const { StateGraph, END, Annotation } = require("@langchain/langgraph");
+const { ToolNode } = require("@langchain/langgraph/prebuilt");
 const { langChainTools, toolsByName } = require("../../tools/langChainTools");
 const { generateRandomId } = require("../../helpers/generateRandomId");
 const {
@@ -49,6 +54,7 @@ const getGeminiResponse = async (prompt) => {
 };
 
 const modelWithTools = langChainModel.bindTools(langChainTools);
+const toolNode = new ToolNode(langChainTools);
 
 // Definisikan tipe state untuk LangGraph
 const State = Annotation.Root({
@@ -56,18 +62,18 @@ const State = Annotation.Root({
     reducer: (x, y) => x.concat(y),
     default: () => [],
   }),
-  searchAttempts: Annotation({
-    reducer: (x, y) => y, // Ambil nilai terbaru
-    default: () => 0,
-  }),
-  productData: Annotation({
-    reducer: (x, y) => y,
-    default: () => [],
-  }),
-  tool_arguments: Annotation({
-    reducer: (x, y) => y,
-    default: () => [],
-  }),
+  // searchAttempts: Annotation({
+  //   reducer: (x, y) => y, // Ambil nilai terbaru
+  //   default: () => 0,
+  // }),
+  // productData: Annotation({
+  //   reducer: (x, y) => y,
+  //   default: () => [],
+  // }),
+  // tool_arguments: Annotation({
+  //   reducer: (x, y) => y,
+  //   default: () => [],
+  // }),
   collectedProductIds: Annotation({
     reducer: (x, y) => new Set([...x, ...y]),
     default: () => new Set(),
@@ -76,14 +82,14 @@ const State = Annotation.Root({
     reducer: (x) => x,
     default: () => {},
   }),
-  searchAttemptsLimit: Annotation({
-    reducer: (x, y) => 4, // Ambil nilai terbaru
-    default: () => 4,
-  }),
-  isFailedQuery: Annotation({
-    reducer: (x, y) => y,
-    default: () => false,
-  }),
+  // searchAttemptsLimit: Annotation({
+  //   reducer: (x, y) => 4, // Ambil nilai terbaru
+  //   default: () => 4,
+  // }),
+  // isFailedQuery: Annotation({
+  //   reducer: (x, y) => y,
+  //   default: () => false,
+  // }),
 });
 
 // Buat Graph
@@ -97,11 +103,6 @@ const graph = new StateGraph(State)
       isFailedQuery,
     } = state;
 
-    // Kumpulkan semua data produk yang ada dari seluruh riwayat pesan AI
-    const allExistingProducts = messages
-      ?.filter((msg) => msg.additional_kwargs?.product_data?.length > 0)
-      ?.flatMap((msg) => msg.additional_kwargs.product_data);
-
     // Ambil instruksi percakapan
     const instruction = await conversationalFlowInstruction(
       userProfile?.assitan_username,
@@ -111,10 +112,29 @@ const graph = new StateGraph(State)
       isFailedQuery
     );
 
-    const fullMessages = [new SystemMessage(instruction), ...messages];
+    // Kumpulkan semua data produk yang ada dari seluruh riwayat pesan AI
+    const allExistingProducts = messages
+      ?.filter((msg) => msg.additional_kwargs?.product_data?.length > 0)
+      ?.flatMap((msg) => msg.additional_kwargs.product_data);
+
+    const prompt = ChatPromptTemplate.fromMessages([
+      [
+        "system",
+        `You are a helpful AI assistant, collaborating with other assistants. Use the provided tools to progress towards answering the question. If you are unable to fully answer, that's OK, another assistant with different tools will help where you left off. Execute what you can to make progress. If you or any of the other assistants have the final answer or deliverable, prefix your response with FINAL ANSWER so the team knows to stop. You have access to the following tools: {tool_names}.\n{system_message}\nCurrent time: {time}.`,
+      ],
+      new MessagesPlaceholder("messages"),
+    ]);
+    const formattedPrompt = await prompt.formatMessages({
+      system_message: instruction,
+      time: new Date().toISOString(),
+      tool_names: langChainTools.map((tool) => tool.name).join(", "),
+      messages: state.messages,
+    });
+
+    // const fullMessages = [new SystemMessage(instruction), ...messages];
 
     // Panggil model dengan tools
-    const response = await modelWithTools.invoke(fullMessages);
+    const response = await modelWithTools.invoke(formattedPrompt);
 
     // Lakukan modifikasi pada tool_calls
     if (response.tool_calls && response.tool_calls.length > 0) {
@@ -152,182 +172,184 @@ const graph = new StateGraph(State)
       searchAttemptsLimit,
       isFailedQuery,
       response.tool_calls,
-      userProfile
+      userProfile,
+      messages
     );
 
     // Mengembalikan AIMessage dari LLM yang sudah dimodifikasi
     if (response.tool_calls && response.tool_calls.length > 0) {
       return {
         messages: [response],
-        searchAttempts: searchAttempts + 1,
+        // searchAttempts: searchAttempts + 1,
       };
     } else {
       return { messages: [response] };
     }
   })
+  .addNode("tools", toolNode)
 
   // ... Bagian node tools dan graph lainnya ada di bawah ...
 
   // Node tools: Menjalankan tools yang diputuskan oleh agent
-  .addNode("tools", async (state) => {
-    const { messages, collectedProductIds, searchAttempts } = state;
-    console.log("Call Tools : ", searchAttempts);
-    const lastMessage = messages[messages.length - 1];
+  //   .addNode("tools", async (state) => {
+  //     const { messages, collectedProductIds, searchAttempts } = state;
+  //     console.log("Call Tools : ", searchAttempts);
+  //     const lastMessage = messages[messages.length - 1];
 
-    if (!lastMessage.tool_calls || lastMessage.tool_calls.length === 0) {
-      throw new Error("Tidak ada tool_calls untuk diproses.");
-    }
+  //     if (!lastMessage.tool_calls || lastMessage.tool_calls.length === 0) {
+  //       throw new Error("Tidak ada tool_calls untuk diproses.");
+  //     }
 
-    const toolMessages = [];
-    const productData = [];
-    const newProductIds = new Set(); // Set sementara untuk ID baru
-    let isFailedQueryCurrently = false;
+  //     const toolMessages = [];
+  //     const productData = [];
+  //     const newProductIds = new Set(); // Set sementara untuk ID baru
+  //     let isFailedQueryCurrently = false;
 
-    for (const toolCall of lastMessage.tool_calls) {
-      const selectedTool = toolsByName[toolCall.name];
+  //     for (const toolCall of lastMessage.tool_calls) {
+  //       const selectedTool = toolsByName[toolCall.name];
 
-      // --- LOGIKA UTAMA: CEK FIELD data_memory DULU ---
-      if (
-        toolCall.args.data_memory &&
-        Array.isArray(toolCall.args.data_memory)
-      ) {
-        // Loop melalui setiap objek sepatu di dalam array data_memory
-        for (const shoe of toolCall.args.data_memory) {
-          const id = shoe._id?.toString();
-          if (id && !newProductIds.has(id)) {
-            productData.push(shoe);
-            newProductIds.add(id);
-          }
-        }
+  //       // --- LOGIKA UTAMA: CEK FIELD data_memory DULU ---
+  //       if (
+  //         toolCall.args.data_memory &&
+  //         Array.isArray(toolCall.args.data_memory)
+  //       ) {
+  //         // Loop melalui setiap objek sepatu di dalam array data_memory
+  //         for (const shoe of toolCall.args.data_memory) {
+  //           const id = shoe._id?.toString();
+  //           if (id && !newProductIds.has(id)) {
+  //             productData.push(shoe);
+  //             newProductIds.add(id);
+  //           }
+  //         }
 
-        const formattedOutputForGemini = toolCall.args.data_memory
-          .map((shoe) => {
-            const formattedVariants = shoe.variants
-              .map((v) =>
-                Object.entries(v)
-                  .map(([key, value]) => `${key}: ${value}`)
-                  .join(", ")
-              )
-              .join("; ");
+  //         const formattedOutputForGemini = toolCall.args.data_memory
+  //           .map((shoe) => {
+  //             const formattedVariants = shoe.variants
+  //               .map((v) =>
+  //                 Object.entries(v)
+  //                   .map(([key, value]) => `${key}: ${value}`)
+  //                   .join(", ")
+  //               )
+  //               .join("; ");
 
-            return `
-- Nama: ${shoe.name}
-- Merek: ${shoe.brand}
-- Kategori: ${shoe.category.join(", ")}
-- Harga: Rp ${shoe.price.toLocaleString("id-ID")}
-- Deskripsi: ${shoe.description}
-- Link Url Sepatu: http://localhost:3008/product/${shoe.slug_sepatu}
-- Varian Tersedia: ${formattedVariants}
-`;
-          })
-          .join("\n---\n"); // Gabungkan setiap item dengan pemisah yang jelas
+  //             return `
+  // - Nama: ${shoe.name}
+  // - Merek: ${shoe.brand}
+  // - Kategori: ${shoe.category.join(", ")}
+  // - Harga: Rp ${shoe.price.toLocaleString("id-ID")}
+  // - Deskripsi: ${shoe.description}
+  // - Link Url Sepatu: http://localhost:3008/product/${shoe.slug_sepatu}
+  // - Varian Tersedia: ${formattedVariants}
+  // `;
+  //           })
+  //           .join("\n---\n"); // Gabungkan setiap item dengan pemisah yang jelas
 
-        const content = `Hasil pencarian sepatu:
-  
-${formattedOutputForGemini}`;
+  //         const content = `Hasil pencarian sepatu:
 
-        toolMessages.push(
-          new ToolMessage({
-            id: toolCall.id,
-            content: content,
-            name: toolCall.name,
-          })
-        );
-        continue; // Lanjut ke tool_call berikutnya
-      }
-      // --- AKHIR LOGIKA UTAMA ---
+  // ${formattedOutputForGemini}`;
 
-      // Jika data_memory tidak ada, jalankan tool seperti biasa
-      if (!selectedTool) {
-        toolMessages.push(
-          new ToolMessage({
-            id: toolCall.id,
-            content: `Tool dengan nama ${toolCall.name} tidak ditemukan.`,
-            name: toolCall.name,
-          })
-        );
-        continue;
-      }
+  //         toolMessages.push(
+  //           new ToolMessage({
+  //             id: toolCall.id,
+  //             content: content,
+  //             name: toolCall.name,
+  //           })
+  //         );
+  //         continue; // Lanjut ke tool_call berikutnya
+  //       }
+  //       // --- AKHIR LOGIKA UTAMA ---
 
-      let toolResult;
-      try {
-        if (toolCall.name === "searchShoes") {
-          const argsWithExclusion = {
-            ...toolCall.args,
-            excludeIds: Array.from(collectedProductIds),
-          };
-          toolResult = await selectedTool.invoke(argsWithExclusion);
-        } else {
-          toolResult = await selectedTool.invoke(toolCall.args);
-        }
-      } catch (error) {
-        console.error(`Error invoking tool ${toolCall.name}:`, error);
-        toolMessages.push(
-          new ToolMessage({
-            id: toolCall.id,
-            content: `Tool ${toolCall.name} gagal dieksekusi karena masalah internal.`,
-            name: toolCall.name,
-          })
-        );
-        continue;
-      }
+  //       // Jika data_memory tidak ada, jalankan tool seperti biasa
+  //       if (!selectedTool) {
+  //         toolMessages.push(
+  //           new ToolMessage({
+  //             id: toolCall.id,
+  //             content: `Tool dengan nama ${toolCall.name} tidak ditemukan.`,
+  //             name: toolCall.name,
+  //           })
+  //         );
+  //         continue;
+  //       }
 
-      if (toolCall.name === "searchShoes") {
-        if (toolResult && toolResult.shoes.length > 0) {
-          for (const shoe of toolResult.shoes) {
-            const id = shoe._id?.toString();
-            if (id && !newProductIds.has(id)) {
-              productData.push(shoe);
-              newProductIds.add(id);
-            }
-          }
-        }
+  //       let toolResult;
+  //       try {
+  //         if (toolCall.name === "searchShoes") {
+  //           const argsWithExclusion = {
+  //             ...toolCall.args,
+  //             excludeIds: Array.from(collectedProductIds),
+  //           };
+  //           toolResult = await selectedTool.invoke(argsWithExclusion);
+  //         } else {
+  //           toolResult = await selectedTool.invoke(toolCall.args);
+  //         }
+  //       } catch (error) {
+  //         console.error(`Error invoking tool ${toolCall.name}:`, error);
+  //         toolMessages.push(
+  //           new ToolMessage({
+  //             id: toolCall.id,
+  //             content: `Tool ${toolCall.name} gagal dieksekusi karena masalah internal.`,
+  //             name: toolCall.name,
+  //           })
+  //         );
+  //         continue;
+  //       }
 
-        if (toolResult.shoes.length === 0) {
-          isFailedQueryCurrently = true;
-          toolMessages.push(
-            new ToolMessage({
-              id: toolCall.id,
-              content: `Pencarian gagal: ${toolResult.content}. Segera panggil tool rephraseQuery untuk mencari sepatu dengan query yang berbeda.`,
-              name: toolCall.name,
-            })
-          );
-        } else {
-          toolMessages.push(
-            new ToolMessage({
-              id: toolCall.id,
-              content: toolResult.content || "Tidak ada yang dihasilkan",
-              name: toolCall.name,
-            })
-          );
-        }
-      } else {
-        toolMessages.push(
-          new ToolMessage({
-            id: toolCall.id,
-            content: toolResult.content || "Tidak ada yang dihasilkan",
-            name: toolCall.name,
-          })
-        );
-      }
-    }
+  //       if (toolCall.name === "searchShoes") {
+  //         if (toolResult && toolResult.shoes.length > 0) {
+  //           for (const shoe of toolResult.shoes) {
+  //             const id = shoe._id?.toString();
+  //             if (id && !newProductIds.has(id)) {
+  //               productData.push(shoe);
+  //               newProductIds.add(id);
+  //             }
+  //           }
+  //         }
 
-    const tool_arguments = lastMessage.tool_calls.map((call) => {
-      const args = call.args;
-      delete args.data_memory;
-      return args;
-    });
+  //         if (toolResult.shoes.length === 0) {
+  //           isFailedQueryCurrently = true;
+  //           toolMessages.push(
+  //             new ToolMessage({
+  //               id: toolCall.id,
+  //               content: `Pencarian gagal: ${toolResult.content}. Segera panggil tool rephraseQuery untuk mencari sepatu dengan query yang berbeda.`,
+  //               name: toolCall.name,
+  //             })
+  //           );
+  //         } else {
+  //           toolMessages.push(
+  //             new ToolMessage({
+  //               id: toolCall.id,
+  //               content: toolResult.content || "Tidak ada yang dihasilkan",
+  //               name: toolCall.name,
+  //             })
+  //           );
+  //         }
+  //       } else {
+  //         toolMessages.push(
+  //           new ToolMessage({
+  //             id: toolCall.id,
+  //             content: toolResult.content || "Tidak ada yang dihasilkan",
+  //             name: toolCall.name,
+  //           })
+  //         );
+  //       }
+  //     }
 
-    // Kembalikan state yang diperbarui
-    return {
-      messages: toolMessages,
-      productData,
-      tool_arguments,
-      // Perbarui set ID yang terkumpul
-      collectedProductIds: newProductIds,
-      isFailedQuery: isFailedQueryCurrently,
-    };
-  })
+  //     const tool_arguments = lastMessage.tool_calls.map((call) => {
+  //       const args = call.args;
+  //       delete args.data_memory;
+  //       return args;
+  //     });
+
+  //     // Kembalikan state yang diperbarui
+  //     return {
+  //       messages: toolMessages,
+  //       productData,
+  //       tool_arguments,
+  //       // Perbarui set ID yang terkumpul
+  //       collectedProductIds: newProductIds,
+  //       isFailedQuery: isFailedQueryCurrently,
+  //     };
+  //   })
 
   // Hubungkan node
   .addEdge("__start__", "agent")
@@ -337,14 +359,14 @@ ${formattedOutputForGemini}`;
     console.log("state:", searchAttempts, lastMessage.tool_calls);
 
     // Aturan 1: Batasi percobaan
-    if (
-      searchAttempts >= searchAttemptsLimit &&
-      lastMessage.tool_calls &&
-      lastMessage.tool_calls.length > 0
-    ) {
-      // Jika sudah mencoba 2 kali dan masih mencoba, hentikan
-      return END;
-    }
+    // if (
+    //   searchAttempts >= searchAttemptsLimit &&
+    //   lastMessage.tool_calls &&
+    //   lastMessage.tool_calls.length > 0
+    // ) {
+    //   // Jika sudah mencoba 2 kali dan masih mencoba, hentikan
+    //   return END;
+    // }
 
     // Aturan 2: Lanjutkan jika ada tool_calls
     if (lastMessage.tool_calls && lastMessage.tool_calls.length > 0) {

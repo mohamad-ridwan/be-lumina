@@ -61,7 +61,7 @@ const searchShoesSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Material utama sepatu (misal: 'kulit', 'kanvas', 'mesh'). Gabungkan menjadi string."
+      "Material utama sepatu (misal: 'kulit', 'kanvas', 'mesh'). Gabungkan menjadi string. Gabungkan juga bersama fitur lainnya"
     ),
   shoeNames: z
     .array(z.string())
