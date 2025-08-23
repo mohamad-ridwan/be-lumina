@@ -1,9 +1,12 @@
 const { ChatGoogleGenerativeAI } = require("@langchain/google-genai");
-const { HumanMessage, ToolMessage } = require("@langchain/core/messages");
-const { StateGraph, END } = require("@langchain/langgraph");
+const {
+  HumanMessage,
+  ToolMessage,
+  SystemMessage,
+} = require("@langchain/core/messages");
+const { StateGraph, END, Annotation } = require("@langchain/langgraph");
 const { langChainTools, toolsByName } = require("../../tools/langChainTools");
 const { generateRandomId } = require("../../helpers/generateRandomId");
-const { MongooseChatHistory } = require("../../tools/classes/chat-history");
 const {
   conversationalFlowInstruction,
 } = require("../../tools/instructions/shoe");
@@ -48,45 +51,43 @@ const getGeminiResponse = async (prompt) => {
 const modelWithTools = langChainModel.bindTools(langChainTools);
 
 // Definisikan tipe state untuk LangGraph
-const State = {
-  messages: {
-    value: (x, y) => x.concat(y),
+const State = Annotation.Root({
+  messages: Annotation({
+    reducer: (x, y) => x.concat(y),
     default: () => [],
-  },
-  searchAttempts: {
-    value: (x, y) => y, // Ambil nilai terbaru
+  }),
+  searchAttempts: Annotation({
+    reducer: (x, y) => y, // Ambil nilai terbaru
     default: () => 0,
-  },
-  productData: {
-    value: (x, y) => y,
+  }),
+  productData: Annotation({
+    reducer: (x, y) => y,
     default: () => [],
-  },
-  tool_arguments: {
-    value: (x, y) => y,
+  }),
+  tool_arguments: Annotation({
+    reducer: (x, y) => y,
     default: () => [],
-  },
-  collectedProductIds: {
-    value: (x, y) => new Set([...x, ...y]),
+  }),
+  collectedProductIds: Annotation({
+    reducer: (x, y) => new Set([...x, ...y]),
     default: () => new Set(),
-  },
-  userProfile: {
-    value: (x) => x,
+  }),
+  userProfile: Annotation({
+    reducer: (x) => x,
     default: () => {},
-  },
-  searchAttemptsLimit: {
-    value: (x, y) => 4, // Ambil nilai terbaru
+  }),
+  searchAttemptsLimit: Annotation({
+    reducer: (x, y) => 4, // Ambil nilai terbaru
     default: () => 4,
-  },
-  isFailedQuery: {
-    value: (x, y) => y,
+  }),
+  isFailedQuery: Annotation({
+    reducer: (x, y) => y,
     default: () => false,
-  },
-};
+  }),
+});
 
 // Buat Graph
-const graph = new StateGraph({
-  channels: State,
-})
+const graph = new StateGraph(State)
   .addNode("agent", async (state) => {
     const {
       messages,
@@ -98,8 +99,8 @@ const graph = new StateGraph({
 
     // Kumpulkan semua data produk yang ada dari seluruh riwayat pesan AI
     const allExistingProducts = messages
-      .filter((msg) => msg.additional_kwargs?.product_data?.length > 0)
-      .flatMap((msg) => msg.additional_kwargs.product_data);
+      ?.filter((msg) => msg.additional_kwargs?.product_data?.length > 0)
+      ?.flatMap((msg) => msg.additional_kwargs.product_data);
 
     // Ambil instruksi percakapan
     const instruction = await conversationalFlowInstruction(
@@ -110,7 +111,7 @@ const graph = new StateGraph({
       isFailedQuery
     );
 
-    const fullMessages = [new HumanMessage(instruction), ...messages];
+    const fullMessages = [new SystemMessage(instruction), ...messages];
 
     // Panggil model dengan tools
     const response = await modelWithTools.invoke(fullMessages);
@@ -150,7 +151,8 @@ const graph = new StateGraph({
       searchAttempts,
       searchAttemptsLimit,
       isFailedQuery,
-      response.tool_calls
+      response.tool_calls,
+      userProfile
     );
 
     // Mengembalikan AIMessage dari LLM yang sudah dimodifikasi
@@ -355,13 +357,12 @@ ${formattedOutputForGemini}`;
   .addEdge("tools", "agent");
 
 // Kompilasi graph menjadi sebuah runnable
-const app = graph.compile();
 
 const processNewMessageWithAI = async (
   formattedHisory,
   message,
   sendMessageCallback,
-  { io, socket, client, agenda, assitan_username, customer_username }
+  { io, socket, client, agenda, assitan_username, customer_username, agentApp }
 ) => {
   const latestMessageTimestamp = Date.now();
   const messageId = generateRandomId(15);
@@ -372,32 +373,28 @@ const processNewMessageWithAI = async (
   }`;
 
   try {
+    const threadId = message?.chatRoomId;
     const userQuestions = message.latestMessage.textMessage;
-    const chatHistoryManager = new MongooseChatHistory(messageId, message);
-    const instruction = await conversationalFlowInstruction(
-      assitan_username,
-      customer_username,
-      4,
-      4,
-      false
-    );
 
-    // Ambil riwayat chat dari MongoDB
-    const chatHistory = await chatHistoryManager.getMessages();
+    if (!threadId) {
+      console.error("Chat room ID is missing, cannot process message with AI.");
+      return;
+    }
 
-    // Jalankan LangGraph dengan semua pesan (instruksi, riwayat, pesan baru)
-    const initialState = {
-      messages: [
-        new HumanMessage(instruction), // Menggunakan HumanMessage untuk instruksi agar lebih jelas
-        ...chatHistory,
-      ],
-      userProfile: {
-        assitan_username,
-        customer_username,
+    const finalState = await agentApp.invoke(
+      {
+        messages: [new HumanMessage(userQuestions)],
+        userProfile: {
+          assitan_username,
+          customer_username,
+        },
       },
-    };
-
-    const finalState = await app.invoke(initialState);
+      {
+        configurable: {
+          thread_id: threadId,
+        },
+      }
+    );
 
     const responseMessage = finalState.messages[finalState.messages.length - 1];
     if (Array.isArray(responseMessage.content)) {
@@ -863,4 +860,9 @@ const processNewMessageWithAI = async (
 //   }
 // };
 
-module.exports = { getGeminiResponse, langChainModel, processNewMessageWithAI };
+module.exports = {
+  getGeminiResponse,
+  langChainModel,
+  processNewMessageWithAI,
+  graph,
+};

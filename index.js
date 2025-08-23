@@ -11,7 +11,9 @@ const { chatRoom } = require("./src/sockets/chatRoom");
 const { usersSocket } = require("./src/sockets/users");
 const { chatsSocket } = require("./src/sockets/chats");
 const { Agenda } = require("@hokify/agenda");
-const { initializeEmbeddingPipeline } = require("./src/utils/embeddings");
+const { MongoClient } = require("mongodb");
+const { MongoDBSaver } = require("@langchain/langgraph-checkpoint-mongodb");
+const { graph } = require("./src/services/ai/gemini.service");
 const {
   agenda_name_sendMessageToCustomer,
   agenda_name_responseCancelOrder,
@@ -75,6 +77,16 @@ dbConnection()
     app.use("/", require("./src/routes"));
     app.use(errorHandler);
 
+    const mongoClient = new MongoClient(process.env.MONGO_DB_URI);
+    await mongoClient.connect();
+    // const db = mongoClient.db(process.env.MONGO_DB_DATABASE);
+
+    const checkpointer = new MongoDBSaver({
+      client: mongoClient,
+      dbName: process.env.MONGO_DB_DATABASE,
+      checkpointCollectionName: "checkpoints",
+    });
+
     // await initializeEmbeddingPipeline();
 
     // app.listen(PORT, () => {
@@ -95,7 +107,18 @@ dbConnection()
 
       agenda.define(agenda_name_sendMessageToCustomer, (data) => {
         const message = data.attrs.data;
-        chatRoom.handleGetNewMessageForBot(message, io, socket, client, agenda);
+
+        // Kompilasi app di sini
+        const agentApp = graph.compile({ checkpointer });
+
+        chatRoom.handleGetNewMessageForBot(
+          message,
+          io,
+          socket,
+          client,
+          agenda,
+          agentApp
+        );
       });
 
       agenda.define(agenda_name_responseCancelOrder, (data) => {

@@ -591,7 +591,8 @@ const handleGetNewMessageForBot = async (
   io,
   socket,
   client,
-  agenda
+  agenda,
+  agentApp
 ) => {
   const { latestMessage, isNeedHeaderDate, recipientProfileId, role } = message;
 
@@ -679,7 +680,15 @@ const handleGetNewMessageForBot = async (
       );
       return result;
     },
-    { io, socket, client, agenda, assitan_username, customer_username }
+    {
+      io,
+      socket,
+      client,
+      agenda,
+      assitan_username,
+      customer_username,
+      agentApp,
+    }
   );
   io.emit("typing-stop", {
     recipientId: newRecipientProfileId,
