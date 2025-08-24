@@ -10,7 +10,10 @@ const searchShoesSchema = z.object({
 
   // Perbaikan: variantFilters harus berupa objek dengan nilai array string, seperti yang ditunjukkan di contoh
   variantFilters: z
-    .record(z.array(z.string()))
+    .object({
+      Warna: z.array(z.string()).optional(),
+      Ukuran: z.array(z.string()).optional(),
+    })
     .optional()
     .describe(
       `Objek untuk memfilter varian seperti warna atau ukuran. 
@@ -58,10 +61,14 @@ const searchShoesSchema = z.object({
     .optional()
     .describe("Jumlah maksimum hasil pencarian, maksimal 2."),
   material: z
-    .string()
+    .array(z.string())
+    .optional()
+    .describe("Material utama sepatu. Contoh: ['kulit', 'kanvas', 'mesh']"),
+  features: z
+    .array(z.string())
     .optional()
     .describe(
-      "Material utama sepatu (misal: 'kulit', 'kanvas', 'mesh'). Gabungkan menjadi string. Gabungkan juga bersama fitur lainnya"
+      "Fitur spesifik sepatu. Contoh: ['nyaman', 'tahan air', 'ringan', 'sol anti-slip']"
     ),
   shoeNames: z
     .array(z.string())
@@ -80,16 +87,15 @@ const searchShoesFuncDeclaration = {
   schema: searchShoesSchema,
   description: `Gunakan fungsi ini ketika pengguna mencari sepatu berdasarkan berbagai kriteria, termasuk:
 
-*   Jenis kegiatan (misal: 'sepatu lari', 'sepatu basket', 'untuk hiking', 'kasual')
-*   Fitur spesifik (misal: 'nyaman', 'tahan air', 'ringan', 'support', 'ada busa empuk', 'sol anti-slip')
-*   Gaya (misal: 'retro', 'modern', 'sporty', 'fashionable')
-*   Budget atau kisaran harga (misal: 'harga di bawah 1.5 juta', 'antara 800 ribu sampai 2 juta')
-*   Merek tertentu (misal: 'dari Adidas', 'Nike', 'Converse')
-*   Warna spesifik — AI boleh memetakan istilah umum seperti 'tidak mencolok' menjadi warna literal yang sesuai (misalnya hitam, putih, abu-abu, cokelat, krem)
-*   Ketersediaan ukuran (misal: 'ukuran 42', 'tersedia ukuran besar')
-*   Kombinasi dari kriteria tersebut
-
-Fungsi ini juga dapat digunakan untuk pertanyaan yang ambigu ('sepatu apa ya yang cocok untuk saya?'). Dalam kasus ini, biarkan logika di backend melakukan pemfilteran cerdas berdasarkan deskripsi produk.
+* Jenis kegiatan (misal: 'sepatu lari', 'sepatu basket', 'untuk hiking', 'kasual')
+* Fitur spesifik - ekstraksi menjadi array (misal: 'nyaman', 'tahan air', 'ringan', 'support', 'ada busa empuk', 'sol anti-slip')
+* Material - ekstraksi menjadi array (misal: 'kulit', 'kanvas', 'mesh')
+* Gaya (misal: 'retro', 'modern', 'sporty', 'fashionable')
+* Budget atau kisaran harga (misal: 'harga di bawah 1.5 juta', 'antara 800 ribu sampai 2 juta')
+* Merek tertentu (misal: 'dari Adidas', 'Nike', 'Converse')
+* Warna spesifik — AI boleh memetakan istilah umum seperti 'tidak mencolok' menjadi warna literal yang sesuai (misalnya hitam, putih, abu-abu, cokelat, krem)
+* Ketersediaan ukuran (misal: 'ukuran 42', 'tersedia ukuran besar')
+* Kombinasi dari kriteria tersebut
   
   Ekstrak semua parameter yang relevan dari satu niat pencarian pengguna. Jika ada produk yang sudah gagal atau tidak relevan, tambahkan ID produk tersebut ke parameter **'excludeIds'** untuk mencegahnya muncul di hasil pencarian berikutnya.
   

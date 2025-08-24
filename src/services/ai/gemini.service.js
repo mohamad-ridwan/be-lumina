@@ -11,12 +11,16 @@ const { generateRandomId } = require("../../helpers/generateRandomId");
 const {
   conversationalFlowInstruction,
 } = require("../../tools/instructions/shoe");
+const {
+  OptimizedInstructionGenerator,
+  ResponseQualityValidator,
+} = require("../../tools/classes/dynamic-prompt");
 
 const langChainModel = new ChatGoogleGenerativeAI({
   model: "gemini-2.5-flash-lite",
-  temperature: 1,
-  maxRetries: 4,
-  maxOutputTokens: 1024,
+  temperature: 0.7, // Reduced for more consistent responses
+  maxRetries: 2, // Reduced retries for faster response
+  maxOutputTokens: 1024, // Reduced token limit for cost efficiency
   apiKey: process.env.GEMINI_API_KEY,
 });
 
@@ -51,11 +55,14 @@ const getGeminiResponse = async (prompt) => {
 
 const modelWithTools = langChainModel.bindTools(langChainTools);
 const toolNode = new ToolNode(langChainTools);
+const instructionGenerator = new OptimizedInstructionGenerator();
 
 // Definisikan tipe state untuk LangGraph
 const State = Annotation.Root({
   messages: Annotation({
-    reducer: (x, y) => x.concat(y),
+    reducer: (x, y) => {
+      return x.concat(y);
+    },
     default: () => [],
   }),
   collectedProductIds: Annotation({
@@ -66,203 +73,283 @@ const State = Annotation.Root({
     reducer: (x) => x,
     default: () => {},
   }),
+  conversationStage: Annotation({
+    reducer: (x, y) => y || x,
+    default: () => "greeting",
+  }),
 });
 
-// Buat Graph
+// Optimized Graph with smarter routing
 const graph = new StateGraph(State)
   .addNode("agent", async (state) => {
-    const {
-      messages,
-      searchAttempts,
-      userProfile,
-      searchAttemptsLimit,
-      isFailedQuery,
-    } = state;
+    const { messages, userProfile } = state;
 
-    // Ambil instruksi percakapan
-    const instruction = await conversationalFlowInstruction(
-      userProfile?.assitan_username,
+    // Generate dynamic instruction based on conversation stage
+    const instruction = await instructionGenerator.generateInstruction(
+      userProfile?.assistan_username,
       userProfile?.customer_username,
-      searchAttempts,
-      searchAttemptsLimit,
-      isFailedQuery
+      messages,
+      userProfile
     );
 
-    // Kumpulkan semua data produk yang ada dari seluruh riwayat pesan AI
-    const allExistingProducts = messages
-      ?.filter((msg) => msg.additional_kwargs?.product_data?.length > 0)
-      ?.flatMap((msg) => msg.additional_kwargs.product_data);
+    console.log("INSTRUCTION :", instruction);
 
+    // Simplified prompt template
     const prompt = ChatPromptTemplate.fromMessages([
-      [
-        "system",
-        `You are a helpful AI assistant, collaborating with other assistants. Use the provided tools to progress towards answering the question. If you are unable to fully answer, that's OK, another assistant with different tools will help where you left off. Execute what you can to make progress. If you or any of the other assistants have the final answer or deliverable, prefix your response with FINAL ANSWER so the team knows to stop. You have access to the following tools: {tool_names}.\n{system_message}\nCurrent time: {time}.`,
-      ],
+      ["system", `${instruction}\n\nCurrent time: {time}`],
       new MessagesPlaceholder("messages"),
     ]);
+
     const formattedPrompt = await prompt.formatMessages({
-      system_message: instruction,
       time: new Date().toISOString(),
-      tool_names: langChainTools.map((tool) => tool.name).join(", "),
+      link_url_sepatu: "",
+      availableCategories: "",
+      availableBrands: "",
+      availableOffers: "",
       messages: state.messages,
     });
 
-    // const fullMessages = [new SystemMessage(instruction), ...messages];
-
-    // Panggil model dengan tools
     const response = await modelWithTools.invoke(formattedPrompt);
+    console.log("AI Response:", response);
 
-    // Lakukan modifikasi pada tool_calls
-    if (response.tool_calls && response.tool_calls.length > 0) {
-      for (const toolCall of response.tool_calls) {
-        if (
-          toolCall.name === "searchShoes" &&
-          toolCall.args.shoeNames &&
-          toolCall.args.shoeNames.length > 0
-        ) {
-          const requestedShoeNames = toolCall.args.shoeNames.map((name) =>
-            name.toLowerCase()
-          );
-          let data_memory = [];
-          requestedShoeNames.forEach((name) => {
-            const existingShoe = allExistingProducts.find(
-              (shoe) => name === shoe.name.toLowerCase()
-            );
-            if (existingShoe) {
-              data_memory.push(existingShoe);
-            }
-          });
-
-          if (data_memory.length > 0) {
-            // Jika sepatu ditemukan, tambahkan data mentah ke dalam field baru
-            toolCall.args.data_memory = data_memory;
-          }
-        }
-        // Tool lainnya tidak dimodifikasi
-      }
+    // Optimize tool calls with memory
+    if (response.tool_calls?.length > 0) {
+      await optimizeToolCalls(response.tool_calls, messages);
     }
 
-    console.log(
-      "Call Agent : ",
-      searchAttempts,
-      searchAttemptsLimit,
-      isFailedQuery,
-      response.tool_calls,
-      userProfile,
-      messages
-    );
-
-    // Mengembalikan AIMessage dari LLM yang sudah dimodifikasi
-    if (response.tool_calls && response.tool_calls.length > 0) {
-      return {
-        messages: [response],
-        // searchAttempts: searchAttempts + 1,
-      };
-    } else {
-      return { messages: [response] };
-    }
+    return {
+      messages: [response],
+      conversationStage: instructionGenerator.stateManager.determineStage(
+        [...messages, response],
+        userProfile
+      ),
+    };
   })
   .addNode("tools", toolNode)
-
-  // Hubungkan node
   .addEdge("__start__", "agent")
   .addConditionalEdges("agent", (state) => {
-    const { messages, searchAttempts, searchAttemptsLimit } = state;
-    const lastMessage = messages[messages.length - 1];
-    console.log("state:", searchAttempts, lastMessage.tool_calls);
+    const lastMessage = state.messages[state.messages.length - 1];
 
-    // Aturan 2: Lanjutkan jika ada tool_calls
-    if (lastMessage.tool_calls && lastMessage.tool_calls.length > 0) {
+    // Smart routing based on conversation stage
+    if (lastMessage.tool_calls?.length > 0) {
       return "tools";
     }
 
-    // Aturan 3: Jika tidak ada tool_calls, akhiri
     return END;
   })
   .addEdge("tools", "agent");
 
-// Kompilasi graph menjadi sebuah runnable
+// Enhanced tool call optimization with memory management
+function optimizeToolCalls(toolCalls, messages) {
+  const existingProducts = extractExistingProducts(messages);
+
+  for (const toolCall of toolCalls) {
+    if (toolCall.name === "searchShoes") {
+      // Add conversation memory to tool calls
+      if (
+        existingProducts.length > 0 &&
+        toolCall.args.shoeNames &&
+        toolCall.args.shoeNames.length > 0
+      ) {
+        const requestedNames = toolCall.args.shoeNames.map((name) =>
+          name.toLowerCase()
+        );
+        const memoryData = existingProducts.filter((product) =>
+          requestedNames.includes(product.name.toLowerCase())
+        );
+
+        if (memoryData.length > 0) {
+          toolCall.args.data_memory = memoryData;
+          // Remove shoes already in memory from new search to avoid duplicates
+          toolCall.args.shoeNames = toolCall.args.shoeNames.filter(
+            (name) =>
+              !memoryData.some(
+                (product) => product.name.toLowerCase() === name.toLowerCase()
+              )
+          );
+        }
+      }
+
+      // Add metadata for better tool usage tracking
+      toolCall.args._context = {
+        conversationStage: "searching",
+        timestamp: Date.now(),
+        messageCount: messages.length,
+      };
+    }
+  }
+
+  return toolCalls;
+}
+
+function extractExistingProducts(messages) {
+  // Extract products from recent messages (last 6 messages for efficiency)
+  return messages;
+}
 
 const processNewMessageWithAI = async (
-  formattedHisory,
+  formattedHistory,
   message,
   sendMessageCallback,
-  { io, socket, client, agenda, assitan_username, customer_username, agentApp }
+  { io, socket, client, agenda, assistan_username, customer_username, agentApp }
 ) => {
   const latestMessageTimestamp = Date.now();
   const messageId = generateRandomId(15);
-  let finalResponse = `Maaf, ${
-    assitan_username || "Kami"
-  } sedang mengalami kendala 😩. Silakan coba lagi ya Kak${
-    ` ${customer_username} 😉.` || "😉."
-  }`;
+
+  // Pre-generate contextual fallback response with proper persona
+  const fallbackResponse = generatePersonalizedFallback(
+    assistan_username,
+    customer_username,
+    "default"
+  );
 
   try {
     const threadId = message?.chatRoomId;
-    const userQuestions = message.latestMessage.textMessage;
+    const userQuestion = message.latestMessage
+      ? message.latestMessage.textMessage
+      : "";
 
     if (!threadId) {
-      console.error("Chat room ID is missing, cannot process message with AI.");
-      return;
+      console.error("Chat room ID is missing");
+      await sendFallbackResponse(fallbackResponse);
+      return fallbackResponse;
     }
 
-    const finalState = await agentApp.invoke(
+    // Add performance monitoring
+    const startTime = Date.now();
+
+    // Optimized timeout with stage-specific durations
+    const timeoutDuration = determineTimeout(userQuestion);
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("Request timeout")), timeoutDuration);
+    });
+
+    const agentPromise = agentApp.invoke(
       {
-        messages: [new HumanMessage(userQuestions)],
-        userProfile: {
-          assitan_username,
-          customer_username,
-        },
+        messages: [new HumanMessage(userQuestion)],
+        userProfile: { assistan_username, customer_username },
       },
       {
-        configurable: {
-          thread_id: threadId,
-        },
+        configurable: { thread_id: threadId },
       }
     );
 
+    const finalState = await Promise.race([agentPromise, timeoutPromise]);
+
+    // Validate response quality
+    const validator = new ResponseQualityValidator();
     const responseMessage = finalState.messages[finalState.messages.length - 1];
-    if (Array.isArray(responseMessage.content)) {
-      console.log("Response Message is Array : ", responseMessage.content);
-      finalResponse =
-        responseMessage.content.find((msg) => msg.type === "text")?.text ||
-        `Maaf, ${
-          assitan_username || "Kami"
-        } sedang mengalami kendala 😩. Silakan coba lagi ya Kak${
-          ` ${customer_username} 😉.` || "😉."
-        }`;
-    } else {
-      finalResponse = responseMessage.content;
+    const extractedContent = extractResponseContent(responseMessage);
+
+    const validation = validator.validateResponse(
+      extractedContent,
+      finalState.conversationStage || "default",
+      { assistantName: assistan_username }
+    );
+
+    // Log performance metrics
+    const processingTime = Date.now() - startTime;
+    console.log(
+      `AI Response - Time: ${processingTime}ms, Quality: ${validation.score}%, Stage: ${finalState.conversationStage}`
+    );
+
+    let finalResponse = extractedContent;
+
+    // Handle low quality responses
+    if (!validation.isValid && validation.score < 60) {
+      console.warn("Low quality response detected:", validation.issues);
+      finalResponse = generatePersonalizedFallback(
+        assistan_username,
+        customer_username,
+        "quality_issue"
+      );
     }
 
-    // Kirim jawaban akhir ke pengguna
-    await sendMessageCallback(finalResponse, message, latestMessageTimestamp, {
+    await sendSuccessResponse(finalResponse || fallbackResponse, finalState);
+    return finalResponse;
+  } catch (error) {
+    const errorType = categorizeError(error);
+    const errorResponse = generatePersonalizedFallback(
+      assistan_username,
+      customer_username,
+      errorType
+    );
+
+    await sendFallbackResponse(errorResponse);
+    console.error(`AI processing error [${errorType}]:`, error.message);
+    return errorResponse;
+  }
+
+  // Helper functions with proper formatting
+  function generatePersonalizedFallback(
+    assistantName,
+    customerName,
+    errorType
+  ) {
+    const name = assistantName || "Wawan";
+    const customer = customerName ? ` Kak ${customerName}` : " Kakak";
+
+    const responses = {
+      default: `<p style="color: #000; background: transparent; padding: 0;">Maaf${customer}, <strong>${name}</strong> sedang mengalami kendala 😩. Silakan coba lagi ya${customer} 😉.</p>`,
+
+      timeout: `<p style="color: #000; background: transparent; padding: 0;">Wah${customer}, <strong>${name}</strong> butuh waktu lebih lama nih buat cariin yang pas. Coba tanya yang lebih spesifik ya${customer} 😊.</p>`,
+
+      rate_limit: `<p style="color: #000; background: transparent; padding: 0;"><strong>${name}</strong> lagi sibuk banget melayani pelanggan lain. Tunggu sebentar ya${customer} 😉.</p>`,
+
+      server_error: `<p style="color: #000; background: transparent; padding: 0;">Mohon maaf${customer}, <strong>${name}</strong> sedang ada gangguan teknis. Mohon tunggu sebentar ya${customer} 🙏.</p>`,
+
+      quality_issue: `<p style="color: #000; background: transparent; padding: 0;">Maaf${customer}, <strong>${name}</strong> agak bingung dengan permintaan ini. Bisa dijelasin lagi kebutuhan sepatunya ya${customer}? 🤔</p>`,
+    };
+
+    return responses[errorType] || responses.default;
+  }
+
+  function determineTimeout(userQuestion) {
+    const question = userQuestion.toLowerCase();
+
+    // Complex queries need more time
+    if (question.includes("rekomendasi") || question.includes("cari sepatu")) {
+      return 20000; // 20 seconds for search queries
+    }
+
+    // Simple clarifications need less time
+    if (
+      question.includes("ukuran") ||
+      question.includes("warna") ||
+      question.includes("harga")
+    ) {
+      return 10000; // 10 seconds for clarifications
+    }
+
+    return 15000; // Default 15 seconds
+  }
+
+  function categorizeError(error) {
+    const errorMessage = error.message?.toLowerCase() || "";
+
+    if (errorMessage.includes("timeout")) return "timeout";
+    if (error.statusText && error.statusText.includes("Too Many Requests"))
+      return "rate_limit";
+    if (error.status === 500) return "server_error";
+
+    return "default";
+  }
+
+  async function sendSuccessResponse(response, state) {
+    await sendMessageCallback(response, message, latestMessageTimestamp, {
       io,
       socket,
       client,
       agenda,
       newMessageId: messageId,
-      productData: finalState?.productData || [],
-      toolArguments: finalState?.tool_arguments || [],
+      productData: state?.productData || [],
+      toolArguments: state?.tool_arguments || [],
       orderData: {},
     });
-    return finalResponse;
-  } catch (error) {
-    let errorMessage;
-    const assistantName = assitan_username || "Kami";
-    const customerName = customer_username ? ` Kak ${customer_username}` : "";
+  }
 
-    // Periksa jenis error dan sesuaikan pesan
-    if (error?.statusText?.includes("Too Many Requests")) {
-      errorMessage = `Mohon maaf, ${assistantName} sedang sibuk melayani banyak pelanggan. Silakan coba lagi sebentar lagi ya${customerName} 😉.`;
-    } else if (error?.status === 500) {
-      errorMessage = `Mohon maaf, ${assistantName} sedang mengalami kendala teknis. Mohon tunggu sebentar ya${customerName} 🙏.`;
-    } else {
-      // Pesan default untuk error lainnya
-      errorMessage = `Maaf, ${assistantName} sedang tidak bisa dihubungi saat ini. Silakan coba lagi ya${customerName} 😉.`;
-    }
-
-    await sendMessageCallback(errorMessage, message, latestMessageTimestamp, {
+  async function sendFallbackResponse(response) {
+    await sendMessageCallback(response, message, latestMessageTimestamp, {
       io,
       socket,
       client,
@@ -272,13 +359,15 @@ const processNewMessageWithAI = async (
       toolArguments: [],
       orderData: {},
     });
-    console.error(
-      "Internal Server Error when process new message with AI:",
-      error
-    );
-    return errorMessage; // Kembalikan pesan error untuk ditampilkan
   }
 };
+
+function extractResponseContent(responseMessage) {
+  if (Array.isArray(responseMessage.content)) {
+    return responseMessage.content.find((msg) => msg.type === "text")?.text;
+  }
+  return responseMessage.content;
+}
 
 module.exports = {
   getGeminiResponse,

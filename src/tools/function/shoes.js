@@ -13,6 +13,7 @@ const searchShoes = async ({
   minPrice,
   maxPrice,
   material,
+  features,
   brand,
   category,
   variantFilters = {},
@@ -28,6 +29,7 @@ const searchShoes = async ({
     minPrice,
     maxPrice,
     material,
+    features,
     brand,
     category,
     variantFilters,
@@ -37,48 +39,17 @@ const searchShoes = async ({
     relatedOffers,
   });
 
-  let userIntentToEmbed = "";
+  let userIntentToEmbed = `${userIntent}. `;
 
-  if (userIntent) {
-    userIntentToEmbed += `Deskripsi: ${userIntent}. `;
-  }
   if (material) {
-    userIntentToEmbed += `Material: ${material}. `;
+    userIntentToEmbed += `Material: ${material.map((m) => m).join(", ")}. `;
   }
-  if (brand) {
-    userIntentToEmbed += `Brand: ${brand}. `;
-  }
-  if (category) {
-    userIntentToEmbed += `Kategori: ${category.join(", ")}. `;
-  }
-  // Perbaikan untuk menambahkan filter varian
-  if (variantFilters && Object.keys(variantFilters).length > 0) {
-    // Buat array untuk menampung string deskripsi varian
-    const variantDescriptionParts = [];
-
-    // Iterasi setiap atribut varian (misal: "Warna", "Ukuran")
-    for (const [attributeName, attributeValues] of Object.entries(
-      variantFilters
-    )) {
-      if (Array.isArray(attributeValues) && attributeValues.length > 0) {
-        // Gabungkan nama atribut dan nilainya
-        // Contoh: "Warna: hitam"
-        variantDescriptionParts.push(
-          `${attributeName}: ${attributeValues.join(", ")}`
-        );
-      }
-    }
-
-    // Jika ada bagian varian yang berhasil dibuat, tambahkan ke string utama
-    if (variantDescriptionParts.length > 0) {
-      userIntentToEmbed += `Attribut Varian: ${variantDescriptionParts.join(
-        ", "
-      )}.`;
-    }
+  if (features) {
+    userIntentToEmbed += `Fitur: ${features.map((f) => f).join(", ")}. `;
   }
 
   // const userIntentEmbedding = await getEmbedding(userIntent);
-  const userIntentEmbedding = await getQueryVector(userIntent);
+  const userIntentEmbedding = await getQueryVector(userIntentToEmbed);
   console.log("user intent embedd length :", userIntentEmbedding.length);
   if (!userIntentEmbedding) {
     console.error("ERROR: Failed to generate embedding for query.");
