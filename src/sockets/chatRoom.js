@@ -608,7 +608,7 @@ const handleGetNewMessageForBot = async (
   const customer_username = users.find(
     (user) => user.role === "user"
   )?.username;
-  const assitan_username = users.find(
+  const assistan_username = users.find(
     (user) => user.role === "admin"
   )?.username;
 
@@ -685,7 +685,7 @@ const handleGetNewMessageForBot = async (
       socket,
       client,
       agenda,
-      assitan_username,
+      assistan_username,
       customer_username,
       agentApp,
     }

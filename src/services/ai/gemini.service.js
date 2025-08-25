@@ -20,7 +20,7 @@ const langChainModel = new ChatGoogleGenerativeAI({
   model: "gemini-2.5-flash-lite",
   temperature: 0.7, // Reduced for more consistent responses
   maxRetries: 2, // Reduced retries for faster response
-  maxOutputTokens: 1024, // Reduced token limit for cost efficiency
+  maxOutputTokens: 512, // Reduced token limit for cost efficiency
   apiKey: process.env.GEMINI_API_KEY,
 });
 
@@ -110,7 +110,9 @@ const graph = new StateGraph(State)
     });
 
     const response = await modelWithTools.invoke(formattedPrompt);
-    console.log("AI Response:", response);
+    console.log("AI response_metadata", response.response_metadata);
+    console.log("AI usage_metadata", response.usage_metadata);
+    console.log("Jumlah riwayat pesan", messages.length);
 
     // Optimize tool calls with memory
     if (response.tool_calls?.length > 0) {

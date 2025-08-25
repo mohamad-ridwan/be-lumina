@@ -6,40 +6,38 @@ class DynamicPromptManager {
   constructor() {
     // Core persona and style - ALWAYS included
     this.corePersona = `
-**PENTING: Seluruh jawaban Anda, dari kalimat pertama hingga terakhir, HARUS sepenuhnya diwarnai oleh persona '{assistantName}' dan nada bicara yang santai, bersahabat, dan ceria.**
-
 [Persona & Gaya Bahasa]
-Anda adalah "{assistantName}" - asisten sepatu yang bersemangat dan berpengetahuan luas.
-- **Nada Bicara:** Santai, bersahabat, ceria. Gunakan bahasa gaul tapi sopan: "nggak ada," "pasti dong," "pas banget," "bikin lari makin enteng," "mantap banget," "asyik nih," "jagoan banget," "udah pas banget."
-- **Gaya Interaksi:** Mulai dengan sapaan hangat. Gunakan "Tentu saja," "Siap bantu," "Ide bagus!" atau "Wah, asyik banget nih!"
-- **Sapaan:** Wajib sapa dengan 'Kak' + nama atau 'Kakak' jika nama tidak ada.
-- **Emoji:** Gunakan secara alami (👍, ✨, 👟, 🤔, 🏃‍♀️) tapi jangan berlebihan.
-
-[Format Jawaban HTML - WAJIB]
-- Gunakan tag HTML dengan CSS inline: 'color: #000; background: transparent; padding: 0;'
-- Teks tidak prioritas: 'color: #555;'
-- Kata kunci penting: '<strong>'
-- Paragraf pembuka spesifik yang merangkum kriteria pelanggan
-- Tambahkan '<br>' setelah paragraf pembuka
-- List bernomor (<ol>) untuk multiple rekomendasi, paragraf untuk single
-- Setelah list/info produk: tambahkan '<br>'
-- Format setiap rekomendasi: Nama (<strong>), paragraf rekomendasi (<p>), Merek (<p><strong>Merek:</strong>), Harga jika ditanya (<p><strong>Harga:</strong>), Link produk (<a href="{link_url_sepatu}" style="color: #007bff; text-decoration: underline;">Lihat Detail Produk</a>)
-- Akhiri dengan CTA yang spesifik dan relevan
-
-[KRITICAL: DATA INTERNAL ONLY]
-**HANYA gunakan data dari tool_calls. TIDAK BOLEH menggunakan pengetahuan eksternal tentang sepatu, merek, atau produk. Jika tool tidak mengembalikan data, katakan "Mohon maaf, saat ini data produk sedang tidak tersedia. Silakan coba lagi nanti ya Kak."**`;
+Nama kamu "{assistantName}" – asisten sepatu ceria, ramah, dan berpengetahuan.
+- Nada: santai, akrab, ceria, pakai bahasa gaul sopan (“nggak ada”, “mantap banget”, “asyik nih”).
+- Selalu sapa dengan “Kak” + nama (jika ada).
+- Gunakan emoji secara wajar (👟✨👍🤔🏃‍♀️).`;
 
     this.stagePrompts = {
       greeting: `
 [Tugas: Sapaan Awal]
-Sapa pelanggan dengan hangat. Tanyakan kebutuhan sepatu mereka secara umum.`,
+Sapa pelanggan dengan hangat. Tanyakan kebutuhan sepatu mereka secara umum.
+
+[Contoh Output]
+Halo Kak "{customerName}"! 👋✨ Wah, asyik banget nih mampir ke "{assistantName}". Ada yang bisa "{assistantName}" bantu untuk carikan sepatu untuk dipakai aktivitas apa kak?.
+`,
 
       gathering_info: `
 [Tugas: Pengumpulan Informasi]
 Tanyakan aktivitas/kategori sepatu yang dicari. Jika sudah disebutkan, langsung lanjut ke rekomendasi.
-{availableCategories}`,
+{availableCategories}
+
+[Format Jawaban]
+- Selalu balas dalam HTML sederhana:
+  <p style="color:#000;background:transparent;padding:0;">...</p>
+- Gunakan <strong> untuk kata kunci.
+- List rekomendasi gunakan <ol>.
+- Tambahkan <br> untuk spasi antar bagian.
+`,
 
       searching: `
+[KRITICAL: DATA INTERNAL ONLY]
+**HANYA gunakan data dari tool_calls. TIDAK BOLEH menggunakan pengetahuan eksternal tentang sepatu, merek, atau produk. Jika tool tidak mengembalikan data, katakan "Mohon maaf, saat ini data produk sedang tidak tersedia. Silakan coba lagi nanti ya Kak."
+
 [Tugas: Pencarian Produk]
 Gunakan tool searchShoes dengan kriteria yang diberikan pelanggan. WAJIB panggil tool untuk mendapatkan data dari database.
 {availableCategories}
@@ -47,12 +45,33 @@ Gunakan tool searchShoes dengan kriteria yang diberikan pelanggan. WAJIB panggil
 {availableOffers}`,
 
       recommendation: `
-[Tugas: Memberikan Rekomendasi]
-Berikan rekomendasi berdasarkan data dari tool_calls. Ikuti format HTML yang diwajibkan.
-- Paragraf pembuka yang spesifik
-- Format sesuai jumlah rekomendasi (list vs paragraf)
-- Jelaskan mengapa cocok untuk kebutuhan pelanggan
-- Akhiri dengan CTA yang mengundang aksi`,
+      [Tugas]
+- Gunakan hasil dari tool 'searchShoes' (sudah ada di context).
+- Buat rekomendasi dalam format HTML sesuai aturan.
+- Maksimal tampilkan 2 produk relevan.
+
+[Contoh Output dengan data tool]
+<p style="color:#000;background:transparent;padding:0;">
+Siap bantu Kak "{customerName}"! 👟✨ Nih ada beberapa pilihan sepatu lari kece di bawah 500 ribu:
+</p><br>
+
+<ol>
+<li>
+<strong>Puma Ventilate Runner</strong>
+<p style="color:#555;">Sepatu lari breathable banget dengan midsole empuk. Pas buat lari santai tiap hari.</p>
+<p><strong>Merek:</strong> Puma</p>
+<a href="{link_url_sepatu}" style="color:#007bff;text-decoration:underline;">Lihat Detail Produk</a>
+</li>
+
+<li>
+<strong>Adidas Lite Racer</strong>
+<p style="color:#555;">Ringan dan stylish, bikin lari jadi makin enteng dan nyaman.</p>
+<p><strong>Merek:</strong> Adidas</p>
+<a href="{link_url_sepatu}" style="color:#007bff;text-decoration:underline;">Lihat Detail Produk</a>
+</li>
+</ol><br>
+
+<p style="color:#000;">Kalau ada kriteria lain, kasih tau ya Kak, biar "{assistantName}" cariin lagi! 👍</p>`,
 
       clarification: `
 [Tugas: Klarifikasi Lanjutan]
@@ -78,15 +97,15 @@ Pelanggan meminta opsi lebih murah/sesuai budget. WAJIB panggil tool dengan krit
 
     // Add stage-specific instructions
     const stagePrompt = this.stagePrompts[stage] || this.stagePrompts.greeting;
-    prompt += "\n\n" + stagePrompt;
+    prompt += "\n" + stagePrompt;
 
     // Add contextual data only when needed for specific stages
     if (this.shouldIncludeContext(stage)) {
-      prompt += "\n\n" + this.buildContextualData(context);
+      prompt += "\n" + this.buildContextualData(context);
     }
 
     // Add conversation rules based on stage
-    prompt += "\n\n" + this.getStageSpecificRules(stage, context);
+    prompt += "\n" + this.getStageSpecificRules(stage, context);
 
     return this.replacePlaceholders(prompt, context);
   }
@@ -100,24 +119,19 @@ Pelanggan meminta opsi lebih murah/sesuai budget. WAJIB panggil tool dengan krit
 
     if (context.categories && context.categories.length > 0) {
       contextData += `\nKategori Tersedia:\n${context.categories
-        .map(
-          (cat) =>
-            `- ${cat.name}: ${cat.description}${
-              cat.isPopular ? " (POPULER)" : ""
-            }`
-        )
+        .map((cat) => `- ${cat.name}${cat.isPopular ? " (POPULER)" : ""}`)
         .join("\n")}`;
     }
 
     if (context.brands && context.brands.length > 0) {
       contextData += `\n\nMerek Tersedia:\n${context.brands
-        .map((brand) => `- ${brand.name}: ${brand.description}`)
+        .map((brand) => `- ${brand.name}`)
         .join("\n")}`;
     }
 
     if (context.offers && context.offers.length > 0) {
       contextData += `\n\nPenawaran Aktif:\n${context.offers
-        .map((offer) => `- ${offer.title}: ${offer.description}`)
+        .map((offer) => `- ${offer.title}`)
         .join("\n")}`;
     }
 
@@ -126,12 +140,13 @@ Pelanggan meminta opsi lebih murah/sesuai budget. WAJIB panggil tool dengan krit
 
   getStageSpecificRules(stage, context) {
     const rules = {
-      greeting: `
-[Aturan Khusus]
-- Mulai dengan sapaan hangat menggunakan nama pelanggan
-- Tanyakan kebutuhan secara umum: "Ada yang bisa ${
-        context.assistantName || "Wawan"
-      } bantu untuk cari sepatu hari ini, ${context.customerName || "Kak"}?"`,
+      //       greeting: `
+      // [Aturan Khusus]
+      // - Mulai dengan sapaan hangat menggunakan nama pelanggan
+      // - Tanyakan kebutuhan secara umum: "Ada yang bisa ${
+      //         context.assistantName || "Wawan"
+      //       } bantu untuk cari sepatu hari ini, ${context.customerName || "Kak"}?"`,
+      greeting: ``,
 
       gathering_info: `
 [Aturan Khusus]
@@ -502,16 +517,11 @@ class OptimizedInstructionGenerator {
   buildDataEnforcementRules(stage, messages) {
     const hasExistingProducts = this.hasProductsInHistory(messages);
 
-    let rules = `
-[CRITICAL: KONTROL DATA INTERNAL]
-- HANYA gunakan data sepatu dari tool searchShoes yang dipanggil dalam percakapan ini
-- DILARANG menggunakan pengetahuan umum tentang sepatu/merek dari training data
-- Jika tidak ada data dari tool, katakan: "Mohon maaf, saat ini data produk sedang tidak tersedia. Silakan coba lagi nanti ya Kak."
-- WAJIB panggil tool searchShoes untuk mendapatkan data produk dari database
-- Link produk HARUS menggunakan field 'link_url_sepatu' exact dari database tanpa modifikasi`;
+    let rules = ``;
 
     if (hasExistingProducts) {
       rules += `
+      [CRITICAL: KONTROL DATA INTERNAL]
 - Prioritaskan data produk yang sudah ada dalam riwayat percakapan untuk pertanyaan klarifikasi
 - Panggil tool baru hanya jika butuh kriteria pencarian yang berbeda`;
     }
@@ -520,18 +530,33 @@ class OptimizedInstructionGenerator {
       case "searching":
       case "price_sensitive":
         rules += `
+        ${
+          !rules.includes("[CRITICAL: KONTROL DATA INTERNAL]")
+            ? "[CRITICAL: KONTROL DATA INTERNAL]"
+            : ""
+        }
 - WAJIB panggil tool searchShoes dengan kriteria yang diberikan pelanggan
 - Tunggu hasil tool sebelum memberikan rekomendasi`;
         break;
 
       case "recommendation":
         rules += `
+        ${
+          !rules.includes("[CRITICAL: KONTROL DATA INTERNAL]")
+            ? "[CRITICAL: KONTROL DATA INTERNAL]"
+            : ""
+        }
 - Gunakan HANYA data dari tool_calls terakhir yang berhasil
 - Format sesuai template HTML yang diwajibkan`;
         break;
 
       case "clarification":
         rules += `
+        ${
+          !rules.includes("[CRITICAL: KONTROL DATA INTERNAL]")
+            ? "[CRITICAL: KONTROL DATA INTERNAL]"
+            : ""
+        }
 - Cek riwayat percakapan dulu untuk data produk yang sudah direkomendasikan
 - Jika data tidak ada dalam riwayat, panggil tool dengan kriteria baru`;
         break;
