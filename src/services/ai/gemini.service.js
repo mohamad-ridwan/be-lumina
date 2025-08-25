@@ -9,9 +9,6 @@ const { ToolNode } = require("@langchain/langgraph/prebuilt");
 const { langChainTools, toolsByName } = require("../../tools/langChainTools");
 const { generateRandomId } = require("../../helpers/generateRandomId");
 const {
-  conversationalFlowInstruction,
-} = require("../../tools/instructions/shoe");
-const {
   OptimizedInstructionGenerator,
   ResponseQualityValidator,
 } = require("../../tools/classes/dynamic-prompt");
@@ -61,13 +58,11 @@ const instructionGenerator = new OptimizedInstructionGenerator();
 const State = Annotation.Root({
   messages: Annotation({
     reducer: (x, y) => {
-      return x.concat(y);
+      const updatedMessages = x.concat(y);
+      const limitedMessages = updatedMessages.slice(-5);
+      return limitedMessages;
     },
     default: () => [],
-  }),
-  collectedProductIds: Annotation({
-    reducer: (x, y) => new Set([...x, ...y]),
-    default: () => new Set(),
   }),
   userProfile: Annotation({
     reducer: (x) => x,
@@ -84,7 +79,6 @@ const graph = new StateGraph(State)
   .addNode("agent", async (state) => {
     const { messages, userProfile } = state;
 
-    // Generate dynamic instruction based on conversation stage
     const instruction = await instructionGenerator.generateInstruction(
       userProfile?.assistan_username,
       userProfile?.customer_username,
@@ -92,31 +86,31 @@ const graph = new StateGraph(State)
       userProfile
     );
 
-    console.log("INSTRUCTION :", instruction);
+    console.log("INSTRUCTION:", instruction);
 
-    // Simplified prompt template
+    // Minimal prompt template
     const prompt = ChatPromptTemplate.fromMessages([
-      ["system", `${instruction}\n\nCurrent time: {time}`],
+      ["system", instruction],
       new MessagesPlaceholder("messages"),
     ]);
 
     const formattedPrompt = await prompt.formatMessages({
+      messages: state.messages,
       time: new Date().toISOString(),
       link_url_sepatu: "",
       availableCategories: "",
       availableBrands: "",
       availableOffers: "",
-      messages: state.messages,
     });
 
     const response = await modelWithTools.invoke(formattedPrompt);
-    console.log("AI response_metadata", response.response_metadata);
-    console.log("AI usage_metadata", response.usage_metadata);
-    console.log("Jumlah riwayat pesan", messages.length);
 
-    // Optimize tool calls with memory
+    // Log usage metrics
+    console.log("AI usage:", response.usage_metadata);
+    console.log("Messages count:", messages.length);
+
     if (response.tool_calls?.length > 0) {
-      await optimizeToolCalls(response.tool_calls, messages);
+      optimizeToolCalls(response.tool_calls, messages);
     }
 
     return {
@@ -131,28 +125,16 @@ const graph = new StateGraph(State)
   .addEdge("__start__", "agent")
   .addConditionalEdges("agent", (state) => {
     const lastMessage = state.messages[state.messages.length - 1];
-
-    // Smart routing based on conversation stage
-    if (lastMessage.tool_calls?.length > 0) {
-      return "tools";
-    }
-
-    return END;
+    return lastMessage.tool_calls?.length > 0 ? "tools" : END;
   })
   .addEdge("tools", "agent");
 
-// Enhanced tool call optimization with memory management
 function optimizeToolCalls(toolCalls, messages) {
   const existingProducts = extractExistingProducts(messages);
 
   for (const toolCall of toolCalls) {
     if (toolCall.name === "searchShoes") {
-      // Add conversation memory to tool calls
-      if (
-        existingProducts.length > 0 &&
-        toolCall.args.shoeNames &&
-        toolCall.args.shoeNames.length > 0
-      ) {
+      if (existingProducts.length > 0 && toolCall.args.shoeNames?.length > 0) {
         const requestedNames = toolCall.args.shoeNames.map((name) =>
           name.toLowerCase()
         );
@@ -162,7 +144,6 @@ function optimizeToolCalls(toolCalls, messages) {
 
         if (memoryData.length > 0) {
           toolCall.args.data_memory = memoryData;
-          // Remove shoes already in memory from new search to avoid duplicates
           toolCall.args.shoeNames = toolCall.args.shoeNames.filter(
             (name) =>
               !memoryData.some(
@@ -172,15 +153,13 @@ function optimizeToolCalls(toolCalls, messages) {
         }
       }
 
-      // Add metadata for better tool usage tracking
       toolCall.args._context = {
-        conversationStage: "searching",
+        stage: "searching",
         timestamp: Date.now(),
         messageCount: messages.length,
       };
     }
   }
-
   return toolCalls;
 }
 
@@ -197,9 +176,7 @@ const processNewMessageWithAI = async (
 ) => {
   const latestMessageTimestamp = Date.now();
   const messageId = generateRandomId(15);
-
-  // Pre-generate contextual fallback response with proper persona
-  const fallbackResponse = generatePersonalizedFallback(
+  const fallbackResponse = generateFallback(
     assistan_username,
     customer_username,
     "default"
@@ -207,38 +184,31 @@ const processNewMessageWithAI = async (
 
   try {
     const threadId = message?.chatRoomId;
-    const userQuestion = message.latestMessage
-      ? message.latestMessage.textMessage
-      : "";
+    const userQuestion = message.latestMessage?.textMessage || "";
 
     if (!threadId) {
-      console.error("Chat room ID is missing");
+      console.error("Missing chat room ID");
       await sendFallbackResponse(fallbackResponse);
       return fallbackResponse;
     }
 
-    // Add performance monitoring
     const startTime = Date.now();
-
-    // Optimized timeout with stage-specific durations
-    const timeoutDuration = determineTimeout(userQuestion);
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error("Request timeout")), timeoutDuration);
-    });
+    const timeout = determineTimeout(userQuestion);
 
     const agentPromise = agentApp.invoke(
       {
         messages: [new HumanMessage(userQuestion)],
         userProfile: { assistan_username, customer_username },
       },
-      {
-        configurable: { thread_id: threadId },
-      }
+      { configurable: { thread_id: threadId } }
     );
+
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("Request timeout")), timeout);
+    });
 
     const finalState = await Promise.race([agentPromise, timeoutPromise]);
 
-    // Validate response quality
     const validator = new ResponseQualityValidator();
     const responseMessage = finalState.messages[finalState.messages.length - 1];
     const extractedContent = extractResponseContent(responseMessage);
@@ -249,7 +219,6 @@ const processNewMessageWithAI = async (
       { assistantName: assistan_username }
     );
 
-    // Log performance metrics
     const processingTime = Date.now() - startTime;
     console.log(
       `AI Response - Time: ${processingTime}ms, Quality: ${validation.score}%, Stage: ${finalState.conversationStage}`
@@ -257,10 +226,9 @@ const processNewMessageWithAI = async (
 
     let finalResponse = extractedContent;
 
-    // Handle low quality responses
     if (!validation.isValid && validation.score < 60) {
-      console.warn("Low quality response detected:", validation.issues);
-      finalResponse = generatePersonalizedFallback(
+      console.warn("Low quality response:", validation.issues);
+      finalResponse = generateFallback(
         assistan_username,
         customer_username,
         "quality_issue"
@@ -271,36 +239,27 @@ const processNewMessageWithAI = async (
     return finalResponse;
   } catch (error) {
     const errorType = categorizeError(error);
-    const errorResponse = generatePersonalizedFallback(
+    const errorResponse = generateFallback(
       assistan_username,
       customer_username,
       errorType
     );
 
     await sendFallbackResponse(errorResponse);
-    console.error(`AI processing error [${errorType}]:`, error.message);
+    console.error(`AI error [${errorType}]:`, error.message);
     return errorResponse;
   }
 
-  // Helper functions with proper formatting
-  function generatePersonalizedFallback(
-    assistantName,
-    customerName,
-    errorType
-  ) {
+  function generateFallback(assistantName, customerName, errorType) {
     const name = assistantName || "Wawan";
     const customer = customerName ? ` Kak ${customerName}` : " Kakak";
 
     const responses = {
-      default: `<p style="color: #000; background: transparent; padding: 0;">Maaf${customer}, <strong>${name}</strong> sedang mengalami kendala 😩. Silakan coba lagi ya${customer} 😉.</p>`,
-
-      timeout: `<p style="color: #000; background: transparent; padding: 0;">Wah${customer}, <strong>${name}</strong> butuh waktu lebih lama nih buat cariin yang pas. Coba tanya yang lebih spesifik ya${customer} 😊.</p>`,
-
-      rate_limit: `<p style="color: #000; background: transparent; padding: 0;"><strong>${name}</strong> lagi sibuk banget melayani pelanggan lain. Tunggu sebentar ya${customer} 😉.</p>`,
-
-      server_error: `<p style="color: #000; background: transparent; padding: 0;">Mohon maaf${customer}, <strong>${name}</strong> sedang ada gangguan teknis. Mohon tunggu sebentar ya${customer} 🙏.</p>`,
-
-      quality_issue: `<p style="color: #000; background: transparent; padding: 0;">Maaf${customer}, <strong>${name}</strong> agak bingung dengan permintaan ini. Bisa dijelasin lagi kebutuhan sepatunya ya${customer}? 🤔</p>`,
+      default: `<p style="color:#000;background:transparent;padding:0;">Maaf${customer}, <strong>${name}</strong> sedang ada kendala 😩. Coba lagi ya${customer} 😉.</p>`,
+      timeout: `<p style="color:#000;background:transparent;padding:0;">Wah${customer}, <strong>${name}</strong> butuh waktu lebih lama. Coba tanya lebih spesifik ya${customer} 😊.</p>`,
+      rate_limit: `<p style="color:#000;background:transparent;padding:0;"><strong>${name}</strong> lagi sibuk melayani. Tunggu sebentar ya${customer} 😉.</p>`,
+      server_error: `<p style="color:#000;background:transparent;padding:0;">Maaf${customer}, <strong>${name}</strong> ada gangguan teknis. Tunggu ya${customer} 🙏.</p>`,
+      quality_issue: `<p style="color:#000;background:transparent;padding:0;">Maaf${customer}, <strong>${name}</strong> bingung. Jelaskan kebutuhan sepatunya lagi ya${customer}? 🤔</p>`,
     };
 
     return responses[errorType] || responses.default;
@@ -309,29 +268,26 @@ const processNewMessageWithAI = async (
   function determineTimeout(userQuestion) {
     const question = userQuestion.toLowerCase();
 
-    // Complex queries need more time
     if (question.includes("rekomendasi") || question.includes("cari sepatu")) {
-      return 20000; // 20 seconds for search queries
+      return 20000;
     }
 
-    // Simple clarifications need less time
     if (
       question.includes("ukuran") ||
       question.includes("warna") ||
       question.includes("harga")
     ) {
-      return 10000; // 10 seconds for clarifications
+      return 10000;
     }
 
-    return 15000; // Default 15 seconds
+    return 15000;
   }
 
   function categorizeError(error) {
     const errorMessage = error.message?.toLowerCase() || "";
 
     if (errorMessage.includes("timeout")) return "timeout";
-    if (error.statusText && error.statusText.includes("Too Many Requests"))
-      return "rate_limit";
+    if (error.statusText?.includes("Too Many Requests")) return "rate_limit";
     if (error.status === 500) return "server_error";
 
     return "default";
