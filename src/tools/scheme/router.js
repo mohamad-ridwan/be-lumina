@@ -2,15 +2,9 @@ const { z } = require("zod");
 
 const routeConversationSchema = z.object({
   tool_name: z
-    .enum(["searchShoes", "clarification", "endConversation"])
-    .describe(
-      "Nama tool yang harus dijalankan. Pilih 'searchShoes' jika pengguna ingin mencari sepatu. Pilih 'clarification' jika pertanyaan membutuhkan klarifikasi lebih lanjut. Pilih 'endConversation' jika percakapan sudah selesai dan tidak perlu alat lain."
-    ),
-  description: z
-    .string()
-    .describe(
-      "Deskripsi singkat tentang niat pengguna. Misal: 'pengguna ingin mencari sepatu lari', 'pengguna menanyakan ketersediaan produk', 'pengguna mengucapkan terima kasih'."
-    ),
+    .enum(["searchShoes"])
+    .describe("Pilih tool yang paling sesuai dengan niat pengguna."),
+  description: z.string().describe("Satu kalimat ringkasan niat pengguna."),
 });
 
 const clarificationSchema = z.object({
@@ -33,7 +27,7 @@ const routeConversation = {
   name: "routeConversation",
   schema: routeConversationSchema,
   description:
-    "Tool ini digunakan untuk menentukan arah percakapan. LLM harus memanggil tool ini terlebih dahulu sebelum mengambil tindakan lain. Tools ini akan menerima input berupa niat pengguna dan mengembalikan nama tool yang harus dijalankan. Setelah tool ini dipanggil, LLM akan mengembalikan output berupa tool call dan LangGraph akan melanjutkan ke node selanjutnya.",
+    "Digunakan untuk mengarahkan percakapan. Panggil ini untuk menentukan niat pengguna sebelum melakukan tindakan lain.",
 };
 
 const clarificationTool = {

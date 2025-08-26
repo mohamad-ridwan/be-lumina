@@ -123,7 +123,7 @@ const graph = new StateGraph(State)
     ]);
 
     const routerMessages = await routerPrompt.formatMessages({
-      messages: [lastMessage],
+      messages: messages,
       time: new Date().toISOString(),
       link_url_sepatu: "",
       availableCategories: "",
@@ -176,7 +176,7 @@ const graph = new StateGraph(State)
         new MessagesPlaceholder("messages"),
       ]);
       const formattedPrompt = await prompt.formatMessages({
-        messages: lastMessages,
+        messages: messages,
         time: new Date().toISOString(),
         link_url_sepatu: "",
         availableCategories: "",
@@ -200,7 +200,7 @@ const graph = new StateGraph(State)
         new MessagesPlaceholder("messages"),
       ]);
       const formattedPrompt = await prompt.formatMessages({
-        messages: lastMessages,
+        messages: messages,
         time: new Date().toISOString(),
         link_url_sepatu: "",
         availableCategories: "",

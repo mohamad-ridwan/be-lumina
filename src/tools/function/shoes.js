@@ -344,6 +344,7 @@ const searchShoes = async ({
         price: 1,
         variants: 1,
         stock: 1,
+        specs: 1,
       },
     },
     {
@@ -358,6 +359,7 @@ const searchShoes = async ({
         variants: { $first: "$variants" },
         stock: { $first: "$stock" },
         slug: { $first: "$slug" },
+        specs: { $first: "$specs" },
       },
     },
     {
@@ -391,8 +393,6 @@ const searchShoes = async ({
         // Tambahkan detail varian lainnya
         if (variant.price) variantObject.price = variant.price;
         if (variant.stock) variantObject.stock = variant.stock;
-        if (variant.sku) variantObject.sku = variant.sku;
-        if (variant.imageUrl) variantObject.imageUrl = variant.imageUrl;
         formattedVariants.push(variantObject);
       }
     }
@@ -402,6 +402,7 @@ const searchShoes = async ({
       brand: shoe.brand,
       category: shoe.category,
       description: compactedDescription,
+      specs: shoe.specs,
       price: shoe.price,
       variants: formattedVariants,
       slug_sepatu: shoe.slug,
@@ -420,19 +421,18 @@ const searchShoes = async ({
     };
   }
 
-  console.log(
-    `--- END searchShoes. Found ${searchResults.length} results. ---`,
-    userIntent,
-    searchResults
-  );
-
-  //   return {
-  //     shoes: formattedOutputForGemini,
-  //     productsForFrontend: [],
-  //   };
-
   const formattedOutputForGemini = searchResults
     .map((shoe) => {
+      // Ubah array `specs` menjadi format string yang rapi
+      const essentialSpecs = shoe.specs.filter((spec) =>
+        ["bahan", "spesifikasi", "fitur"].includes(spec.type.toLowerCase())
+      );
+
+      const formattedSpecs = essentialSpecs
+        .map((spec) => `${spec.type}: ${spec.text}`)
+        .join(" | ");
+
+      // Format varian seperti sebelumnya
       const formattedVariants = shoe.variants
         .map((v) =>
           Object.entries(v)
@@ -441,21 +441,27 @@ const searchShoes = async ({
         )
         .join("; ");
 
-      return `
-- Nama: ${shoe.name}
-- Merek: ${shoe.brand}
-- Kategori: ${shoe.category.join(", ")}
-- Harga: Rp ${shoe.price.toLocaleString("id-ID")}
-- Deskripsi: ${shoe.description}
-- Link Url Sepatu: http://localhost:3008/product/${shoe.slug_sepatu}
-- Varian Tersedia: ${formattedVariants}
+      return `Name: ${shoe.name} | Brand: ${
+        shoe.brand
+      } | Category: ${shoe.category.join(", ")}${
+        shoe.variants.length === 0
+          ? ` | Price: Rp ${shoe.price.toLocaleString("id-ID")}`
+          : ""
+      }${formattedSpecs} | shoe url: http://localhost:3008/product/${
+        shoe.slug_sepatu
+      }
+${shoe.variants.length > 0 ? ` | Variants: ${formattedVariants}` : ""}
 `;
     })
-    .join("\n---\n"); // Gabungkan setiap item dengan pemisah yang jelas
+    .join("\n---\n");
 
-  const content = `Hasil pencarian sepatu:
-  
-${formattedOutputForGemini}`;
+  const content = `Jawab pertanyaan jika relevan. Sepatu ditemukan: ${formattedOutputForGemini}`;
+
+  console.log(
+    `--- END searchShoes. Found ${searchResults.length} results. ---`,
+    userIntent,
+    formattedOutputForGemini
+  );
 
   return {
     shoes: searchResults,
