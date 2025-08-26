@@ -23,7 +23,7 @@ const clarificationTools = tool(clarificationFunc, clarificationTool);
 const endConversationTools = tool(endConversationFunc, endConversationTool);
 // const extractProductInfoTool = tool(extractProductInfo, productInfoTool);
 
-const langChainTools = [searchShoesTool, rephraseQueryTool];
+const langChainTools = [searchShoesTool];
 const routerTools = [routeConversationTool];
 
 const toolsByName = {

@@ -6,8 +6,9 @@ const embeddings = new JinaEmbeddings({
 });
 
 const toolsEmbedding = new JinaEmbeddings({
-  apiKey: process.env.JINA_API_KEY_API_KEY,
-  model: "jina-embeddings-v2-small-en",
+  apiKey: process.env.JINA_TOOLS_API_KEY,
+  model: "jina-clip-v2",
+  dimensions: 256,
 });
 
 const getQueryVector = async (query, model = "product") => {

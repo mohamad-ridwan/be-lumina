@@ -289,28 +289,6 @@ const searchShoes = async ({
         postVectorSearchFilters.$and.push(
           buildVariantFilterClause(attributeName, attributeValues)
         );
-        // 2. Buat objek kriteria untuk setiap attributeName
-        // const regexList = attributeValues.map(
-        //   (val) => new RegExp(`\\b${val}\\b`, "i")
-        // );
-
-        // postVectorSearchFilters.$and.push({
-        //   $or: [
-        //     // Cek di variants.optionValues
-        //     {
-        //       "variants.optionValues": {
-        //         $elemMatch: {
-        //           key: attributeName,
-        //           value: { $in: regexList },
-        //         },
-        //       },
-        //     },
-        //     // Cek di name
-        //     {
-        //       name: { $in: regexList },
-        //     },
-        //   ],
-        // });
       }
     }
   }
@@ -332,36 +310,6 @@ const searchShoes = async ({
           $match: postVectorSearchFilters,
         }
       : null,
-    // {
-    //   $match: {
-    //     // $and: [
-    //     //   {
-    //     //     "variants.optionValues": {
-    //     //       $elemMatch: {
-    //     //         key: "Ukuran",
-    //     //         value: {
-    //     //           // $in: attributeValues.map((val) => new RegExp(val, "i")),
-    //     //           $in: ["39", "40"].map((val) => new RegExp(val, "i")),
-    //     //         },
-    //     //       },
-    //     //     },
-    //     //   },
-    //     //   {
-    //     //     "variants.optionValues": {
-    //     //       $elemMatch: {
-    //     //         key: "Warna",
-    //     //         value: {
-    //     //           // $in: attributeValues.map((val) => new RegExp(val, "i")),
-    //     //           $in: ["PUTIH/abu-abu", "HITAM", "UNGU"].map(
-    //     //             (val) => new RegExp(val, "i")
-    //     //           ),
-    //     //         },
-    //     //       },
-    //     //     },
-    //     //   },
-    //     // ],
-    //   },
-    // },
     {
       $lookup: {
         from: "brands",
@@ -419,47 +367,6 @@ const searchShoes = async ({
       $limit: limit,
     },
   ].filter(Boolean); // Hapus stage null jika tidak ada filter lanjutan
-
-  // console.log(
-  //   "Final vectorSearchFilterObject:",
-  //   JSON.stringify(vectorSearchFilterObject, null, 2)
-  // );
-  // console.log(
-  //   "POST VECTOR : ",
-  //   JSON.stringify(postVectorSearchFilters, null, 2)
-  // );
-
-  // const testShoe = await Shoe.find({
-  //   $and: [
-  //     {
-  //       category: {
-  //         $eq: "686173dc094fec4a4b64e516",
-  //       },
-  //     },
-  //     {
-  //       "variants.optionValues": {
-  //         $elemMatch: {
-  //           key: "Warna",
-  //           value: {
-  //             $in: ["Hitam"].map((val) => new RegExp(val, "i")),
-  //           },
-  //         },
-  //       },
-  //     },
-  //     {
-  //       "variants.optionValues": {
-  //         $elemMatch: {
-  //           key: "Ukuran",
-  //           value: {
-  //             $in: ["42"].map((val) => new RegExp(val, "i")),
-  //           },
-  //         },
-  //       },
-  //     },
-  //   ],
-  // });
-
-  // console.log(`TEST SHOE ${testShoe.length} :`);
 
   const shoes = await Shoe.aggregate(pipeline).exec();
   console.log(`GET ${shoes.length} SHOES : `);

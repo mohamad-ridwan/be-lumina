@@ -21,7 +21,7 @@ const langChainModel = new ChatGoogleGenerativeAI({
   model: "gemini-2.5-flash-lite",
   temperature: 0.7, // Reduced for more consistent responses
   maxRetries: 2, // Reduced retries for faster response
-  maxOutputTokens: 512, // Reduced token limit for cost efficiency
+  maxOutputTokens: 128, // Reduced token limit for cost efficiency
   apiKey: process.env.GEMINI_API_KEY,
 });
 const routerModel = new ChatGoogleGenerativeAI({
@@ -32,10 +32,10 @@ const routerModel = new ChatGoogleGenerativeAI({
   apiKey: process.env.GEMINI_API_KEY,
 });
 const directResponseModel = new ChatGoogleGenerativeAI({
-  model: "gemini-2.5-flash-lite", // Bisa pakai model yang sama, tapi tanpa tools
-  temperature: 0.7,
-  maxRetries: 2,
-  maxOutputTokens: 512,
+  model: "gemini-2.0-flash-lite", // Bisa pakai model yang sama, tapi tanpa tools
+  temperature: 0,
+  maxRetries: 1,
+  maxOutputTokens: 128,
   apiKey: process.env.GEMINI_API_KEY,
 });
 
@@ -70,8 +70,7 @@ const getGeminiResponse = async (prompt) => {
 
 const mainModelWithTools = langChainModel.bindTools(langChainTools);
 const routerModelWithTools = routerModel.bindTools(routerTools);
-const mainToolNode = new ToolNode(langChainTools);
-const routerToolNode = new ToolNode(routerTools);
+const routerToolNode = new ToolNode([...routerTools, ...langChainTools]);
 const instructionGenerator = new OptimizedInstructionGenerator();
 
 // Definisikan tipe state untuk LangGraph
@@ -97,99 +96,124 @@ const State = Annotation.Root({
 // Optimized Graph with smarter routing
 const graph = new StateGraph(State)
   .addNode("routerAgent", async (state) => {
-    const { messages } = state;
+    const { messages, userProfile } = state;
     const lastMessage = messages[messages.length - 1];
+
+    const instruction = await instructionGenerator.generateInstruction(
+      userProfile?.assistan_username,
+      userProfile?.customer_username,
+      messages,
+      userProfile
+    );
 
     const routerPrompt = ChatPromptTemplate.fromMessages([
       [
         "system",
-        "Anda adalah router percakapan. Tentukan niat pengguna dan kembalikan nama tool yang harus dijalankan.",
+        `Anda adalah asisten AI yang bertugas sebagai router percakapan untuk toko sepatu.
+        
+        Tugas Anda adalah memproses pesan pengguna dan melakukan salah satu dari dua tindakan berikut:
+        
+        1.  **Jika niat pengguna adalah untuk mencari atau menemukan sepatu** (misalnya, mencari berdasarkan merek, warna, harga, atau jenis), panggil tool **'searchShoes'**.
+        2.  **Jika niat pengguna adalah hal lain**, seperti menanyakan tentang ketersediaan produk umum, menanyakan tentang pengiriman, mengucapkan salam, terima kasih, atau mengakhiri percakapan, **jangan panggil tool apa pun**. Cukup berikan jawaban langsung dalam bentuk teks.
+        
+        Berikut adalah konteks percakapan:
+        ${instruction}`,
       ],
       new MessagesPlaceholder("messages"),
     ]);
 
     const routerMessages = await routerPrompt.formatMessages({
-      messages: [lastMessage], // Hanya kirim pesan terakhir untuk efisiensi
+      messages: [lastMessage],
+      time: new Date().toISOString(),
+      link_url_sepatu: "",
+      availableCategories: "",
+      availableBrands: "",
+      availableOffers: "",
     });
 
     const response = await routerModelWithTools.invoke(routerMessages);
+    console.log(
+      "ROUTER RESPONSE : ",
+      response.usage_metadata,
+      response.tool_calls
+    );
     return { messages: [response] };
   })
   .addNode("agentFinalResponse", async (state) => {
     const { messages, userProfile } = state;
 
-    const lastToolMessages = state.messages.filter((msg) => msg.tool_call_id);
+    const lastToolMessage = [...messages]
+      .reverse()
+      .find((msg) => msg.tool_call_id);
+
     // hasil tool_calls dari router agent
-    // embed tool messages argumen
-
-    // cari tool dari database (menggunakan atlas search vector store)
-    // lalu berikan prompt engineering ke llm model
-
-    const instruction = await instructionGenerator.generateInstruction(
-      userProfile?.assistan_username,
-      userProfile?.customer_username,
-      messages,
-      userProfile
-    );
-
-    const prompt = ChatPromptTemplate.fromMessages([
-      ["system", instruction],
-      new MessagesPlaceholder("messages"),
-    ]);
-
-    const formattedPrompt = await prompt.formatMessages({
-      messages: state.messages,
-      time: new Date().toISOString(),
-      link_url_sepatu: "",
-      availableCategories: "",
-      availableBrands: "",
-      availableOffers: "",
-    });
-
-    // Panggil model TANPA tools
-    const response = await directResponseModel.invoke(formattedPrompt);
-    console.log("HISTORY : ", messages);
-    console.log("AI WITHOUT TOOLS :", response);
-
-    return {
-      messages: [response],
-      conversationStage: instructionGenerator.stateManager.determineStage(
-        [...messages, response],
-        userProfile
-      ),
-    };
-  })
-  .addNode("agentWithTools", async (state) => {
-    const { messages, userProfile } = state;
-
-    const instruction = await instructionGenerator.generateInstruction(
-      userProfile?.assistan_username,
-      userProfile?.customer_username,
-      messages,
-      userProfile
-    );
-
-    const prompt = ChatPromptTemplate.fromMessages([
-      ["system", instruction],
-      new MessagesPlaceholder("messages"),
-    ]);
-
-    const formattedPrompt = await prompt.formatMessages({
-      messages: state.messages,
-      time: new Date().toISOString(),
-      link_url_sepatu: "",
-      availableCategories: "",
-      availableBrands: "",
-      availableOffers: "",
-    });
-
-    // Panggil model DENGAN tools
-    const response = await mainModelWithTools.invoke(formattedPrompt);
-    console.log("AI WITH TOOLS :", response.usage_metadata);
-
-    if (response.tool_calls?.length > 0) {
-      optimizeToolCalls(response.tool_calls, messages);
+    let toolContent;
+    if (lastToolMessage) {
+      try {
+        toolContent = JSON.parse(lastToolMessage.content);
+        if (!toolContent.shoes) {
+          toolContent = JSON.parse(toolContent.content);
+        }
+      } catch (error) {
+        console.error("Failed to parse JSON from ToolMessage:", error);
+      }
     }
+    let response;
+
+    if (toolContent?.decision === "searchShoes") {
+      const lastMessages = messages.slice(-4);
+      // --- Cabang searchShoes: Panggil model DENGAN tools ---
+
+      // Dapatkan instruksi dan prompt
+      const instruction = await instructionGenerator.generateInstruction(
+        userProfile?.assistan_username,
+        userProfile?.customer_username,
+        messages,
+        userProfile
+      );
+      const prompt = ChatPromptTemplate.fromMessages([
+        ["system", instruction],
+        new MessagesPlaceholder("messages"),
+      ]);
+      const formattedPrompt = await prompt.formatMessages({
+        messages: lastMessages,
+        time: new Date().toISOString(),
+        link_url_sepatu: "",
+        availableCategories: "",
+        availableBrands: "",
+        availableOffers: "",
+      });
+
+      // Panggil model yang sudah di-bind dengan mainTools
+      // Pastikan Anda memiliki modelWithTools yang di-bind dengan mainTools
+      response = await mainModelWithTools.invoke(formattedPrompt);
+    } else {
+      const lastMessages = messages.slice(-2);
+      const instruction = await instructionGenerator.generateInstruction(
+        userProfile?.assistan_username,
+        userProfile?.customer_username,
+        messages,
+        userProfile
+      );
+      const prompt = ChatPromptTemplate.fromMessages([
+        ["system", instruction],
+        new MessagesPlaceholder("messages"),
+      ]);
+      const formattedPrompt = await prompt.formatMessages({
+        messages: lastMessages,
+        time: new Date().toISOString(),
+        link_url_sepatu: "",
+        availableCategories: "",
+        availableBrands: "",
+        availableOffers: "",
+      });
+
+      // Panggil model TANPA tools
+      response = await directResponseModel.invoke(formattedPrompt);
+    }
+
+    // Langkah 3: Kembalikan respons ke LangGraph
+    console.log("AI RESPONSE:", response.usage_metadata, response.tool_calls);
 
     return {
       messages: [response],
@@ -200,26 +224,21 @@ const graph = new StateGraph(State)
     };
   })
   .addNode("routerTools", routerToolNode)
-  .addNode("mainTools", mainToolNode)
   .addEdge("__start__", "routerAgent")
   .addConditionalEdges("routerAgent", (state) => {
     const lastMessage = state.messages[state.messages.length - 1];
     if (lastMessage.tool_calls?.length > 0) {
       return "routerTools"; // Arahkan ke ToolNode yang khusus untuk router
     }
-    return "agentFinalResponse"; // Fallback jika router tidak memanggil tool
+    return END;
   })
-  // Conditional Edge dari agentWithTools
-  .addConditionalEdges("agentWithTools", (state) => {
+  .addConditionalEdges("agentFinalResponse", (state) => {
     const lastMessage = state.messages[state.messages.length - 1];
     if (lastMessage.tool_calls?.length > 0) {
-      return "mainTools"; // Arahkan ke ToolNode yang khusus untuk tools utama
+      return "routerTools"; // Arahkan ke ToolNode utama jika ada tool_calls
     }
     return END;
   })
-
-  // Edge dari mainTools kembali ke agentWithTools
-  .addEdge("mainTools", "agentWithTools")
   .addEdge("routerTools", "agentFinalResponse");
 
 function optimizeToolCalls(toolCalls, messages) {
