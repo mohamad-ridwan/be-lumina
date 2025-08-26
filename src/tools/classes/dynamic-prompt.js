@@ -19,7 +19,7 @@ class DynamicPromptManager {
 {availableBrands}
 {availableOffers}`,
 
-      recommendation: `[Tugas] Gunakan hasil searchShoes. Max 2 produk. Format HTML wajib:
+      recommendation: `[Tugas] Gunakan hasil searchShoes. Max 1 produk. Format HTML wajib:
 <p style="color:#000;background:transparent;padding:0;">Teks rekomendasi</p><br>
 <ol><li><strong>Nama Produk</strong><p style="color:#555;">Deskripsi</p><a href="{link_url_sepatu}">Lihat Detail</a></li></ol><br>`,
 

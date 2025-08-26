@@ -1,14 +1,11 @@
 const { z } = require("zod");
 
 const searchShoesSchema = z.object({
-  // Atribut yang diperlukan (required)
   userIntent: z
     .string()
     .describe(
-      "Ringkasan niat utama pengguna dalam satu kalimat. Contoh: 'Mencari sepatu lari dari Nike, warna hitam, ukuran 42'"
+      "Satu kalimat ringkasan niat pengguna. Contoh: 'Mencari sepatu lari Nike, hitam, ukuran 42.'"
     ),
-
-  // Perbaikan: variantFilters harus berupa objek dengan nilai array string, seperti yang ditunjukkan di contoh
   variantFilters: z
     .object({
       Warna: z.array(z.string()).optional(),
@@ -16,98 +13,42 @@ const searchShoesSchema = z.object({
     })
     .optional()
     .describe(
-      `Objek untuk memfilter varian seperti warna atau ukuran. 
-     Nilai warna mengacu pada pemahaman warna umum di dunia, bukan hanya yang ada di katalog internal.
-     Contoh warna umum: hitam, putih, abu-abu, biru, merah, hijau, kuning, oranye, cokelat, beige, pastel.
-     Warna lembut atau 'tidak mencolok' biasanya termasuk hitam, krem, abu-abu, biru muda/navy.
-     Warna mencolok biasanya termasuk merah terang, kuning neon, oranye terang.
-     Gunakan kata warna literal yang terdekat.
-     Contoh: {'Warna': ['hitam'], 'Ukuran': ['42'] }`
+      `Objek filter varian. Gunakan nama warna literal yang terdekat. Contoh: {'Warna': ['hitam'], 'Ukuran': ['42']}`
     ),
 
-  // Atribut yang opsional (optional)
-  minPrice: z
-    .number()
-    .optional()
-    .describe("Harga minimum yang diinginkan dalam Rupiah. Contoh: 1500000"),
-  maxPrice: z
-    .number()
-    .optional()
-    .describe("Harga maksimum yang diinginkan dalam Rupiah. Contoh: 2000000"),
-  brand: z
-    .array(z.string())
-    .optional()
-    .describe("Nama merek sepatu (misal: 'Adidas', 'Nike')."),
-  category: z
-    .array(z.string())
-    .optional()
-    .describe("Daftar kategori sepatu (misal: 'Sepatu lari', 'Kasual')."),
-  label: z
-    .string()
-    .optional()
-    .describe("Label khusus sepatu (misal: 'limited edition', 'premium')."),
-  newArrival: z
-    .boolean()
-    .optional()
-    .describe("Filter untuk sepatu yang merupakan model baru."),
+  minPrice: z.number().optional().describe("Harga minimum dalam Rupiah."),
+  maxPrice: z.number().optional().describe("Harga maksimum dalam Rupiah."),
+  brand: z.array(z.string()).optional().describe("Nama merek sepatu."),
+  category: z.array(z.string()).optional().describe("Daftar kategori sepatu."),
+  label: z.string().optional().describe("Label khusus sepatu."),
+  newArrival: z.boolean().optional().describe("Filter untuk model baru."),
   relatedOffers: z
     .array(z.string())
     .optional()
-    .describe(
-      "Daftar penawaran sepatu (misal: 'Musim Panas Tiba!', 'Waktunya Untuk Belajar Lagi!')"
-    ),
+    .describe("Daftar penawaran sepatu."),
   limit: z
     .number()
     .optional()
-    .describe("Jumlah maksimum hasil pencarian, maksimal 2."),
-  material: z
-    .array(z.string())
-    .optional()
-    .describe("Material utama sepatu. Contoh: ['kulit', 'kanvas', 'mesh']"),
-  features: z
-    .array(z.string())
-    .optional()
-    .describe(
-      "Fitur spesifik sepatu. Contoh: ['nyaman', 'tahan air', 'ringan', 'sol anti-slip']"
-    ),
-  shoeNames: z
-    .array(z.string())
-    .optional()
-    .describe("Daftar nama sepatu spesifik yang dicari."),
+    .describe("Jumlah maksimal hasil pencarian (max 2)."),
+  material: z.array(z.string()).optional().describe("Material utama sepatu."),
+  features: z.array(z.string()).optional().describe("Fitur spesifik sepatu."),
+  shoeNames: z.array(z.string()).optional().describe("Nama sepatu spesifik."),
   excludeIds: z
     .array(z.string())
     .optional()
-    .describe(
-      "Daftar ID sepatu yang harus dikecualikan dari hasil pencarian karena sudah dilihat atau tidak sesuai."
-    ),
+    .describe("ID sepatu yang harus dikecualikan."),
 });
 
 const searchShoesFuncDeclaration = {
   name: "searchShoes",
   schema: searchShoesSchema,
-  description: `Gunakan fungsi ini ketika pengguna mencari sepatu berdasarkan berbagai kriteria, termasuk:
-
-* Jenis kegiatan (misal: 'sepatu lari', 'sepatu basket', 'untuk hiking', 'kasual')
-* Fitur spesifik - ekstraksi menjadi array (misal: 'nyaman', 'tahan air', 'ringan', 'support', 'ada busa empuk', 'sol anti-slip')
-* Material - ekstraksi menjadi array (misal: 'kulit', 'kanvas', 'mesh')
-* Gaya (misal: 'retro', 'modern', 'sporty', 'fashionable')
-* Budget atau kisaran harga (misal: 'harga di bawah 1.5 juta', 'antara 800 ribu sampai 2 juta')
-* Merek tertentu (misal: 'dari Adidas', 'Nike', 'Converse')
-* Warna spesifik — AI boleh memetakan istilah umum seperti 'tidak mencolok' menjadi warna literal yang sesuai (misalnya hitam, putih, abu-abu, cokelat, krem)
-* Ketersediaan ukuran (misal: 'ukuran 42', 'tersedia ukuran besar')
-* Kombinasi dari kriteria tersebut
+  description: `Gunakan fungsi ini untuk mencari sepatu berdasarkan kriteria dari pertanyaan pengguna. Ekstrak semua parameter relevan menjadi field yang sesuai, seperti kategori, merek, harga, fitur, dan lainnya.
   
-  Ekstrak semua parameter yang relevan dari satu niat pencarian pengguna. Jika ada produk yang sudah gagal atau tidak relevan, tambahkan ID produk tersebut ke parameter **'excludeIds'** untuk mencegahnya muncul di hasil pencarian berikutnya.
-  
-  Pastikan hasil pencarian tidak duplikasi dan akurat sesuai pertanyaan. Jangan memberikan solusi di luar konteks pertanyaan.
-  
-  AI juga bisa menemukan produk sesuai jumlah yang di inginkan, namun maksimal nya 2.
-  AI juga bisa menyesuaikan sepatu dengan harga atau budget yang ditentukan pertanyaan.
-  AI wajib memberikan solusi dan di extract menjadi parameter yang relevan.
-  
-  AI HARUS MEMANGGIL fungsi ini ketika pengguna mencari sepatu berdasarkan berbagai kriteria.
-  
-  Jangan gunakan fungsi ini ketika pengguna menanyakan tentang hal yang sebelumnya di dalam percakapan (history) atau hal-hal yang tidak relevan dengan produk sepatu.`,
+  **Aturan:**
+  - Panggil fungsi ini HANYA JIKA pengguna secara eksplisit mencari sepatu.
+  - Jangan gunakan ini untuk pertanyaan umum atau non-produk.
+  - Tambahkan ID produk ke 'excludeIds' jika produk tersebut sudah dilihat atau tidak relevan.
+  - Jumlah hasil maksimal dibatasi 1.`,
 };
 
 const productInfoSchema = z.object({
