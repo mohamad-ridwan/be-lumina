@@ -1,54 +1,29 @@
 const { z } = require("zod");
 
 const searchShoesSchema = z.object({
-  userIntent: z
-    .string()
-    .describe(
-      "Satu kalimat ringkasan niat pengguna. Contoh: 'Mencari sepatu lari Nike, hitam, ukuran 42.'"
-    ),
+  userIntent: z.string().describe("Ringkasan niat pengguna."),
   variantFilters: z
     .object({
       Warna: z.array(z.string()).optional(),
       Ukuran: z.array(z.string()).optional(),
     })
-    .optional()
-    .describe(
-      `Objek filter varian. Gunakan nama warna literal yang terdekat. Contoh: {'Warna': ['hitam'], 'Ukuran': ['42']}`
-    ),
-
-  minPrice: z.number().optional().describe("Harga minimum dalam Rupiah."),
-  maxPrice: z.number().optional().describe("Harga maksimum dalam Rupiah."),
-  brand: z.array(z.string()).optional().describe("Nama merek sepatu."),
-  category: z.array(z.string()).optional().describe("Daftar kategori sepatu."),
-  label: z.string().optional().describe("Label khusus sepatu."),
-  newArrival: z.boolean().optional().describe("Filter untuk model baru."),
-  relatedOffers: z
-    .array(z.string())
-    .optional()
-    .describe("Daftar penawaran sepatu."),
-  limit: z
-    .number()
-    .optional()
-    .describe("Jumlah maksimal hasil pencarian (max 2)."),
-  material: z.array(z.string()).optional().describe("Material utama sepatu."),
-  features: z.array(z.string()).optional().describe("Fitur spesifik sepatu."),
-  shoeNames: z.array(z.string()).optional().describe("Nama sepatu spesifik."),
-  excludeIds: z
-    .array(z.string())
-    .optional()
-    .describe("ID sepatu yang harus dikecualikan."),
+    .optional(),
+  minPrice: z.number().optional().describe("Harga min. (IDR)."),
+  maxPrice: z.number().optional().describe("Harga maks. (IDR)."),
+  brand: z.array(z.string()).optional(),
+  category: z.array(z.string()).optional(),
+  relatedOffers: z.array(z.string()).optional(),
+  limit: z.number().optional().describe("Maks. 1 hasil."),
+  material: z.array(z.string()).optional(),
+  features: z.array(z.string()).optional(),
+  shoeNames: z.array(z.string()).optional(),
+  excludeIds: z.array(z.string()).optional(),
 });
 
 const searchShoesFuncDeclaration = {
   name: "searchShoes",
   schema: searchShoesSchema,
-  description: `Gunakan fungsi ini untuk mencari sepatu berdasarkan kriteria dari pertanyaan pengguna. Ekstrak semua parameter relevan menjadi field yang sesuai, seperti kategori, merek, harga, fitur, dan lainnya.
-  
-  **Aturan:**
-  - Panggil fungsi ini HANYA JIKA pengguna secara eksplisit mencari sepatu.
-  - Jangan gunakan ini untuk pertanyaan umum atau non-produk.
-  - Tambahkan ID produk ke 'excludeIds' jika produk tersebut sudah dilihat atau tidak relevan.
-  - Jumlah hasil maksimal dibatasi 1.`,
+  description: `Mencari sepatu berdasarkan kriteria.`,
 };
 
 const productInfoSchema = z.object({
