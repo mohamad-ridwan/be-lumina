@@ -6,11 +6,7 @@ const {
 } = require("@langchain/core/prompts");
 const { StateGraph, END, Annotation } = require("@langchain/langgraph");
 const { ToolNode } = require("@langchain/langgraph/prebuilt");
-const {
-  langChainTools,
-  toolsByName,
-  routerTools,
-} = require("../../tools/langChainTools");
+const { langChainTools, routerTools } = require("../../tools/langChainTools");
 const { generateRandomId } = require("../../helpers/generateRandomId");
 const {
   OptimizedInstructionGenerator,
@@ -38,35 +34,6 @@ const directResponseModel = new ChatGoogleGenerativeAI({
   maxOutputTokens: 128,
   apiKey: process.env.GEMINI_API_KEY,
 });
-
-const getGeminiResponse = async (prompt) => {
-  try {
-    const modelTools = langChainModel.bindTools(langChainTools);
-    const messages = prompt;
-    const aiMessage = await modelTools.invoke(messages);
-    console.log(aiMessage);
-
-    messages.push(aiMessage);
-
-    for (const toolCall of aiMessage.tool_calls) {
-      const selectedTool = toolsByName[toolCall.name];
-      const toolMessage = await selectedTool.invoke(toolCall);
-      messages.push(toolMessage);
-    }
-
-    console.log(messages);
-
-    if (aiMessage.tool_calls.length === 0) {
-      return aiMessage;
-    }
-
-    const response = await modelTools.invoke(messages);
-    return response;
-  } catch (error) {
-    console.error("Error getting response from Gemini:", error);
-    throw new Error("Failed to get response from Gemini.");
-  }
-};
 
 const mainModelWithTools = langChainModel.bindTools(langChainTools);
 const routerModelWithTools = routerModel.bindTools(routerTools);
@@ -240,45 +207,6 @@ const graph = new StateGraph(State)
     return END;
   })
   .addEdge("routerTools", "agentFinalResponse");
-
-function optimizeToolCalls(toolCalls, messages) {
-  const existingProducts = extractExistingProducts(messages);
-
-  for (const toolCall of toolCalls) {
-    if (toolCall.name === "searchShoes") {
-      if (existingProducts.length > 0 && toolCall.args.shoeNames?.length > 0) {
-        const requestedNames = toolCall.args.shoeNames.map((name) =>
-          name.toLowerCase()
-        );
-        const memoryData = existingProducts.filter((product) =>
-          requestedNames.includes(product.name.toLowerCase())
-        );
-
-        if (memoryData.length > 0) {
-          toolCall.args.data_memory = memoryData;
-          toolCall.args.shoeNames = toolCall.args.shoeNames.filter(
-            (name) =>
-              !memoryData.some(
-                (product) => product.name.toLowerCase() === name.toLowerCase()
-              )
-          );
-        }
-      }
-
-      toolCall.args._context = {
-        stage: "searching",
-        timestamp: Date.now(),
-        messageCount: messages.length,
-      };
-    }
-  }
-  return toolCalls;
-}
-
-function extractExistingProducts(messages) {
-  // Extract products from recent messages (last 6 messages for efficiency)
-  return messages;
-}
 
 const processNewMessageWithAI = async (
   formattedHistory,

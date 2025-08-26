@@ -18,30 +18,6 @@ const routeConversationFunc = async ({ tool_name, description }) => {
   };
 };
 
-const clarificationFunc = async ({ userIntent }) => {
-  console.log(`Clarification tool dipanggil, niat: ${userIntent}`);
-  // Mengembalikan sinyal ke LangGraph. Output ini akan menjadi bagian dari ToolMessage.
-  return {
-    content: JSON.stringify({
-      status: "clarification_needed",
-      message: `Pengguna membutuhkan klarifikasi. Niat: ${userIntent}`,
-    }),
-  };
-};
-
-const endConversationFunc = async ({ userIntent }) => {
-  console.log(`End conversation tool dipanggil, niat: ${userIntent}`);
-  // Mengembalikan sinyal ke LangGraph.
-  return {
-    content: JSON.stringify({
-      status: "conversation_ended",
-      message: `Percakapan berakhir. Niat: ${userIntent}`,
-    }),
-  };
-};
-
 module.exports = {
   routeConversationFunc,
-  clarificationFunc,
-  endConversationFunc,
 };

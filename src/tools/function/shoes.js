@@ -68,14 +68,6 @@ const searchShoes = async ({
     });
   }
 
-  // if (brand) {
-  //   const brandDoc = await Brand.findOne({
-  //     name: { $regex: new RegExp(brand, "i") },
-  //   });
-  //   if (brandDoc) {
-  //     vectorSearchFilters.push({ brand: { $eq: brandDoc._id } });
-  //   }
-  // }
   if (brand && Array.isArray(brand) && brand.length > 0) {
     // Buat array untuk menampung semua ID kategori yang cocok
     const matchedBrandIds = [];
@@ -104,14 +96,6 @@ const searchShoes = async ({
     vectorSearchFilterObject.newArrival = newArrival;
   }
 
-  // if (category) {
-  //   const categoryDoc = await Category.findOne({
-  //     name: { $regex: new RegExp(category, "i") },
-  //   });
-  //   if (categoryDoc) {
-  //     vectorSearchFilters.push({ category: { $eq: categoryDoc._id } });
-  //   }
-  // }
   if (category && Array.isArray(category) && category.length > 0) {
     // Buat array untuk menampung semua ID kategori yang cocok
     const matchedCategoryIds = [];
@@ -157,26 +141,12 @@ const searchShoes = async ({
       matchedOffersIds.push(doc._id);
     }
 
-    // Jika ada ID yang cocok, tambahkan ke filter
-    // if (matchedOffersIds.length > 0) {
-    //   vectorSearchFilterObject.relatedOffers = {
-    //     $in: matchedOffersIds,
-    //   };
-    // }
     if (matchedOffersIds.length > 0) {
       postVectorSearchFilters.$and.push({
         $or: [{ relatedOffers: { $in: matchedOffersIds } }],
       });
     }
   }
-
-  // Masukkan filter harga dasar (price di level atas)
-  // if (minPrice !== undefined || maxPrice !== undefined) {
-  //   const priceQuery = {};
-  //   if (minPrice !== undefined) priceQuery.$gte = minPrice;
-  //   if (maxPrice !== undefined) priceQuery.$lte = maxPrice;
-  //   vectorSearchFilters.push({ price: priceQuery });
-  // }
 
   if (vectorSearchFilters.length > 0) {
     vectorSearchFilterObject = {
@@ -212,11 +182,6 @@ const searchShoes = async ({
     "gi"
   );
 
-  /**
-   * Membangun klausa filter untuk 1 atribut varian.
-   * - attributeName: "Ukuran" | "Warna" | dst.
-   * - attributeValues: array string, mis. ["42"] atau ["hitam"]
-   */
   function buildVariantFilterClause(attributeName, attributeValues) {
     const regexList = attributeValues.map(
       (v) => new RegExp(`\\b${escapeRegex(v)}\\b`, "i")
