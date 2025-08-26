@@ -5,9 +5,17 @@ const embeddings = new JinaEmbeddings({
   model: "jina-clip-v2",
 });
 
-const getQueryVector = async (query) => {
+const toolsEmbedding = new JinaEmbeddings({
+  apiKey: process.env.JINA_API_KEY_API_KEY,
+  model: "jina-embeddings-v2-small-en",
+});
+
+const getQueryVector = async (query, model = "product") => {
   try {
-    const queryVector = await embeddings.embedQuery(query);
+    const queryVector =
+      model === "product"
+        ? await embeddings.embedQuery(query)
+        : await toolsEmbedding.embedQuery(query);
     return queryVector;
   } catch (error) {
     console.log("ERROR GET QUERY VECTOR FROM JINA EMBBEDING :", error);
