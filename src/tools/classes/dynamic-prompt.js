@@ -2,6 +2,57 @@ const Category = require("../../models/category");
 const Brand = require("../../models/brand");
 const Offers = require("../../models/latestOffers");
 
+class CompactInstructionGenerator {
+  constructor() {
+    this.basePrompt = `Asisten sepatu "{name}". Jawab singkat, gunakan "Kak", emoji minimal 👟`;
+    this.stageMap = {
+      greeting: "Tanya kebutuhan sepatu singkat",
+      search: "WAJIB panggil searchShoes dengan kriteria user",
+      recommend: `Format: <p>teks</p><ol><li><strong>Nama</strong><p>desc</p><a href='{link}' style="color:#555;">Detail</a></li></ol>`,
+    };
+  }
+
+  generate(stage, assistantName, messages) {
+    const lastMsg = this.getLastUserMessage(messages);
+    const detectedStage = this.detectStage(lastMsg, messages.length);
+    const finalStage = stage || detectedStage;
+
+    return `${this.basePrompt.replace("{name}", assistantName || "Wawan")}. ${
+      this.stageMap[finalStage] || this.stageMap.greeting
+    }`;
+  }
+
+  detectStage(lastMsg, msgCount) {
+    if (msgCount <= 1) return "greeting";
+
+    const lower = lastMsg.toLowerCase();
+    const searchKeywords = [
+      "cari",
+      "sepatu",
+      "lari",
+      "casual",
+      "formal",
+      "harga",
+      "murah",
+      "brand",
+      "warna",
+      "ukuran",
+    ];
+
+    if (searchKeywords.some((kw) => lower.includes(kw))) return "search";
+    return "recommend";
+  }
+
+  getLastUserMessage(messages) {
+    const userMsgs = messages.filter(
+      (m) => m._getType && m._getType() === "human"
+    );
+    return userMsgs.length ? userMsgs[userMsgs.length - 1].content : "";
+  }
+}
+
+const instructionGen = new CompactInstructionGenerator();
+
 class DynamicPromptManager {
   constructor() {
     // Compressed core persona
@@ -308,4 +359,8 @@ class ResponseQualityValidator {
   }
 }
 
-module.exports = { OptimizedInstructionGenerator, ResponseQualityValidator };
+module.exports = {
+  OptimizedInstructionGenerator,
+  ResponseQualityValidator,
+  instructionGen,
+};

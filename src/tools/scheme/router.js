@@ -1,17 +1,14 @@
 const { z } = require("zod");
 
 const routeConversationSchema = z.object({
-  tool_name: z
-    .enum(["searchShoes"])
-    .describe("Pilih tool yang paling sesuai dengan niat pengguna."),
-  description: z.string().describe("Satu kalimat ringkasan niat pengguna."),
+  tool_name: z.enum(["searchShoes"]),
+  description: z.string().max(20).describe("Intent singkat max 20 karakter"), // Limit description length
 });
 
 const routeConversation = {
   name: "routeConversation",
   schema: routeConversationSchema,
-  description:
-    "Digunakan untuk mengarahkan percakapan. Panggil ini untuk menentukan niat pengguna sebelum melakukan tindakan lain.",
+  description: "Route user intent: searchShoes jika cari sepatu",
 };
 
 module.exports = { routeConversation };

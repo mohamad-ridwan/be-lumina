@@ -1,29 +1,26 @@
 const { z } = require("zod");
 
 const searchShoesSchema = z.object({
-  userIntent: z.string().describe("Ringkasan niat pengguna."),
+  userIntent: z.string().max(50), // Limit intent length
+  // Only keep essential filters to reduce schema size
   variantFilters: z
     .object({
       Warna: z.array(z.string()).optional(),
       Ukuran: z.array(z.string()).optional(),
     })
     .optional(),
-  minPrice: z.number().optional().describe("Harga min. (IDR)."),
-  maxPrice: z.number().optional().describe("Harga maks. (IDR)."),
+  minPrice: z.number().optional(),
+  maxPrice: z.number().optional(),
   brand: z.array(z.string()).optional(),
   category: z.array(z.string()).optional(),
-  relatedOffers: z.array(z.string()).optional(),
-  limit: z.number().optional().describe("Maks. 1 hasil."),
-  material: z.array(z.string()).optional(),
-  features: z.array(z.string()).optional(),
-  shoeNames: z.array(z.string()).optional(),
-  excludeIds: z.array(z.string()).optional(),
+  limit: z.number().default(1).optional(),
+  // Remove rarely used fields: material, features, shoeNames, excludeIds, relatedOffers
 });
 
 const searchShoesFuncDeclaration = {
   name: "searchShoes",
   schema: searchShoesSchema,
-  description: `Mencari sepatu berdasarkan kriteria.`,
+  description: "Search sepatu berdasarkan kriteria user",
 };
 
 const productInfoSchema = z.object({

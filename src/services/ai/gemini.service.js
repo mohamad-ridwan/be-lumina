@@ -6,47 +6,36 @@ const {
 } = require("@langchain/core/prompts");
 const { StateGraph, END, Annotation } = require("@langchain/langgraph");
 const { ToolNode } = require("@langchain/langgraph/prebuilt");
-const { langChainTools, routerTools } = require("../../tools/langChainTools");
+const { langChainTools } = require("../../tools/langChainTools");
 const { generateRandomId } = require("../../helpers/generateRandomId");
-const {
-  OptimizedInstructionGenerator,
-  ResponseQualityValidator,
-} = require("../../tools/classes/dynamic-prompt");
+const { instructionGen } = require("../../tools/classes/dynamic-prompt");
 
-const langChainModel = new ChatGoogleGenerativeAI({
-  model: "gemini-2.5-flash-lite",
-  temperature: 0.7, // Reduced for more consistent responses
-  maxRetries: 2, // Reduced retries for faster response
-  maxOutputTokens: 128, // Reduced token limit for cost efficiency
-  apiKey: process.env.GEMINI_API_KEY,
-});
 const routerModel = new ChatGoogleGenerativeAI({
-  model: "gemini-2.0-flash-lite",
+  model: "gemini-2.5-flash",
   temperature: 0,
   maxRetries: 1,
-  maxOutputTokens: 128,
-  apiKey: process.env.GEMINI_API_KEY,
-});
-const directResponseModel = new ChatGoogleGenerativeAI({
-  model: "gemini-2.0-flash-lite", // Bisa pakai model yang sama, tapi tanpa tools
-  temperature: 0,
-  maxRetries: 1,
-  maxOutputTokens: 128,
+  maxOutputTokens: 128, // Reduced from 128
   apiKey: process.env.GEMINI_API_KEY,
 });
 
-const mainModelWithTools = langChainModel.bindTools(langChainTools);
-const routerModelWithTools = routerModel.bindTools(routerTools);
-const routerToolNode = new ToolNode([...routerTools, ...langChainTools]);
-const instructionGenerator = new OptimizedInstructionGenerator();
+const mainModel = new ChatGoogleGenerativeAI({
+  model: "gemini-2.5-flash",
+  temperature: 0.7,
+  maxRetries: 1,
+  maxOutputTokens: 256, // Reduced from 128
+  apiKey: process.env.GEMINI_API_KEY,
+});
+
+const mainModelWithTools = routerModel.bindTools(langChainTools);
+const toolNode = new ToolNode(langChainTools);
 
 // Definisikan tipe state untuk LangGraph
 const State = Annotation.Root({
   messages: Annotation({
     reducer: (x, y) => {
-      const updatedMessages = x.concat(y);
-      // const limitedMessages = updatedMessages.slice(-5);
-      return updatedMessages;
+      const combined = x.concat(y);
+      // Keep only last 2 messages to minimize context
+      return combined;
     },
     default: () => [],
   }),
@@ -54,159 +43,75 @@ const State = Annotation.Root({
     reducer: (x) => x,
     default: () => {},
   }),
-  conversationStage: Annotation({
+  intent: Annotation({
     reducer: (x, y) => y || x,
-    default: () => "greeting",
+    default: () => null,
   }),
 });
 
 // Optimized Graph with smarter routing
 const graph = new StateGraph(State)
-  .addNode("routerAgent", async (state) => {
+  .addNode("intentDetector", async (state) => {
     const { messages, userProfile } = state;
-    const lastMessage = messages[messages.length - 1];
 
-    const instruction = await instructionGenerator.generateInstruction(
+    const stage = "recommend";
+    const instruction = instructionGen.generate(
+      stage,
       userProfile?.assistan_username,
-      userProfile?.customer_username,
-      messages,
-      userProfile
+      messages
     );
 
+    console.log("INSTRUKSI : ", instruction);
+
+    // Ultra-minimal router prompt
     const routerPrompt = ChatPromptTemplate.fromMessages([
-      [
-        "system",
-        `Anda adalah asisten AI yang bertugas sebagai router percakapan untuk toko sepatu.
-        
-        Tugas Anda adalah memproses pesan pengguna dan melakukan salah satu dari dua tindakan berikut:
-        
-        1.  **Jika niat pengguna adalah untuk mencari atau menemukan sepatu** (misalnya, mencari berdasarkan merek, warna, harga, atau jenis), panggil tool **'searchShoes'**.
-        2.  **Jika niat pengguna adalah hal lain**, seperti menanyakan tentang ketersediaan produk umum, menanyakan tentang pengiriman, mengucapkan salam, terima kasih, atau mengakhiri percakapan, **jangan panggil tool apa pun**. Cukup berikan jawaban langsung dalam bentuk teks.
-        
-        Berikut adalah konteks percakapan:
-        ${instruction}`,
-      ],
+      ["system", instruction],
       new MessagesPlaceholder("messages"),
     ]);
 
     const routerMessages = await routerPrompt.formatMessages({
-      messages: messages,
-      time: new Date().toISOString(),
-      link_url_sepatu: "",
-      availableCategories: "",
-      availableBrands: "",
-      availableOffers: "",
+      messages,
+      link: "",
     });
+    const response = await mainModelWithTools.invoke(routerMessages);
 
-    const response = await routerModelWithTools.invoke(routerMessages);
-    console.log(
-      "ROUTER RESPONSE : ",
-      response.usage_metadata,
-      response.tool_calls
-    );
+    console.log("ROUTER:", response.usage_metadata, response.tool_calls);
     return { messages: [response] };
   })
-  .addNode("agentFinalResponse", async (state) => {
+
+  .addNode("responseGenerator", async (state) => {
     const { messages, userProfile } = state;
 
-    const lastToolMessage = [...messages]
-      .reverse()
-      .find((msg) => msg.tool_call_id);
+    // Generate ultra-compact instruction
+    const stage = "recommend";
+    const instruction = instructionGen.generate(
+      stage,
+      userProfile?.assistan_username,
+      messages
+    );
 
-    // hasil tool_calls dari router agent
-    let toolContent;
-    if (lastToolMessage) {
-      try {
-        toolContent = JSON.parse(lastToolMessage.content);
-        if (!toolContent.shoes) {
-          toolContent = JSON.parse(toolContent.content);
-        }
-      } catch (error) {
-        console.error("Failed to parse JSON from ToolMessage:", error);
-      }
-    }
-    let response;
+    const prompt = ChatPromptTemplate.fromMessages([
+      ["system", instruction],
+      new MessagesPlaceholder("messages"),
+    ]);
 
-    if (toolContent?.decision === "searchShoes") {
-      const lastMessages = messages.slice(-4);
-      // --- Cabang searchShoes: Panggil model DENGAN tools ---
+    const formattedPrompt = await prompt.formatMessages({
+      messages,
+      link: "",
+    });
 
-      // Dapatkan instruksi dan prompt
-      const instruction = await instructionGenerator.generateInstruction(
-        userProfile?.assistan_username,
-        userProfile?.customer_username,
-        messages,
-        userProfile
-      );
-      const prompt = ChatPromptTemplate.fromMessages([
-        ["system", instruction],
-        new MessagesPlaceholder("messages"),
-      ]);
-      const formattedPrompt = await prompt.formatMessages({
-        messages: messages,
-        time: new Date().toISOString(),
-        link_url_sepatu: "",
-        availableCategories: "",
-        availableBrands: "",
-        availableOffers: "",
-      });
+    const response = await mainModel.invoke(formattedPrompt);
 
-      // Panggil model yang sudah di-bind dengan mainTools
-      // Pastikan Anda memiliki modelWithTools yang di-bind dengan mainTools
-      response = await mainModelWithTools.invoke(formattedPrompt);
-    } else {
-      const lastMessages = messages.slice(-2);
-      const instruction = await instructionGenerator.generateInstruction(
-        userProfile?.assistan_username,
-        userProfile?.customer_username,
-        messages,
-        userProfile
-      );
-      const prompt = ChatPromptTemplate.fromMessages([
-        ["system", instruction],
-        new MessagesPlaceholder("messages"),
-      ]);
-      const formattedPrompt = await prompt.formatMessages({
-        messages: messages,
-        time: new Date().toISOString(),
-        link_url_sepatu: "",
-        availableCategories: "",
-        availableBrands: "",
-        availableOffers: "",
-      });
-
-      // Panggil model TANPA tools
-      response = await directResponseModel.invoke(formattedPrompt);
-    }
-
-    // Langkah 3: Kembalikan respons ke LangGraph
-    console.log("AI RESPONSE:", response.usage_metadata, response.tool_calls);
-
-    return {
-      messages: [response],
-      conversationStage: instructionGenerator.stateManager.determineStage(
-        [...messages, response],
-        userProfile
-      ),
-    };
+    console.log("AI:", response.usage_metadata);
+    return { messages: [response] };
   })
-  .addNode("routerTools", routerToolNode)
-  .addEdge("__start__", "routerAgent")
-  .addConditionalEdges("routerAgent", (state) => {
+  .addNode("tools", toolNode)
+  .addEdge("__start__", "intentDetector")
+  .addConditionalEdges("intentDetector", (state) => {
     const lastMessage = state.messages[state.messages.length - 1];
-    if (lastMessage.tool_calls?.length > 0) {
-      return "routerTools"; // Arahkan ke ToolNode yang khusus untuk router
-    }
-    return END;
+    return lastMessage.tool_calls?.length > 0 ? "tools" : END;
   })
-  .addConditionalEdges("agentFinalResponse", (state) => {
-    const lastMessage = state.messages[state.messages.length - 1];
-    if (lastMessage.tool_calls?.length > 0) {
-      return "routerTools"; // Arahkan ke ToolNode utama jika ada tool_calls
-    }
-    return END;
-  })
-  .addEdge("routerTools", "agentFinalResponse");
+  .addEdge("tools", "responseGenerator");
 
 const processNewMessageWithAI = async (
   formattedHistory,
@@ -218,8 +123,7 @@ const processNewMessageWithAI = async (
   const messageId = generateRandomId(15);
   const fallbackResponse = generateFallback(
     assistan_username,
-    customer_username,
-    "default"
+    customer_username
   );
 
   try {
@@ -233,7 +137,7 @@ const processNewMessageWithAI = async (
     }
 
     const startTime = Date.now();
-    const timeout = determineTimeout(userQuestion);
+    const timeout = 60000; // Fixed timeout
 
     const agentPromise = agentApp.invoke(
       {
@@ -248,89 +152,28 @@ const processNewMessageWithAI = async (
     });
 
     const finalState = await Promise.race([agentPromise, timeoutPromise]);
-
-    const validator = new ResponseQualityValidator();
     const responseMessage = finalState.messages[finalState.messages.length - 1];
-    const extractedContent = extractResponseContent(responseMessage);
-
-    const validation = validator.validateResponse(
-      extractedContent,
-      finalState.conversationStage || "default",
-      { assistantName: assistan_username }
-    );
+    const finalResponse = extractResponseContent(responseMessage);
 
     const processingTime = Date.now() - startTime;
-    console.log(
-      `AI Response - Time: ${processingTime}ms, Quality: ${validation.score}%, Stage: ${finalState.conversationStage}`
-    );
-
-    let finalResponse = extractedContent;
-
-    if (!validation.isValid && validation.score < 60) {
-      console.warn("Low quality response:", validation.issues);
-      finalResponse = generateFallback(
-        assistan_username,
-        customer_username,
-        "quality_issue"
-      );
-    }
+    console.log(`Processing time: ${processingTime}ms`);
 
     await sendSuccessResponse(finalResponse || fallbackResponse, finalState);
     return finalResponse;
   } catch (error) {
-    const errorType = categorizeError(error);
     const errorResponse = generateFallback(
       assistan_username,
-      customer_username,
-      errorType
+      customer_username
     );
-
     await sendFallbackResponse(errorResponse);
-    console.error(`AI error [${errorType}]:`, error.message);
+    console.error("AI error:", error.message);
     return errorResponse;
   }
 
-  function generateFallback(assistantName, customerName, errorType) {
+  function generateFallback(assistantName, customerName) {
     const name = assistantName || "Wawan";
     const customer = customerName ? ` Kak ${customerName}` : " Kakak";
-
-    const responses = {
-      default: `<p style="color:#000;background:transparent;padding:0;">Maaf${customer}, <strong>${name}</strong> sedang ada kendala 😩. Coba lagi ya${customer} 😉.</p>`,
-      timeout: `<p style="color:#000;background:transparent;padding:0;">Wah${customer}, <strong>${name}</strong> butuh waktu lebih lama. Coba tanya lebih spesifik ya${customer} 😊.</p>`,
-      rate_limit: `<p style="color:#000;background:transparent;padding:0;"><strong>${name}</strong> lagi sibuk melayani. Tunggu sebentar ya${customer} 😉.</p>`,
-      server_error: `<p style="color:#000;background:transparent;padding:0;">Maaf${customer}, <strong>${name}</strong> ada gangguan teknis. Tunggu ya${customer} 🙏.</p>`,
-      quality_issue: `<p style="color:#000;background:transparent;padding:0;">Maaf${customer}, <strong>${name}</strong> bingung. Jelaskan kebutuhan sepatunya lagi ya${customer}? 🤔</p>`,
-    };
-
-    return responses[errorType] || responses.default;
-  }
-
-  function determineTimeout(userQuestion) {
-    const question = userQuestion.toLowerCase();
-
-    if (question.includes("rekomendasi") || question.includes("cari sepatu")) {
-      return 20000;
-    }
-
-    if (
-      question.includes("ukuran") ||
-      question.includes("warna") ||
-      question.includes("harga")
-    ) {
-      return 10000;
-    }
-
-    return 15000;
-  }
-
-  function categorizeError(error) {
-    const errorMessage = error.message?.toLowerCase() || "";
-
-    if (errorMessage.includes("timeout")) return "timeout";
-    if (error.statusText?.includes("Too Many Requests")) return "rate_limit";
-    if (error.status === 500) return "server_error";
-
-    return "default";
+    return `<p style="color:#000;background:transparent;padding:0;">Maaf${customer}, <strong>${name}</strong> sedang ada kendala 😩. Coba lagi ya${customer} 😉.</p>`;
   }
 
   async function sendSuccessResponse(response, state) {
@@ -368,8 +211,7 @@ function extractResponseContent(responseMessage) {
 }
 
 module.exports = {
-  getGeminiResponse,
-  langChainModel,
+  mainModel,
   processNewMessageWithAI,
   graph,
 };
