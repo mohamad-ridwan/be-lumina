@@ -6,15 +6,16 @@ const {
 } = require("@langchain/core/prompts");
 const { StateGraph, END, Annotation } = require("@langchain/langgraph");
 const { ToolNode } = require("@langchain/langgraph/prebuilt");
-const { langChainTools } = require("../../tools/langChainTools");
+const { langChainTools, toolsByName } = require("../../tools/langChainTools");
 const { generateRandomId } = require("../../helpers/generateRandomId");
 const { instructionGen } = require("../../tools/classes/dynamic-prompt");
+const { findRelevantTools } = require("../../tools/function/tool-description");
 
 const routerModel = new ChatGoogleGenerativeAI({
   model: "gemini-2.5-flash",
-  temperature: 0,
-  maxRetries: 1,
-  maxOutputTokens: 128, // Reduced from 128
+  temperature: 0.7,
+  maxRetries: 2,
+  maxOutputTokens: 768, // Reduced from 128
   apiKey: process.env.GEMINI_API_KEY,
 });
 
@@ -26,7 +27,7 @@ const mainModel = new ChatGoogleGenerativeAI({
   apiKey: process.env.GEMINI_API_KEY,
 });
 
-const mainModelWithTools = routerModel.bindTools(langChainTools);
+// const mainModelWithTools = routerModel.bindTools(langChainTools);
 const toolNode = new ToolNode(langChainTools);
 
 // Definisikan tipe state untuk LangGraph
@@ -53,8 +54,32 @@ const State = Annotation.Root({
 const graph = new StateGraph(State)
   .addNode("intentDetector", async (state) => {
     const { messages, userProfile } = state;
+    const lastMessage = messages[messages.length - 1];
 
-    const stage = "recommend";
+    let toolUsage = [];
+    const intentUser = await findRelevantTools(lastMessage.content);
+    console.log("RESULT INTENT USER : ", intentUser);
+
+    const searchIntent = intentUser?.filter(
+      (intent) => intent.name === "requestProductRecommendation"
+    );
+    const greetingIntent = intentUser?.filter(
+      (intent) => intent.name === "startConversation"
+    );
+
+    let stage = "greeting";
+    if (greetingIntent?.length > 0) {
+      stage = "greeting";
+    } else if (
+      searchIntent?.length > 0 ||
+      toolUsage[0]?.name === "searchShoes"
+    ) {
+      stage = "search";
+    }
+
+    if (stage === "search") {
+      toolUsage.push(toolsByName.searchShoes);
+    }
     const instruction = instructionGen.generate(
       stage,
       userProfile?.assistan_username,
@@ -62,6 +87,7 @@ const graph = new StateGraph(State)
     );
 
     console.log("INSTRUKSI : ", instruction);
+    console.log("STAGE : ", stage);
 
     // Ultra-minimal router prompt
     const routerPrompt = ChatPromptTemplate.fromMessages([
@@ -73,7 +99,11 @@ const graph = new StateGraph(State)
       messages,
       link: "",
     });
-    const response = await mainModelWithTools.invoke(routerMessages);
+    let model = routerModel;
+    if (toolUsage.length > 0) {
+      model = model.bindTools(toolUsage);
+    }
+    const response = await model.invoke(routerMessages);
 
     console.log("ROUTER:", response.usage_metadata, response.tool_calls);
     return { messages: [response] };

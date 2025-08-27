@@ -88,7 +88,7 @@ exports.getBestMatchingTool = async (req, res) => {
     ]);
 
     // Langkah 4: Tentukan ambang batas (threshold) kecocokan
-    const similarityThreshold = 0.7; // Sesuaikan ambang batas ini sesuai kebutuhan
+    const similarityThreshold = 0.6; // Sesuaikan ambang batas ini sesuai kebutuhan
 
     // Filter hasil yang skornya di atas ambang batas
     const relevantTools = results.filter(
