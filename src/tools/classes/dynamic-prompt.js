@@ -2,6 +2,377 @@ const Category = require("../../models/category");
 const Brand = require("../../models/brand");
 const Offers = require("../../models/latestOffers");
 
+class AdvancedIntentFlowManager {
+  constructor() {
+    // Group intents by flow type for efficient processing
+    this.intentFlows = {
+      // Direct search flows - require immediate tool usage
+      SEARCH_FLOWS: [
+        "requestProductRecommendation",
+        "productInquiryByActivity",
+        "productInquiryByCategory",
+        "productInquiryBySpecificFeature",
+        "productInquiryWithMultipleCriteria",
+      ],
+
+      // Refinement flows - modify existing search
+      REFINE_FLOWS: [
+        "refineSearchByPrice",
+        "refineSearchByBrand",
+        "refineSearchByColor",
+        "refineSearchBySize",
+      ],
+
+      // Conversational flows - no tools needed
+      CONVO_FLOWS: [
+        "startConversation",
+        "generalInquiry",
+        "clarifyProductDetails",
+        "positiveSentimentResponse",
+        "negativeSentimentResponse",
+        "endConversation",
+        "systemErrorInquiry",
+      ],
+    };
+
+    // Ultra-compact prompts by flow type
+    this.flowPrompts = {
+      SEARCH_FLOWS: `Asisten sepatu {name}. WAJIB panggil searchShoes dengan kriteria user. Jawab "Kak" 👟`,
+      REFINE_FLOWS: `Asisten sepatu {name}. WAJIB panggil searchShoes dengan filter baru. Jawab "Kak" 👟`,
+      CONVO_FLOWS: `Asisten sepatu {name}. Jawab ramah tanpa tool. Gunakan "Kak", emoji minimal 👟`,
+    };
+
+    // Specific intent handling for edge cases
+    this.intentActions = {
+      startConversation: () => "Hai Kak! Ada sepatu yang dicari? 👟",
+      generalInquiry: () =>
+        "Sepatu untuk aktivitas apa Kak? Lari, casual, atau formal? 👟",
+      endConversation: () => "Terima kasih Kak! Semoga cocok sepatunya 👟✨",
+      systemErrorInquiry: () =>
+        "Maaf Kak, ada yang bisa dibantu soal sepatu? 👟",
+      positiveSentimentResponse: () =>
+        "Senang bisa bantu Kak! Ada yang lain? 👟",
+      negativeSentimentResponse: () => "Oke Kak, cari alternatif lain ya 👟",
+    };
+  }
+
+  determineFlow(intents) {
+    // Priority-based flow determination
+    for (const intent of intents) {
+      if (this.intentFlows.SEARCH_FLOWS.includes(intent.name)) {
+        return { type: "SEARCH_FLOWS", needsTools: true, priority: 1 };
+      }
+    }
+
+    for (const intent of intents) {
+      if (this.intentFlows.REFINE_FLOWS.includes(intent.name)) {
+        return { type: "REFINE_FLOWS", needsTools: true, priority: 2 };
+      }
+    }
+
+    // Default to conversation flow
+    const primaryIntent = intents[0]?.name || "generalInquiry";
+    return {
+      type: "CONVO_FLOWS",
+      needsTools: false,
+      priority: 3,
+      specificIntent: primaryIntent,
+    };
+  }
+
+  generatePrompt(flowType, assistantName, specificIntent) {
+    let basePrompt = this.flowPrompts[flowType].replace(
+      "{name}",
+      assistantName || "Wawan"
+    );
+
+    // Add specific action for direct response intents
+    if (flowType === "CONVO_FLOWS" && this.intentActions[specificIntent]) {
+      basePrompt += ` Respon: "${this.intentActions[specificIntent]()}"`;
+    }
+
+    return basePrompt;
+  }
+
+  // Extract search criteria from user message for optimization
+  extractSearchCriteria(message, intents) {
+    const criteria = {};
+    const text = message.toLowerCase();
+
+    // Quick keyword extraction for search optimization
+    const patterns = {
+      price: /(?:budget|harga|murah|mahal|dibawah|under)\s*(\d+)/i,
+      brand: /(?:brand|merek)\s*([a-zA-Z]+)/i,
+      color: /(?:warna|color)\s*([a-zA-Z]+)/i,
+      size: /(?:ukuran|size)\s*(\d+)/i,
+      category: /(lari|running|casual|formal|olahraga|hiking)/i,
+    };
+
+    for (const [key, pattern] of Object.entries(patterns)) {
+      const match = text.match(pattern);
+      if (match) criteria[key] = match[1];
+    }
+
+    return criteria;
+  }
+}
+
+class IntentClassificationSystem {
+  constructor() {
+    // Intent hierarchy with token cost optimization
+    this.intentHierarchy = {
+      // Tier 1: Direct action intents (highest priority, immediate tool usage)
+      IMMEDIATE_ACTION: {
+        intents: [
+          "requestProductRecommendation",
+          "productInquiryByActivity",
+          "productInquiryByCategory",
+          "productInquiryBySpecificFeature",
+          "productInquiryWithMultipleCriteria",
+        ],
+        tokenCost: "HIGH", // Requires tools + response generation
+        needsTools: true,
+        maxTokens: 400,
+      },
+
+      // Tier 2: Search refinement (medium priority, tool usage with context)
+      SEARCH_REFINEMENT: {
+        intents: [
+          "refineSearchByPrice",
+          "refineSearchByBrand",
+          "refineSearchByColor",
+          "refineSearchBySize",
+        ],
+        tokenCost: "MEDIUM", // Requires tools but shorter prompts
+        needsTools: true,
+        maxTokens: 300,
+      },
+
+      // Tier 3: Information retrieval (low-medium priority, context-based)
+      INFO_RETRIEVAL: {
+        intents: ["clarifyProductDetails"],
+        tokenCost: "MEDIUM", // Context lookup, possibly tools
+        needsTools: false, // Try context first
+        maxTokens: 200,
+      },
+
+      // Tier 4: Conversational (lowest token cost, predefined responses)
+      CONVERSATIONAL: {
+        intents: [
+          "startConversation",
+          "generalInquiry",
+          "positiveSentimentResponse",
+          "negativeSentimentResponse",
+          "endConversation",
+          "systemErrorInquiry",
+        ],
+        tokenCost: "LOW", // Predefined or simple generation
+        needsTools: false,
+        maxTokens: 100,
+      },
+    };
+
+    // Precomputed responses for ultra-fast conversational intents
+    this.precomputedResponses = {
+      startConversation: (name) =>
+        `Hai Kak! ${name || "Wawan"} siap bantu cari sepatu. Ada yang dicari?`,
+      generalInquiry: () =>
+        "Sepatu untuk aktivitas apa Kak? Lari, casual, atau formal?",
+      endConversation: () => "Terima kasih Kak! Semoga cocok sepatunya",
+      systemErrorInquiry: () => "Maaf Kak, ada yang bisa dibantu soal sepatu?",
+      positiveSentimentResponse: () => "Senang bisa bantu Kak! Ada yang lain?",
+      negativeSentimentResponse: () => "Oke Kak, cari alternatif lain ya",
+    };
+
+    // Search criteria patterns for efficient extraction
+    this.criteriaPatterns = {
+      activity:
+        /(lari|running|jogging|olahraga|gym|casual|formal|kerja|hiking|jalan)/i,
+      price:
+        /(?:budget|harga|murah|mahal|dibawah|under|maksimal|max)\s*(\d+(?:\.\d+)?(?:k|rb|ribu|juta)?)/i,
+      brand: /(?:brand|merek|merk)\s*([a-zA-Z]+)/i,
+      color:
+        /(?:warna|color)\s*(hitam|putih|merah|biru|kuning|hijau|coklat|abu|pink|ungu)/i,
+      size: /(?:ukuran|size)\s*(\d+)/i,
+      feature: /(ringan|waterproof|tahan|air|empuk|nyaman|breathable)/i,
+    };
+  }
+
+  // Fast intent classification with token optimization
+  classifyIntent(intents, userMessage) {
+    if (!intents?.length) return this.getDefaultClassification();
+
+    // Find the highest priority tier
+    for (const [tierName, tierConfig] of Object.entries(this.intentHierarchy)) {
+      const matchedIntents = intents.filter((intent) =>
+        tierConfig.intents.includes(intent.name)
+      );
+
+      if (matchedIntents.length > 0) {
+        return {
+          tier: tierName,
+          primaryIntent: matchedIntents[0].name,
+          config: tierConfig,
+          criteria: this.extractCriteria(userMessage, tierName),
+          canUsePrecomputed: this.canUsePrecomputedResponse(
+            matchedIntents[0].name
+          ),
+        };
+      }
+    }
+
+    return this.getDefaultClassification();
+  }
+
+  // Extract search criteria efficiently
+  extractCriteria(userMessage, tier) {
+    if (tier === "CONVERSATIONAL") return {};
+
+    const criteria = {};
+    const text = userMessage.toLowerCase();
+
+    for (const [key, pattern] of Object.entries(this.criteriaPatterns)) {
+      const match = text.match(pattern);
+      if (match) {
+        criteria[key] = match[1] || match[0];
+        // Convert price format
+        if (key === "price" && criteria[key]) {
+          criteria[key] = this.normalizePrice(criteria[key]);
+        }
+      }
+    }
+
+    return criteria;
+  }
+
+  // Normalize price format
+  normalizePrice(priceStr) {
+    const cleaned = priceStr.toLowerCase();
+    let multiplier = 1;
+
+    if (
+      cleaned.includes("k") ||
+      cleaned.includes("rb") ||
+      cleaned.includes("ribu")
+    ) {
+      multiplier = 1000;
+    } else if (cleaned.includes("juta")) {
+      multiplier = 1000000;
+    }
+
+    const numMatch = cleaned.match(/(\d+(?:\.\d+)?)/);
+    if (numMatch) {
+      return parseInt(parseFloat(numMatch[1]) * multiplier);
+    }
+
+    return null;
+  }
+
+  // Check if response can be precomputed
+  canUsePrecomputedResponse(intentName) {
+    return this.precomputedResponses.hasOwnProperty(intentName);
+  }
+
+  // Get precomputed response
+  getPrecomputedResponse(intentName, assistantName) {
+    const responseGenerator = this.precomputedResponses[intentName];
+    return responseGenerator ? responseGenerator(assistantName) : null;
+  }
+
+  // Default classification for unknown intents
+  getDefaultClassification() {
+    return {
+      tier: "CONVERSATIONAL",
+      primaryIntent: "generalInquiry",
+      config: this.intentHierarchy.CONVERSATIONAL,
+      criteria: {},
+      canUsePrecomputed: true,
+    };
+  }
+
+  // Generate optimized search parameters
+  generateSearchParams(classification, userMessage) {
+    if (!classification.config.needsTools) return null;
+
+    const { criteria, primaryIntent } = classification;
+    const baseParams = { userIntent: userMessage.substring(0, 50) }; // Limit intent length
+
+    // Map criteria to searchShoes parameters efficiently
+    if (criteria.price) {
+      baseParams.maxPrice = criteria.price;
+    }
+    if (criteria.brand) {
+      baseParams.brand = [criteria.brand];
+    }
+    if (criteria.color) {
+      baseParams.variantFilters = { Warna: [criteria.color] };
+    }
+    if (criteria.size) {
+      baseParams.variantFilters = {
+        ...baseParams.variantFilters,
+        Ukuran: [criteria.size],
+      };
+    }
+    if (criteria.activity) {
+      baseParams.category = [criteria.activity];
+    }
+    if (criteria.feature) {
+      baseParams.features = [criteria.feature];
+    }
+
+    return baseParams;
+  }
+
+  // Calculate estimated token usage
+  estimateTokenUsage(classification, messageLength) {
+    const baseTokens = {
+      IMMEDIATE_ACTION: 300,
+      SEARCH_REFINEMENT: 200,
+      INFO_RETRIEVAL: 150,
+      CONVERSATIONAL: 50,
+    };
+
+    let estimated = baseTokens[classification.tier] || 100;
+    estimated += Math.floor(messageLength / 4); // Rough token estimation
+
+    // Add tool usage tokens
+    if (classification.config.needsTools) {
+      estimated += 200; // Tool call overhead
+    }
+
+    // Add response generation tokens
+    if (!classification.canUsePrecomputed) {
+      estimated += classification.config.maxTokens;
+    }
+
+    return Math.min(estimated, 1000); // Cap at 1000 tokens
+  }
+}
+
+class TieredPromptTemplates {
+  constructor() {
+    this.templates = {
+      IMMEDIATE_ACTION: (name) =>
+        `${
+          name || "Wawan"
+        } - asisten sepatu. WAJIB panggil searchShoes. Jawab "Kak"`,
+      SEARCH_REFINEMENT: (name) =>
+        `${
+          name || "Wawan"
+        } - filter ulang sepatu. WAJIB panggil searchShoes. Jawab "Kak"`,
+      INFO_RETRIEVAL: (name) =>
+        `${name || "Wawan"} - info produk dari konteks. Jawab detail "Kak"`,
+      CONVERSATIONAL: (name) =>
+        `${name || "Wawan"} - jawab ramah. Gunakan "Kak"`,
+    };
+  }
+
+  getPrompt(tier, assistantName) {
+    const generator = this.templates[tier] || this.templates.CONVERSATIONAL;
+    return generator(assistantName);
+  }
+}
+
 class CompactInstructionGenerator {
   constructor() {
     this.basePrompt = `Asisten sepatu "{name}". Jawab singkat, gunakan "Kak", emoji minimal 👟`;
@@ -363,4 +734,5 @@ module.exports = {
   OptimizedInstructionGenerator,
   ResponseQualityValidator,
   instructionGen,
+  AdvancedIntentFlowManager,
 };

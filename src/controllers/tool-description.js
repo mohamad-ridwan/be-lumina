@@ -71,8 +71,8 @@ exports.getBestMatchingTool = async (req, res) => {
           index: "default", // Nama indeks yang Anda berikan
           path: "embedding",
           queryVector: userQueryVector,
-          numCandidates: 10, // Tetap gunakan numCandidates untuk akurasi
-          limit: 10,
+          numCandidates: 50, // Tetap gunakan numCandidates untuk akurasi
+          limit: 1,
           // Tidak ada limit di sini, jadi akan mengembalikan semua hasil
         },
       },
@@ -85,10 +85,13 @@ exports.getBestMatchingTool = async (req, res) => {
           score: { $meta: "vectorSearchScore" }, // Tampilkan skor cosine similarity
         },
       },
+      {
+        $sort: { score: -1 },
+      },
     ]);
 
     // Langkah 4: Tentukan ambang batas (threshold) kecocokan
-    const similarityThreshold = 0.6; // Sesuaikan ambang batas ini sesuai kebutuhan
+    const similarityThreshold = 0.65; // Sesuaikan ambang batas ini sesuai kebutuhan
 
     // Filter hasil yang skornya di atas ambang batas
     const relevantTools = results.filter(

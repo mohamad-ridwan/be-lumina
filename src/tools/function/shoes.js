@@ -165,6 +165,8 @@ const searchShoes = async ({
     }
   }
 
+  console.log("VECTOR SEARCH FILTER: ", vectorSearchFilter);
+
   // Streamlined aggregation pipeline
   const pipeline = [
     {
@@ -194,7 +196,6 @@ const searchShoes = async ({
         localField: "category",
         foreignField: "_id",
         as: "category",
-        pipeline: [{ $project: { name: 1 } }], // Only get name field
       },
     },
     { $unwind: { path: "$category", preserveNullAndEmptyArrays: true } },
@@ -206,11 +207,26 @@ const searchShoes = async ({
         brand: "$brand.name",
         category: "$category.name",
         slug: 1,
-        description: { $substr: ["$description", 0, 200] }, // Limit description length
+        description: 1,
         price: 1,
-        variants: { $slice: ["$variants", 3] }, // Limit variants
+        variants: 1,
         stock: 1,
-        specs: { $slice: ["$specs", 3] }, // Limit specs
+        specs: 1,
+      },
+    },
+    {
+      $group: {
+        _id: "$_id",
+        score: { $first: "$score" },
+        name: { $first: "$name" },
+        brand: { $first: "$brand" },
+        category: { $push: "$category" },
+        description: { $first: "$description" },
+        price: { $first: "$price" },
+        variants: { $first: "$variants" },
+        stock: { $first: "$stock" },
+        slug: { $first: "$slug" },
+        specs: { $first: "$specs" },
       },
     },
     { $sort: { score: -1 } },
@@ -231,15 +247,17 @@ const searchShoes = async ({
 
     // Simplified variants formatting
     const formattedVariants =
-      shoe.variants?.slice(0, 2).map((v) => {
-        // Limit variants
-        const variantObj = {};
-        v.optionValues?.forEach((opt) => {
-          variantObj[opt.key] = opt.value;
-        });
-        if (v.price) variantObj.price = v.price;
-        return variantObj;
-      }) || [];
+      shoe.variants
+        .filter((v) => v.stock)
+        .map((v) => {
+          // Limit variants
+          const variantObj = {};
+          v.optionValues?.forEach((opt) => {
+            variantObj[opt.key] = opt.value;
+          });
+          if (v.price) variantObj.price = v.price;
+          return variantObj;
+        }) || [];
 
     return {
       _id: shoe._id,
@@ -247,7 +265,7 @@ const searchShoes = async ({
       brand: shoe.brand,
       category: shoe.category,
       description: cleanDesc.substring(0, 100), // Truncate description
-      specs: shoe.specs?.slice(0, 2) || [], // Limit specs
+      specs: shoe.specs || [], // Limit specs
       price: shoe.price,
       variants: formattedVariants,
       slug_sepatu: shoe.slug,
@@ -263,15 +281,14 @@ const searchShoes = async ({
   // Simplified output formatting for LLM
   const formattedOutput = searchResults
     .map((shoe) => {
-      const essentialSpecs = shoe.specs
-        .filter((spec) => ["bahan", "fitur"].includes(spec.type?.toLowerCase()))
-        .slice(0, 2); // Limit specs
+      const essentialSpecs = shoe.specs.filter((spec) =>
+        ["bahan", "fitur"].includes(spec.type?.toLowerCase())
+      );
 
       const specs = essentialSpecs
         .map((s) => `${s.type}: ${s.text}`)
         .join(" | ");
       const variants = shoe.variants
-        .slice(0, 1)
         .map(
           (
             v // Show only first variant
@@ -284,11 +301,11 @@ const searchShoes = async ({
 
       return `${shoe.name} | ${shoe.brand}${
         shoe.price ? ` | Rp ${shoe.price.toLocaleString("id-ID")}` : ""
-      }${specs ? ` | ${specs}` : ""} | URL: http://localhost:3008/product/${
-        shoe.slug_sepatu
-      }${variants ? ` | ${variants}` : ""}`;
+      }${specs ? ` | ${specs}` : ""}${variants ? ` | ${variants}` : ""}`;
     })
     .join("\n");
+
+  console.log("FORMATTED SHOE : ", formattedOutput);
 
   return {
     shoes: [],
