@@ -301,7 +301,7 @@ const searchShoes = async ({
 
       return `${shoe.name} | ${shoe.brand}${
         shoe.price ? ` | Rp ${shoe.price.toLocaleString("id-ID")}` : ""
-      }${specs ? ` | ${specs}` : ""}${variants ? ` | ${variants}` : ""}`;
+      }${specs ? ` | ${specs}` : ""}${false ? ` | ${variants}` : ""}`;
     })
     .join("\n");
 
