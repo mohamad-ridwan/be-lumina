@@ -3,44 +3,37 @@ const {
   HumanMessage,
   AIMessage,
   SystemMessage,
+  ToolMessage,
 } = require("@langchain/core/messages");
 const {
   MessagesPlaceholder,
   ChatPromptTemplate,
 } = require("@langchain/core/prompts");
 const { StateGraph, END, Annotation } = require("@langchain/langgraph");
-const { ToolNode } = require("@langchain/langgraph/prebuilt");
-const { langChainTools, toolsByName } = require("../../tools/langChainTools");
 const { generateRandomId } = require("../../helpers/generateRandomId");
 const {
   AdvancedIntentFlowManager,
 } = require("../../tools/classes/dynamic-prompt");
-const { findRelevantTools } = require("../../tools/function/tool-description");
 
 const routerModel = new ChatGoogleGenerativeAI({
-  model: "gemini-2.5-flash",
-  temperature: 0.7,
-  maxRetries: 2,
-  maxOutputTokens: 256, // Reduced significantly
+  model: "gemini-2.5-flash-lite",
   apiKey: process.env.GEMINI_API_KEY,
 });
 
 const summarizer = new ChatGoogleGenerativeAI({
   model: "gemini-2.5-flash-lite",
-  temperature: 0.7,
-  maxOutputTokens: 1024, // Reduced significantly
   apiKey: process.env.GEMINI_API_KEY,
 });
 
 const mainModel = new ChatGoogleGenerativeAI({
-  model: "gemini-2.5-flash",
+  model: "gemini-2.5-flash-lite",
   temperature: 0.7,
   maxRetries: 1,
   maxOutputTokens: 512, // Reduced from 256
   apiKey: process.env.GEMINI_API_KEY,
 });
 
-const toolNode = new ToolNode(langChainTools);
+// const toolNode = new ToolNode(langChainTools);
 
 const flowManager = new AdvancedIntentFlowManager();
 
@@ -77,17 +70,30 @@ const State = Annotation.Root({
 });
 
 const summarizeHistory = async (messages, prevSummary) => {
+  let context = ``;
+
+  if (prevSummary) {
+    context += `Summary lama: ${prevSummary}\n`;
+  }
+  if (messages.length > 0) {
+    context += `Pesan baru: ${messages
+      .map(
+        (m) =>
+          (m instanceof HumanMessage
+            ? "Pengguna"
+            : m instanceof ToolMessage
+            ? "Tool"
+            : "Assistant") +
+          ": " +
+          m.content
+      )
+      .join("\n")}`;
+  }
   const response = await summarizer.invoke([
-    {
-      role: "system",
-      content: "Ringkas percakapan untuk arsip, singkat, fokus info penting.",
-    },
-    {
-      role: "user",
-      content: `Summary lama:\n${prevSummary}\n\nPesan baru:\n${messages
-        .map((m) => m.role + ": " + m.content)
-        .join("\n")}`,
-    },
+    new SystemMessage(
+      "Ringkas percakapan untuk arsip, singkat, fokus info penting."
+    ),
+    new HumanMessage(context),
   ]);
   console.log(
     "RESPONSE SUMMARY TOKEN:",
@@ -97,98 +103,55 @@ const summarizeHistory = async (messages, prevSummary) => {
   return response.content;
 };
 
-const MAX_HISTORY = 5;
 const SUMMARY_INTERVAL = 5;
 
 const summarizerNode = async (state) => {
   // cek kondisi: tiap 5 turn atau history > 20
-  console.log("TURN COUNT:", state.turnCount);
-  console.log("CURRENT SUMMARY:", state.summary);
 
   // Pastikan summary selalu ada, default-nya adalah string kosong jika undefined
   const prevSummary = state.summary || "";
 
-  if (
-    state.turnCount % SUMMARY_INTERVAL !== 0 &&
-    state.messages.length <= MAX_HISTORY
-  ) {
+  // Jalankan ringkasan jika turnCount <= 2 ATAU (ringkasan dijadwalkan)
+  if (state.turnCount <= 2 || state.turnCount % SUMMARY_INTERVAL === 0) {
+    const newMessages = state.messages
+      .filter(
+        (msg) =>
+          msg instanceof HumanMessage ||
+          (msg instanceof AIMessage && !Array.isArray(msg.content))
+      )
+      .slice(-3);
+
+    const newSummary = await summarizeHistory(newMessages, prevSummary);
+    console.log("NEW SUMMARY : ", newSummary);
+
     return {
-      // Pastikan selalu mengembalikan summary, meskipun tidak diringkas ulang
-      summary: prevSummary,
-      messages: state.messages,
+      summary: newSummary,
+      turnCount: 1, // Mengatur ulang turnCount setelah ringkasan
     };
   }
 
-  const newMessages = state.messages
+  // Jika kondisi di atas tidak terpenuhi, lewati ringkasan
+  return {
+    summary: prevSummary,
+    turnCount: 1, // Mengatur ulang turnCount
+  };
+};
+
+const intentRouter = async (state) => {
+  const { messages, userProfile } = state;
+  const lastMessages = [...messages]
     .filter(
       (msg) =>
         msg instanceof HumanMessage ||
         (msg instanceof AIMessage && !Array.isArray(msg.content))
     )
     .slice(-3);
-  console.log("PESAN BARU : ", newMessages);
-
-  // Jika tidak ada pesan baru, kembalikan summary yang ada tanpa ringkasan baru
-  if (newMessages.length === 0) {
-    return {
-      summary: prevSummary,
-      messages: state.messages,
-    };
-  }
-
-  const newSummary = await summarizeHistory(newMessages, prevSummary);
-  console.log("NEW SUMMARY : ", newSummary);
-
-  return {
-    summary: newSummary,
-    messages: state.messages
-      .filter(
-        (msg) =>
-          msg instanceof HumanMessage ||
-          (msg instanceof AIMessage && !Array.isArray(msg.content))
-      )
-      .slice(-3),
-  };
-};
-
-const intentRouter = async (state) => {
-  const { messages, userProfile } = state;
-
-  const queryIntent = `[Berdasarkan riwayat percakapan terakhir]:
-    ${[...messages]
-      .filter(
-        (msg) =>
-          msg instanceof HumanMessage ||
-          (msg instanceof AIMessage && !Array.isArray(msg.content))
-      )
-      .slice(-3)
-      .map((msg, index) => {
-        let content = ``;
-        if (msg instanceof AIMessage && !Array.isArray(msg.content)) {
-          content = `${
-            index + 1
-          }.Assistant: Aku telah memberikan rekomendasi sepatu`;
-        } else if (msg instanceof AIMessage) {
-          content = `${index + 1}.Assistant: ${msg.content}`;
-        } else if (msg instanceof HumanMessage) {
-          content = `${index + 1}.User: ${msg.content}`;
-        }
-        return content;
-      })
-      .join(", ")}
-      [Tugas]: Temukan intent untuk alur percakapan selanjutnya.
-    `;
 
   // Get intent from embedding system
-  const intentResults = await findRelevantTools(queryIntent);
-  console.log(
-    "INTENT RESULTS: ",
-    intentResults.map((i) => i.name)
-  );
+  const intentResults = [];
 
   // Determine flow based on intents
   const flow = flowManager.determineFlow(intentResults);
-  console.log("FLOW:", flow);
 
   // Generate ultra-compact instruction
   const instruction = flowManager.generatePrompt(
@@ -199,57 +162,132 @@ const intentRouter = async (state) => {
 
   // Prepare model with or without tools
   let model = routerModel;
-  if (flow.needsTools) {
-    model = model.bindTools([toolsByName.searchShoes]);
-  }
-
-  const recentMessages = [...messages]
-    .filter(
-      (msg) =>
-        msg instanceof HumanMessage ||
-        (msg instanceof AIMessage && !Array.isArray(msg.content))
-    )
-    .slice(-1);
-  console.log("FULL MESSAGES :", messages.length);
+  // if (flow.needsTools) {
+  //   model = model.bindTools([toolsByName.searchShoes]);
+  // }
+  model = model.bindTools([toolsByName.searchShoes]);
   console.log("SUMMARY : ", state.summary);
-  const context = [
-    new SystemMessage(
-      instruction +
-        `Gunakan ringkasan percakapan:\n${state.summary || "Belum ada"}\n`
-    ),
-    ...recentMessages,
-  ];
 
-  const response = await model.invoke(context);
+  const exampleInstruction = `
+  [Tugas]:
+  - Temuka salah satu kriteria sepatu pengguna (aktivitas, warna, ukuran).
+  - Panggil tools 'searchShoes' Jika sudah menemukan kriteria.
+  `;
+
+  const prompt = ChatPromptTemplate.fromMessages([
+    new SystemMessage({
+      content: state.summary
+        ? `[Ringkasan percakapan terakhir]:\n${state.summary}\n` +
+          exampleInstruction
+        : exampleInstruction,
+      additional_kwargs: { uniqueTimeId: state.uniqueTimeId },
+    }),
+    new MessagesPlaceholder("messages"),
+  ]);
+
+  const formattedPrompt = await prompt.formatMessages({
+    messages: lastMessages,
+  });
+
+  const response = await model.invoke(formattedPrompt);
 
   console.log(
     "ROUTER:",
     response.usage_metadata,
     response.tool_calls?.length || 0,
-    response.response_metadata
+    response.response_metadata,
+    `TURN COUNT = ${state.turnCount}`
   );
 
-  if (response.tool_calls?.length > 0) {
-    return {
-      messages: [
-        new AIMessage({
-          ...response,
-          additional_kwargs: { uniqueTimeId: state.uniqueTimeId },
-        }),
-      ],
-      turnCount: 1,
-      summary: state.summary,
-    };
+  return {
+    messages: [
+      new AIMessage({
+        ...response,
+        additional_kwargs: {
+          ...response.additional_kwargs,
+          uniqueTimeId: state.uniqueTimeId,
+        },
+      }),
+    ],
+    summary: state.summary,
+  };
+};
+
+const toolNode = async (state) => {
+  const { messages, uniqueTimeId } = state;
+  const lastMessage = messages[messages.length - 1];
+
+  // Pastikan pesan terakhir adalah AIMessage dengan tool_calls
+  if (
+    !(lastMessage instanceof AIMessage) ||
+    !lastMessage.tool_calls ||
+    lastMessage.tool_calls.length === 0
+  ) {
+    return state;
   }
-  return { messages: [response], turnCount: 1, summary: state.summary };
+
+  const toolMessages = [];
+
+  // Loop melalui setiap tool call yang ditemukan
+  for (const toolCall of lastMessage.tool_calls) {
+    const tool = toolsByName[toolCall.name];
+
+    if (tool) {
+      try {
+        // Eksekusi tool
+        const result = await tool.invoke(toolCall.args);
+
+        // Buat ToolMessage baru dengan uniqueTimeId
+        const toolMsg = new ToolMessage({
+          content: JSON.stringify(result),
+          tool_call_id: toolCall.id,
+          name: toolCall.name,
+          additional_kwargs: {
+            uniqueTimeId: uniqueTimeId, // Tambahkan uniqueTimeId di sini
+          },
+        });
+        toolMessages.push(toolMsg);
+      } catch (error) {
+        console.error(`Error invoking tool ${toolCall.name}:`, error);
+
+        const errorMsg = new ToolMessage({
+          content: `Error: ${error.message}`,
+          tool_call_id: toolCall.id,
+          name: toolCall.name,
+          additional_kwargs: {
+            uniqueTimeId: uniqueTimeId,
+          },
+        });
+        toolMessages.push(errorMsg);
+      }
+    } else {
+      // Jika tool tidak ditemukan, berikan pesan error
+      const notFoundMsg = new ToolMessage({
+        content: `Tool ${toolCall.name} not found.`,
+        tool_call_id: toolCall.id,
+        name: toolCall.name,
+        additional_kwargs: {
+          uniqueTimeId: uniqueTimeId,
+        },
+      });
+      toolMessages.push(notFoundMsg);
+    }
+  }
+
+  // Gabungkan pesan lama dengan ToolMessage yang baru dibuat
+
+  // Kembalikan state dengan pesan yang diperbarui
+  return {
+    messages: toolMessages,
+  };
 };
 
 const responseGenerator = async (state) => {
   const { messages, userProfile, flowType, uniqueTimeId } = state;
   const oneRoundMessages = [...messages].filter(
-    (msg) => msg.uniqueTimeId === uniqueTimeId
+    (msg) => msg.additional_kwargs?.uniqueTimeId === uniqueTimeId
   );
-  console.log("FULL MESSAGES IN TOOLS RESPONSE:", messages);
+  console.log("ONE ROUND MESSAGES : ", oneRoundMessages);
 
   // Ultra-minimal response generation for non-tool flows
   const instruction = `Asisten ${
@@ -257,12 +295,11 @@ const responseGenerator = async (state) => {
   }. Jawab singkat dari hasil tool. Gunakan Format HTML jika ada produk. Gunakan "Kak" 👟`;
 
   const prompt = ChatPromptTemplate.fromMessages([
-    [
-      "system",
+    new SystemMessage(
       instruction + state.summary
         ? `Gunakan ringkasan percakapan:\n${state.summary}\n`
-        : "",
-    ],
+        : ""
+    ),
     new MessagesPlaceholder("messages"),
   ]);
 
