@@ -1,7 +1,7 @@
 const { z } = require("zod");
 
 const searchShoesSchema = z.object({
-  userIntent: z.string().max(50), // Limit intent length
+  userIntent: z.string(), // Limit intent length
   // Only keep essential filters to reduce schema size
   variantFilters: z
     .object({

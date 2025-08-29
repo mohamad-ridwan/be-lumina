@@ -5,15 +5,33 @@ const {
   SystemMessage,
   ToolMessage,
 } = require("@langchain/core/messages");
+const { StructuredOutputParser } = require("@langchain/core/output_parsers");
 const {
   MessagesPlaceholder,
   ChatPromptTemplate,
 } = require("@langchain/core/prompts");
 const { StateGraph, END, Annotation } = require("@langchain/langgraph");
+const { z } = require("zod");
 const { generateRandomId } = require("../../helpers/generateRandomId");
 const {
   AdvancedIntentFlowManager,
 } = require("../../tools/classes/dynamic-prompt");
+const { toolsByName } = require("../../tools/langChainTools");
+
+const parser = StructuredOutputParser.fromZodSchema(
+  z.object({
+    intent: z.string(),
+    criteria: z.object({
+      nama: z.string().optional(),
+      brand: z.string().optional(),
+      kategori: z.string().optional(),
+      aktivitas: z.string().optional(),
+      warna: z.string().optional(),
+      ukuran: z.string().optional(),
+      preferensi: z.string().optional(),
+    }),
+  })
+);
 
 const routerModel = new ChatGoogleGenerativeAI({
   model: "gemini-2.5-flash-lite",
@@ -27,9 +45,6 @@ const summarizer = new ChatGoogleGenerativeAI({
 
 const mainModel = new ChatGoogleGenerativeAI({
   model: "gemini-2.5-flash-lite",
-  temperature: 0.7,
-  maxRetries: 1,
-  maxOutputTokens: 512, // Reduced from 256
   apiKey: process.env.GEMINI_API_KEY,
 });
 
@@ -63,44 +78,56 @@ const State = Annotation.Root({
     reducer: (x, y) => (x ?? 0) + (y ?? 0),
     default: () => 0,
   }),
+  structuredSummary: Annotation({
+    // <-- tambahan
+    reducer: (x, y) => ({ ...x, ...y }), // merge JSON lama + baru
+    default: () => ({}),
+  }),
   uniqueTimeId: Annotation({
     reducer: (x, y) => y || x,
     default: () => generateRandomId(10),
   }),
 });
 
-const summarizeHistory = async (messages, prevSummary) => {
-  let context = ``;
+const summarizeHistory = async (messages, prevSummary, prevStructured = {}) => {
+  const context = messages
+    .map(
+      (m) =>
+        (m instanceof HumanMessage
+          ? "User"
+          : m instanceof ToolMessage
+          ? "Tool"
+          : "Assistant") +
+        ": " +
+        m.content
+    )
+    .join("\n");
 
-  if (prevSummary) {
-    context += `Summary lama: ${prevSummary}\n`;
-  }
-  if (messages.length > 0) {
-    context += `Pesan baru: ${messages
-      .map(
-        (m) =>
-          (m instanceof HumanMessage
-            ? "Pengguna"
-            : m instanceof ToolMessage
-            ? "Tool"
-            : "Assistant") +
-          ": " +
-          m.content
-      )
-      .join("\n")}`;
-  }
+  const formatInstructions = parser.getFormatInstructions();
+
   const response = await summarizer.invoke([
     new SystemMessage(
-      "Ringkas percakapan untuk arsip, singkat, fokus info penting."
+      `Kamu adalah summarizer percakapan. 
+    Ringkas percakapan singkat untuk arsip.
+    Ekstrak info penting dalam format JSON. 
+    ${formatInstructions}`
     ),
-    new HumanMessage(context),
+    new HumanMessage(
+      `Summary lama:\n${prevSummary}\n
+    Structured lama:\n${JSON.stringify(prevStructured, null, 2)}\n
+    Pesan baru:\n${context}`
+    ),
   ]);
+
   console.log(
-    "RESPONSE SUMMARY TOKEN:",
+    "TOKEN USAGE FOR SUMMARIZER:",
     response.usage_metadata,
     response.response_metadata
   );
-  return response.content;
+
+  const structuredPart = await parser.parse(response.content);
+
+  return { text: response.content, structured: structuredPart };
 };
 
 const SUMMARY_INTERVAL = 5;
@@ -110,9 +137,10 @@ const summarizerNode = async (state) => {
 
   // Pastikan summary selalu ada, default-nya adalah string kosong jika undefined
   const prevSummary = state.summary || "";
+  const prevStructured = state.structuredSummary || {};
 
   // Jalankan ringkasan jika turnCount <= 2 ATAU (ringkasan dijadwalkan)
-  if (state.turnCount <= 2 || state.turnCount % SUMMARY_INTERVAL === 0) {
+  if (state.turnCount <= 0 || state.turnCount % SUMMARY_INTERVAL === 0) {
     const newMessages = state.messages
       .filter(
         (msg) =>
@@ -121,24 +149,55 @@ const summarizerNode = async (state) => {
       )
       .slice(-3);
 
-    const newSummary = await summarizeHistory(newMessages, prevSummary);
-    console.log("NEW SUMMARY : ", newSummary);
+    const { text, structured } = await summarizeHistory(
+      newMessages,
+      prevSummary,
+      prevStructured
+    );
+
+    console.log("NEW SUMMARY : ", text, structured);
 
     return {
-      summary: newSummary,
-      turnCount: 1, // Mengatur ulang turnCount setelah ringkasan
+      summary: text,
+      structuredSummary: structured,
+      turnCount: 1,
     };
   }
 
   // Jika kondisi di atas tidak terpenuhi, lewati ringkasan
   return {
-    summary: prevSummary,
     turnCount: 1, // Mengatur ulang turnCount
   };
 };
 
+const updateSummarizeNode = async (state) => {
+  const prevSummary = state.summary || "";
+  const prevStructured = state.structuredSummary || {};
+
+  const newMessages = state.messages
+    .filter(
+      (msg) =>
+        msg instanceof HumanMessage ||
+        (msg instanceof AIMessage && !Array.isArray(msg.content))
+    )
+    .slice(-3);
+
+  const { text, structured } = await summarizeHistory(
+    newMessages,
+    prevSummary,
+    prevStructured
+  );
+
+  console.log("UPDATE SUMMARY : ", text, structured);
+
+  return {
+    summary: text,
+    structuredSummary: structured,
+  };
+};
+
 const intentRouter = async (state) => {
-  const { messages, userProfile } = state;
+  const { messages, userProfile, structuredSummary, summary } = state;
   const lastMessages = [...messages]
     .filter(
       (msg) =>
@@ -147,18 +206,24 @@ const intentRouter = async (state) => {
     )
     .slice(-3);
 
-  // Get intent from embedding system
-  const intentResults = [];
+  const criteria = structuredSummary?.criteria || {};
+  const intent = structuredSummary?.intent || "unknown";
 
-  // Determine flow based on intents
-  const flow = flowManager.determineFlow(intentResults);
+  const persona = `
+  [Persona]:
+  Asisten ${userProfile?.assistan_username || "Wawan"}.`;
 
-  // Generate ultra-compact instruction
-  const instruction = flowManager.generatePrompt(
-    flow.type,
-    userProfile?.assistan_username,
-    flow.specificIntent
-  );
+  const summaryInstruction = `
+  [Tugas]:
+  - Gunakan intent & criteria JSON jika tersedia.
+  - Intent: ${intent}
+  - Criteria: ${JSON.stringify(criteria)}
+  - Kalau tersedia (aktivitas, warna) sepatu, jika intent terakhir pengguna minta dicarikan sepatu panggil tools 'searchShoes'.
+  `;
+  const instruction = `${persona} ${summaryInstruction}`;
+
+  console.log("INSTRUCTION ROUTER:", instruction);
+  console.log("SUMMARY ROUTER:", summary);
 
   // Prepare model with or without tools
   let model = routerModel;
@@ -166,20 +231,10 @@ const intentRouter = async (state) => {
   //   model = model.bindTools([toolsByName.searchShoes]);
   // }
   model = model.bindTools([toolsByName.searchShoes]);
-  console.log("SUMMARY : ", state.summary);
-
-  const exampleInstruction = `
-  [Tugas]:
-  - Temuka salah satu kriteria sepatu pengguna (aktivitas, warna, ukuran).
-  - Panggil tools 'searchShoes' Jika sudah menemukan kriteria.
-  `;
 
   const prompt = ChatPromptTemplate.fromMessages([
     new SystemMessage({
-      content: state.summary
-        ? `[Ringkasan percakapan terakhir]:\n${state.summary}\n` +
-          exampleInstruction
-        : exampleInstruction,
+      content: instruction,
       additional_kwargs: { uniqueTimeId: state.uniqueTimeId },
     }),
     new MessagesPlaceholder("messages"),
@@ -209,7 +264,6 @@ const intentRouter = async (state) => {
         },
       }),
     ],
-    summary: state.summary,
   };
 };
 
@@ -283,23 +337,32 @@ const toolNode = async (state) => {
 };
 
 const responseGenerator = async (state) => {
-  const { messages, userProfile, flowType, uniqueTimeId } = state;
+  const { messages, userProfile, uniqueTimeId, structuredSummary } = state;
   const oneRoundMessages = [...messages].filter(
     (msg) => msg.additional_kwargs?.uniqueTimeId === uniqueTimeId
   );
-  console.log("ONE ROUND MESSAGES : ", oneRoundMessages);
+  console.log("ONE ROUND MESSAGES Length: ", oneRoundMessages.length);
+
+  const criteria = structuredSummary?.criteria || {};
+  const intent = structuredSummary?.intent || "unknown";
+
+  const summaryInstruction = `
+  [Tugas]:
+  - Gunakan intent & criteria JSON jika tersedia.
+  - Intent: ${intent}
+  - Criteria: ${JSON.stringify(criteria)}
+  - Jawab singkat dari hasil tool. Gunakan Format HTML jika ada produk. Gunakan "Kak" 👟
+  `;
+
+  const persona = `
+  [Persona]:
+  Asisten ${userProfile?.assistan_username || "Wawan"}.`;
 
   // Ultra-minimal response generation for non-tool flows
-  const instruction = `Asisten ${
-    userProfile?.assistan_username || "Wawan"
-  }. Jawab singkat dari hasil tool. Gunakan Format HTML jika ada produk. Gunakan "Kak" 👟`;
+  const instruction = `${persona} ${summaryInstruction}`;
 
   const prompt = ChatPromptTemplate.fromMessages([
-    new SystemMessage(
-      instruction + state.summary
-        ? `Gunakan ringkasan percakapan:\n${state.summary}\n`
-        : ""
-    ),
+    new SystemMessage(instruction),
     new MessagesPlaceholder("messages"),
   ]);
 
@@ -313,7 +376,17 @@ const responseGenerator = async (state) => {
     response.usage_metadata,
     response.response_metadata
   );
-  return { messages: [response], summary: state.summary };
+  return {
+    messages: [
+      new AIMessage({
+        ...response,
+        additional_kwargs: {
+          ...response.additional_kwargs,
+          uniqueTimeId: state.uniqueTimeId,
+        },
+      }),
+    ],
+  };
 };
 
 const intentRouterConditional = (state) => {
@@ -332,12 +405,14 @@ const graph = new StateGraph(State)
   .addNode("summarize", summarizerNode)
   .addNode("intentRouter", intentRouter)
   .addNode("responseGenerator", responseGenerator)
+  .addNode("updateSummarize", updateSummarizeNode)
   .addNode("tools", toolNode)
   .addEdge("__start__", "summarize")
   .addConditionalEdges("intentRouter", intentRouterConditional)
   .addEdge("summarize", "intentRouter")
   .addEdge("tools", "responseGenerator")
-  .addEdge("responseGenerator", END);
+  .addEdge("responseGenerator", "updateSummarize")
+  .addEdge("updateSummarize", END);
 
 const processNewMessageWithAI = async (
   formattedHistory,
