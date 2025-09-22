@@ -1,7 +1,9 @@
 const { z } = require("zod");
 
 const searchShoesSchema = z.object({
-  userIntent: z.string(), // Limit intent length
+  userIntent: z
+    .string()
+    .describe("Sepatu lari empuk dan nyaman, ukuran 40 warna putih"), // Limit intent length
   // Only keep essential filters to reduce schema size
   variantFilters: z
     .object({

@@ -17,19 +17,34 @@ const {
   AdvancedIntentFlowManager,
 } = require("../../tools/classes/dynamic-prompt");
 const { toolsByName } = require("../../tools/langChainTools");
+const { stripHtml } = require("../../helpers/general");
 
 const parser = StructuredOutputParser.fromZodSchema(
   z.object({
-    intent: z.string(),
+    intent: z
+      .string()
+      .describe(
+        "Intent pelanggan di percakapan. Contoh: Pelanggan tertarik sepatu lari yang direkomendasikan"
+      ),
     criteria: z.object({
-      nama: z.string().optional(),
-      brand: z.string().optional(),
-      kategori: z.string().optional(),
       aktivitas: z.string().optional(),
-      warna: z.string().optional(),
-      ukuran: z.string().optional(),
-      preferensi: z.string().optional(),
+      preferensi: z
+        .string()
+        .optional()
+        .describe(
+          "Preferensi sepatu. Contoh: warna putih, ukuran 40, bahan yang nyaman, empuk"
+        ),
     }),
+    // conversationState: z
+    //   .enum([
+    //     "ongoing",
+    //     "needs_clarification",
+    //     "search_failed",
+    //     "recommendation_process",
+    //     "interested_users",
+    //   ])
+    //   .optional()
+    //   .describe("Intent yang ada di percakapan"),
   })
 );
 
@@ -39,7 +54,7 @@ const routerModel = new ChatGoogleGenerativeAI({
 });
 
 const summarizer = new ChatGoogleGenerativeAI({
-  model: "gemini-2.5-flash-lite",
+  model: "gemini-2.5-flash",
   apiKey: process.env.GEMINI_API_KEY,
 });
 
@@ -78,6 +93,10 @@ const State = Annotation.Root({
     reducer: (x, y) => (x ?? 0) + (y ?? 0),
     default: () => 0,
   }),
+  toolResult: Annotation({
+    reducer: (x, y) => y ?? x,
+    default: () => [],
+  }),
   structuredSummary: Annotation({
     // <-- tambahan
     reducer: (x, y) => ({ ...x, ...y }), // merge JSON lama + baru
@@ -89,6 +108,94 @@ const State = Annotation.Root({
   }),
 });
 
+const parseToolResult = async (text) => {
+  try {
+    const json = JSON.parse(text);
+    if (json?.content) {
+      return json.content;
+    }
+    return json;
+  } catch (error) {
+    return "Pencarian data tidak ditemukan.";
+  }
+};
+
+const formatMessagesForPrompt = async (messages) => {
+  const formattedMessages = await Promise.all(
+    messages.map(async (m) => {
+      // Tentukan peran pesan dengan lebih ringkas
+      const role =
+        m instanceof HumanMessage
+          ? "User"
+          : m instanceof ToolMessage
+          ? "Tool"
+          : "Assistant";
+
+      // Ambil konten pesan
+      let content = "";
+      if (m instanceof ToolMessage) {
+        // Asumsi parseToolResult adalah fungsi async
+        content = await parseToolResult(m.content);
+      } else if (typeof m.content === "string") {
+        content = m.content;
+      } else if (Array.isArray(m.content) && m.tool_calls) {
+        // Tangani tool_calls dengan lebih spesifik
+        content = m.tool_calls
+          .map(
+            (tc) =>
+              `Calling tool '${tc.name}' with args: ${JSON.stringify(tc.args)}`
+          )
+          .join(", ");
+      } else {
+        // Default konten jika format tidak dikenal
+        content = "Message content received.";
+      }
+
+      const cleanedContent = stripHtml(content);
+      const compactedContent = cleanedContent.replace(/\s+/g, " ").trim();
+
+      return `${role}: ${compactedContent}`;
+    })
+  );
+
+  return formattedMessages.join("\n");
+};
+
+const summarizerHistoryWithTools = async (
+  messages,
+  prevSummary,
+  prevStructured = {}
+) => {
+  const formatInstructions = parser.getFormatInstructions();
+
+  // Format pesan baru ke dalam string yang ringkas
+  const formattedMessages = await formatMessagesForPrompt(messages);
+
+  const response = await summarizer.invoke([
+    new SystemMessage(
+      `Kamu adalah summarizer percakapan.
+       Ringkas percakapan singkat untuk arsip.
+       Ekstrak info penting dalam format JSON.
+       ${formatInstructions}
+       `
+    ),
+    new HumanMessage(
+      `Summary lama:\n${prevSummary || ""}\n
+       Structured lama:\n${JSON.stringify(prevStructured || {}, null, 2)}\n
+       Pesan baru:\n${formattedMessages}` // Gunakan formattedMessages di sini
+    ),
+  ]);
+
+  console.log(
+    "TOKEN FOR SUMMMARIZER WITH TOOLS:",
+    response.usage_metadata,
+    response.response_metadata
+  );
+
+  const structuredPart = await parser.parse(response.content);
+  return { text: response.content, structured: structuredPart };
+};
+
 const summarizeHistory = async (messages, prevSummary, prevStructured = {}) => {
   const context = messages
     .map(
@@ -99,7 +206,11 @@ const summarizeHistory = async (messages, prevSummary, prevStructured = {}) => {
           ? "Tool"
           : "Assistant") +
         ": " +
-        m.content
+        (() => {
+          const cleanedContent = stripHtml(m.content);
+          const compactedContent = cleanedContent.replace(/\s+/g, " ").trim();
+          return compactedContent;
+        })()
     )
     .join("\n");
 
@@ -130,7 +241,7 @@ const summarizeHistory = async (messages, prevSummary, prevStructured = {}) => {
   return { text: response.content, structured: structuredPart };
 };
 
-const SUMMARY_INTERVAL = 5;
+const SUMMARY_INTERVAL = 3;
 
 const summarizerNode = async (state) => {
   // cek kondisi: tiap 5 turn atau history > 20
@@ -140,22 +251,20 @@ const summarizerNode = async (state) => {
   const prevStructured = state.structuredSummary || {};
 
   // Jalankan ringkasan jika turnCount <= 2 ATAU (ringkasan dijadwalkan)
-  if (state.turnCount <= 0 || state.turnCount % SUMMARY_INTERVAL === 0) {
+  if (state.turnCount === 0 || state.turnCount % SUMMARY_INTERVAL === 0) {
     const newMessages = state.messages
       .filter(
         (msg) =>
           msg instanceof HumanMessage ||
           (msg instanceof AIMessage && !Array.isArray(msg.content))
       )
-      .slice(-3);
+      .slice(-5);
 
     const { text, structured } = await summarizeHistory(
       newMessages,
       prevSummary,
       prevStructured
     );
-
-    console.log("NEW SUMMARY : ", text, structured);
 
     return {
       summary: text,
@@ -174,56 +283,116 @@ const updateSummarizeNode = async (state) => {
   const prevSummary = state.summary || "";
   const prevStructured = state.structuredSummary || {};
 
-  const newMessages = state.messages
-    .filter(
-      (msg) =>
+  const oneRoundMessages = [...state.messages].filter(
+    (msg) =>
+      msg.additional_kwargs?.uniqueTimeId === state.uniqueTimeId &&
+      ((msg instanceof AIMessage && msg.tool_calls.length > 0) ||
         msg instanceof HumanMessage ||
-        (msg instanceof AIMessage && !Array.isArray(msg.content))
-    )
-    .slice(-3);
+        msg instanceof ToolMessage)
+  );
 
-  const { text, structured } = await summarizeHistory(
-    newMessages,
+  const toolResults = [];
+  for (const msg of oneRoundMessages) {
+    if (msg instanceof AIMessage && msg.tool_calls?.length > 0) {
+      // Cari ToolMessage yang punya tool_call_id sama
+      for (const call of msg.tool_calls) {
+        const toolMsg = oneRoundMessages.find(
+          (m) => m instanceof ToolMessage && m.tool_call_id === call.id
+        );
+
+        toolResults.push({
+          tool_name: call.name,
+          args: call.args,
+          result: toolMsg ? toolMsg.content : null,
+        });
+      }
+    }
+  }
+
+  const { text, structured } = await summarizerHistoryWithTools(
+    oneRoundMessages,
     prevSummary,
     prevStructured
   );
 
-  console.log("UPDATE SUMMARY : ", text, structured);
-
   return {
     summary: text,
     structuredSummary: structured,
+    toolResult: toolResults,
   };
 };
 
 const intentRouter = async (state) => {
-  const { messages, userProfile, structuredSummary, summary } = state;
+  const { messages, userProfile, structuredSummary, toolResult } = state;
   const lastMessages = [...messages]
     .filter(
       (msg) =>
         msg instanceof HumanMessage ||
         (msg instanceof AIMessage && !Array.isArray(msg.content))
     )
+    .map((msg) => {
+      const cleanedContent = stripHtml(msg.content);
+      const compactedContent = cleanedContent.replace(/\s+/g, " ").trim();
+      msg.content = compactedContent;
+      return msg;
+    })
     .slice(-3);
 
   const criteria = structuredSummary?.criteria || {};
   const intent = structuredSummary?.intent || "unknown";
 
-  const persona = `
-  [Persona]:
-  Asisten ${userProfile?.assistan_username || "Wawan"}.`;
+  const toolExecutionHistory = `
+  - Riwayat Tools:
+  ${
+    toolResult?.length
+      ? toolResult
+          .map(
+            (tr, i) => `(${i + 1})
+  - Tool Name: ${tr.tool_name}
+  - Args: ${JSON.stringify(tr.args)}
+  - Result: ${typeof tr.result === "string" ? tr.result : ""}
+  `
+          )
+          .join("\n")
+      : "- Belum ada tool yang pernah dijalankan"
+  }
+`;
 
-  const summaryInstruction = `
-  [Tugas]:
-  - Gunakan intent & criteria JSON jika tersedia.
-  - Intent: ${intent}
-  - Criteria: ${JSON.stringify(criteria)}
-  - Kalau tersedia (aktivitas, warna) sepatu, jika intent terakhir pengguna minta dicarikan sepatu panggil tools 'searchShoes'.
+  const persona = `Sebagai {assistan_username}, asisten yang ramah dan gaul. Selalu gunakan sapaan "Kak".`;
+
+  const criteriaFormatted = Object.entries(criteria)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join(", ");
+
+  const conversationSummary = `
+  [Konteks Percakapan]:
+  - Tujuan: ${intent}
+  ${criteriaFormatted ? `- Criteria: ${criteriaFormatted}` : ""}
+  ${toolExecutionHistory}
   `;
-  const instruction = `${persona} ${summaryInstruction}`;
+
+  const rule = `
+  [Format Jawaban]:
+- Maksimal 100-250 karakter dan 15-40 kata.
+- Format teks dengan HTML untuk keterbacaan.
+- Gunakan tag <strong>, <i> untuk info penting.
+- Ukuran teks 13px dengan warna #000.
+- Gunakan <br/> untuk baris baru.
+  `;
+
+  const task = `
+  [Tugas]:
+  - Panggil tool yang tersedia jika user menyebutkan aktivitas dan salah satu dari warna atau ukuran.
+- Gunakan tool untuk rekomendasi sepatu, bukan sumber eksternal.
+  `;
+  const instruction = `
+${persona} 
+${conversationSummary} 
+${task}
+${rule} 
+`;
 
   console.log("INSTRUCTION ROUTER:", instruction);
-  console.log("SUMMARY ROUTER:", summary);
 
   // Prepare model with or without tools
   let model = routerModel;
@@ -242,16 +411,16 @@ const intentRouter = async (state) => {
 
   const formattedPrompt = await prompt.formatMessages({
     messages: lastMessages,
+    assistan_username: userProfile?.assistan_username || "Wawan",
   });
 
   const response = await model.invoke(formattedPrompt);
 
   console.log(
-    "ROUTER:",
+    "ROUTER INFO :",
     response.usage_metadata,
-    response.tool_calls?.length || 0,
     response.response_metadata,
-    `TURN COUNT = ${state.turnCount}`
+    state.turnCount
   );
 
   return {
@@ -338,28 +507,43 @@ const toolNode = async (state) => {
 
 const responseGenerator = async (state) => {
   const { messages, userProfile, uniqueTimeId, structuredSummary } = state;
-  const oneRoundMessages = [...messages].filter(
-    (msg) => msg.additional_kwargs?.uniqueTimeId === uniqueTimeId
-  );
-  console.log("ONE ROUND MESSAGES Length: ", oneRoundMessages.length);
+  const oneRoundMessages = [...messages]
+    .filter((msg) => msg.additional_kwargs?.uniqueTimeId === uniqueTimeId)
+    .map((msg) => {
+      if (typeof msg?.content === "string") {
+        const cleanedContent = stripHtml(msg.content);
+        const compactedContent = cleanedContent.replace(/\s+/g, " ").trim();
+        msg.content = compactedContent;
+      }
+      return msg;
+    });
 
   const criteria = structuredSummary?.criteria || {};
   const intent = structuredSummary?.intent || "unknown";
 
-  const summaryInstruction = `
-  [Tugas]:
-  - Gunakan intent & criteria JSON jika tersedia.
-  - Intent: ${intent}
-  - Criteria: ${JSON.stringify(criteria)}
-  - Jawab singkat dari hasil tool. Gunakan Format HTML jika ada produk. Gunakan "Kak" 👟
+  const criteriaFormatted = Object.entries(criteria)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join(", ");
+
+  const persona = `Sebagai {assistan_username}, asisten yang ramah dan gaul. Selalu gunakan sapaan "Kak".`;
+
+  const conversationSummary = `
+  [Konteks Percakapan]:
+  - Tujuan: ${intent}
+  ${criteriaFormatted ? `- Criteria: ${criteriaFormatted}` : ""}
   `;
 
-  const persona = `
-  [Persona]:
-  Asisten ${userProfile?.assistan_username || "Wawan"}.`;
+  const rule = `
+  [Format Jawaban]:
+- Maksimal 100-250 karakter dan 15-40 kata.
+- Format teks dengan HTML untuk keterbacaan.
+- Gunakan tag <strong>, <i> untuk info penting.
+- Ukuran teks 13px dengan warna #000.
+- Gunakan <br/> untuk baris baru.
+  `;
 
   // Ultra-minimal response generation for non-tool flows
-  const instruction = `${persona} ${summaryInstruction}`;
+  const instruction = `${persona} ${conversationSummary} ${rule}`;
 
   const prompt = ChatPromptTemplate.fromMessages([
     new SystemMessage(instruction),
@@ -368,14 +552,10 @@ const responseGenerator = async (state) => {
 
   const formattedPrompt = await prompt.formatMessages({
     messages: oneRoundMessages,
+    assistan_username: userProfile?.assistan_username || "Wawan",
   });
   const response = await mainModel.invoke(formattedPrompt);
 
-  console.log(
-    "RESPONSE TOOLS GENERATOR:",
-    response.usage_metadata,
-    response.response_metadata
-  );
   return {
     messages: [
       new AIMessage({

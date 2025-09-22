@@ -165,8 +165,6 @@ const searchShoes = async ({
     }
   }
 
-  console.log("VECTOR SEARCH FILTER: ", vectorSearchFilter);
-
   // Streamlined aggregation pipeline
   const pipeline = [
     {
@@ -174,8 +172,8 @@ const searchShoes = async ({
         index: "embedding",
         path: "embedding",
         queryVector: userIntentEmbedding,
-        numCandidates: 50, // Reduced from 50
-        limit,
+        numCandidates: 200, // Reduced from 50
+        limit: 20,
         filter: vectorSearchFilter,
       },
     },
@@ -186,7 +184,6 @@ const searchShoes = async ({
         localField: "brand",
         foreignField: "_id",
         as: "brand",
-        pipeline: [{ $project: { name: 1 } }], // Only get name field
       },
     },
     { $unwind: "$brand" },
@@ -275,7 +272,7 @@ const searchShoes = async ({
   });
 
   if (searchResults.length === 0) {
-    return { content: "Tidak ada hasil sepatu ditemukan", shoes: [] };
+    return { content: "Tidak ada hasil sepatu ditemukan" };
   }
 
   // Simplified output formatting for LLM
@@ -299,8 +296,8 @@ const searchShoes = async ({
         )
         .join("; ");
 
-      return `${shoe.name} | ${shoe.brand}${
-        shoe.price ? ` | Rp ${shoe.price.toLocaleString("id-ID")}` : ""
+      return `Nama: ${shoe.name} | Merek: ${shoe.brand}${
+        shoe.price ? ` | Harga: Rp ${shoe.price.toLocaleString("id-ID")}` : ""
       }${specs ? ` | ${specs}` : ""}${false ? ` | ${variants}` : ""}`;
     })
     .join("\n");
@@ -308,26 +305,16 @@ const searchShoes = async ({
   console.log("FORMATTED SHOE : ", formattedOutput);
 
   return {
-    shoes: [],
-    content: `Sepatu ditemukan:\n${formattedOutput}`,
+    content: `Hasil pencarian:\n${formattedOutput}`,
   };
 };
 
 // searchShoes({
-//   // userIntent: `Mencari sepatu casual, yang nyaman dan tahan basah`,
-//   userIntent: `nyari sepatu Basket, rekomendasi yang ga gampang kena noda & lembab`,
-//   shoeNames: undefined,
-//   minPrice: undefined,
-//   maxPrice: undefined,
-//   material: "anti noda, anti lembab",
-//   brand: undefined,
-//   category: ["Basket"],
-//   variantFilters: { Ukuran: ["39", "40"], Warna: ["Putih"] },
-//   limit: 5,
-//   excludeIds: [],
-//   newArrival: undefined,
-//   relatedOffers: undefined,
-//   isPopular: undefined,
+//   userIntent: "sepatu cepat kering",
+//   brand: ["New Balance"],
+//   category: ["Casual"],
+//   limit: 1,
+//   variantFilters: { Warna: ["biru"], Ukuran: ["40"] },
 // });
 
 const extractProductInfo = async (_id, newSpecsData) => {

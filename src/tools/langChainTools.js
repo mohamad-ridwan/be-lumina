@@ -17,7 +17,6 @@ const routerTools = [routeConversationTool];
 
 const toolsByName = {
   searchShoes: searchShoesTool,
-  rephraseQuery: rephraseQueryTool,
 };
 
 module.exports = { langChainTools, toolsByName, routerTools };
