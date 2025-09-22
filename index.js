@@ -100,6 +100,8 @@ dbConnection()
       },
     });
 
+    app.locals.agenda = agenda;
+
     // Socket.io Connection
     io.on("connection", (socket) => {
       console.log("A user connected", socket.id);
@@ -158,8 +160,6 @@ dbConnection()
           );
         }
       );
-
-      app.locals.agenda = agenda;
 
       // Jalankan agenda
       (async function () {
