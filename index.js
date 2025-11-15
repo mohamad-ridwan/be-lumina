@@ -27,6 +27,8 @@ const origin = [
   "http://localhost:3125",
   "http://192.168.1.10:3125",
   "http://localhost:4173",
+  "http://localhost:3008",
+  "http://localhost:3009",
 ];
 
 const app = express();
@@ -287,4 +289,4 @@ dbConnection()
       console.log(`Server is running on port ${PORT}`);
     });
   })
-  .catch((error) => console.log(error));
+  .catch((error) => console.log("Failed to connect to DB:", error));

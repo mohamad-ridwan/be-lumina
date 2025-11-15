@@ -5,7 +5,7 @@ const connectDB = async (cb) => {
   try {
     const conn = await mongoose.connect(URI, {
       useNewUrlParser: true,
-      useUnifiedTopology: true,
+      // useUnifiedTopology: true,
       connectTimeoutMS: 120000, // Timeout after 60 seconds
       serverSelectionTimeoutMS: 120000, // Timeout after 60 seconds
       timeoutMS: 120000, // Timeout for all operations after 60 seconds
@@ -13,7 +13,7 @@ const connectDB = async (cb) => {
     // mongoose.set("useCreateIndex", true);
     console.log(`MongoDB Connected: ${conn.connection.host}`);
   } catch (error) {
-    console.log(error);
+    console.log("Error connecting to MongoDB:", error);
     process.exit(1);
   }
 };
